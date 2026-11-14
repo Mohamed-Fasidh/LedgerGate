@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.database import Base, engine, get_db, set_tenant_context
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, IdempotencyRecord, Role, InvoiceStatus
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, IdempotencyRecord, InvoiceApproval, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn
 from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
 from app.audit import record_event, verify_event_chain
@@ -187,13 +187,33 @@ def approve(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempoten
     try: ensure_independent_decision(inv,user.id,"approve")
     except ValueError as exc: raise HTTPException(409,str(exc))
     if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before approval")
-    inv.status=InvoiceStatus.APPROVED
-    inv.approved_by_user_id=user.id
-    record_event(db,user,"invoice",inv.id,"human_approved",{"warning":"Approval recorded; no payment is initiated."})
-    response={"id":inv.id,"status":inv.status.value,"message":"Human approval recorded. No payment was initiated."}
+    prior=db.query(InvoiceApproval).filter(InvoiceApproval.tenant_id==user.tenant_id,InvoiceApproval.invoice_id==inv.id,InvoiceApproval.reviewer_user_id==user.id).first()
+    if prior: raise HTTPException(409,"This reviewer has already approved the invoice")
+    required=2 if inv.currency.upper()=="INR" and float(inv.amount or 0)>=settings.dual_approval_threshold_inr else 1
+    approval=InvoiceApproval(tenant_id=user.tenant_id,invoice_id=inv.id,reviewer_user_id=user.id)
+    db.add(approval)
+    db.flush()
+    approval_count=db.query(InvoiceApproval).filter(InvoiceApproval.tenant_id==user.tenant_id,InvoiceApproval.invoice_id==inv.id).count()
+    if approval_count>=required:
+        inv.status=InvoiceStatus.APPROVED
+        inv.approved_by_user_id=user.id
+        action="human_approved"
+        message="Required human approval(s) recorded. No payment was initiated."
+    else:
+        action="human_approval_recorded"
+        message="First approval recorded. A second independent reviewer is required before approval is final."
+    record_event(db,user,"invoice",inv.id,action,{"approval_count":approval_count,"required_approvals":required,"threshold_currency":"INR","threshold_amount":settings.dual_approval_threshold_inr})
+    response={"id":inv.id,"status":inv.status.value,"approval_count":approval_count,"required_approvals":required,"message":message}
     complete_idempotent_request(idem,response)
     db.commit()
     return response
+
+@app.get("/api/v1/invoices/{invoice_id}/approvals")
+def invoice_approvals(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    if not inv: raise HTTPException(404,"Invoice not found")
+    rows=db.query(InvoiceApproval).filter(InvoiceApproval.tenant_id==user.tenant_id,InvoiceApproval.invoice_id==invoice_id).order_by(InvoiceApproval.created_at.asc()).all()
+    return [{"reviewer_user_id":row.reviewer_user_id,"created_at":row.created_at.isoformat()} for row in rows]
 
 @app.post("/api/v1/invoices/{invoice_id}/reject")
 def reject(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
