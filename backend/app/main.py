@@ -9,7 +9,7 @@ from app.database import Base, engine, get_db, set_tenant_context
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn
 from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
-from app.audit import record_event
+from app.audit import record_event, verify_event_chain
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
 from app.services.retrieval import retrieve_policy, retrieve_business_records
@@ -237,7 +237,17 @@ def agent_tools(user:User=Depends(get_current_user)):
 def evaluate(user:User=Depends(require_roles("admin","reviewer"))):
     return run_evaluation()
 
+@app.get("/api/v1/audit-events/verify")
+def verify_audit_events(db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+    events=db.query(AuditEvent).filter(AuditEvent.tenant_id==user.tenant_id).order_by(AuditEvent.id.asc()).yield_per(500)
+    valid,invalid_event_id=verify_event_chain(events)
+    return {"valid":valid,"first_invalid_event_id":invalid_event_id}
+
+
 @app.get("/api/v1/audit-events")
 def audit_events(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    rows=db.query(AuditEvent).filter(AuditEvent.tenant_id==user.tenant_id).order_by(AuditEvent.created_at.desc()).limit(500).all()
+    return [{"id":x.id,"actor_user_id":x.actor_user_id,"entity_type":x.entity_type,"entity_id":x.entity_id,"action":x.action,"details":x.details,"created_at":x.created_at.isoformat()} for x in rows]
+(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     rows=db.query(AuditEvent).filter(AuditEvent.tenant_id==user.tenant_id).order_by(AuditEvent.created_at.desc()).limit(500).all()
     return [{"id":x.id,"actor_user_id":x.actor_user_id,"entity_type":x.entity_type,"entity_id":x.entity_id,"action":x.action,"details":x.details,"created_at":x.created_at.isoformat()} for x in rows]
