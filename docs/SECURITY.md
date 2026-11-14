@@ -13,6 +13,7 @@
 - PostgreSQL row locks around invoice reconciliation, approval, and rejection to serialize competing state changes.
 - Optional database-backed `Idempotency-Key` support for invoice approval/rejection, scoped to tenant and authenticated user, with request-fingerprint conflict detection, replayed response bodies, PostgreSQL advisory-lock serialization, and 24-hour expiry.
 - Maker-checker enforcement prevents the recorded invoice creator from approving or rejecting their own invoice; creator and decision-maker IDs are persisted.
+- Configurable high-value INR invoices require two distinct reviewer accounts. Each approval is persisted in a tenant-isolated table; the invoice remains in review until the second independent approval. Default threshold: INR 100,000 (`DUAL_APPROVAL_THRESHOLD_INR`).
 - Pydantic validation for API inputs and agent tool arguments.
 - Production startup rejects the default JWT secret and wildcard CORS.
 
@@ -21,7 +22,7 @@
 2. **Tenant isolation:** PostgreSQL RLS with FORCE ROW LEVEL SECURITY, a non-owner DB runtime role, tenant-isolation integration tests, and tenant-aware background jobs.
 3. **Files:** Current uploads still use local disk and are not malware-scanned. Before enterprise use, move to private encrypted object storage, add antivirus/malware scanning, robust content sniffing, parser sandboxing and CPU/memory/decompression limits, retention/deletion, signed download URLs, and access logging.
 4. **Audit:** Current database audit rows are append-only under ordinary SQL UPDATE/DELETE and hash-chained per tenant. External WORM storage, independent chain checkpoints/signatures, centralized log retention, alerting, and privileged/superuser tamper monitoring are still required; database administrators can disable triggers or rewrite the chain.
-5. **Financial controls:** Current maker-checker enforcement prevents an invoice creator from approving or rejecting that same invoice. Configurable dual-approval thresholds, idempotency keys, approval policy versioning, and independent reconciliation review are still required.
+5. **Financial controls:** Maker-checker and configurable two-reviewer approval for high-value INR invoices are implemented. The default threshold is INR 100,000 and can be changed with `DUAL_APPROVAL_THRESHOLD_INR`. Foreign-currency invoices currently use single-reviewer approval; FX conversion and tenant-specific policy management are not implemented. Idempotency currently covers approve/reject only; approval policy versioning and independent reconciliation review remain required.
 6. **Infrastructure:** TLS, secure headers, rate limiting, WAF, secret manager, key rotation, network isolation, DB backups, point-in-time recovery, and restore drills.
 7. **Assurance:** Threat model, SAST/DAST, dependency scanning, penetration testing, load tests, privacy/legal review, and incident response plan.
 
