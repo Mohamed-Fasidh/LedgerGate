@@ -142,7 +142,7 @@ def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,db:Session=Dep
 
 @app.post("/api/v1/invoices/{invoice_id}/reconcile",response_model=ReconcileOut)
 def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
-    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.amount is None or inv.invoice_number.startswith("UNCONFIRMED-"):
         raise HTTPException(409,"Confirm extracted invoice fields before reconciliation")
@@ -168,7 +168,7 @@ def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_cu
 
 @app.post("/api/v1/invoices/{invoice_id}/approve")
 def approve(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
-    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
     if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before approval")
@@ -178,7 +178,7 @@ def approve(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_
 
 @app.post("/api/v1/invoices/{invoice_id}/reject")
 def reject(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
-    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status in (InvoiceStatus.APPROVED,InvoiceStatus.REJECTED): raise HTTPException(409,"Invoice is already finalized")
     inv.status=InvoiceStatus.REJECTED; record_event(db,user,"invoice",inv.id,"human_rejected",{})
