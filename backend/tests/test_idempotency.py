@@ -76,6 +76,7 @@ def test_expired_idempotency_key_can_be_reused(db, user):
     record, _ = begin_idempotent_request(
         db, user, "decision-key-004", "invoice.approve", {"invoice_id": 42}
     )
+    original_hash = record.request_hash
     record.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
     db.commit()
 
@@ -83,7 +84,7 @@ def test_expired_idempotency_key_can_be_reused(db, user):
         db, user, "decision-key-004", "invoice.reject", {"invoice_id": 42}
     )
     assert replay is None
-    assert replacement.request_hash != record.request_hash
+    assert replacement.request_hash != original_hash
 
 
 def test_short_idempotency_key_is_rejected(db, user):
