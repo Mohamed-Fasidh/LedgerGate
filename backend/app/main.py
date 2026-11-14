@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.database import Base, engine, get_db, set_tenant_context
@@ -84,8 +85,9 @@ def po_view(x):
 def list_pos(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     return [po_view(x) for x in db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id==user.tenant_id).all()]
 
-def invoice_view(x):
-    return {"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"created_by_user_id":x.created_by_user_id,"approved_by_user_id":x.approved_by_user_id,"rejected_by_user_id":x.rejected_by_user_id,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"created_at":x.created_at.isoformat()}
+def invoice_view(x,approval_count:int=0):
+    required=required_invoice_approvals(x.amount,x.currency,settings.dual_approval_threshold_inr)
+    return {"approval_count":approval_count,"required_approvals":required,"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"created_by_user_id":x.created_by_user_id,"approved_by_user_id":x.approved_by_user_id,"rejected_by_user_id":x.rejected_by_user_id,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"created_at":x.created_at.isoformat()}
 
 @app.post("/api/v1/invoices")
 def create_invoice(payload:InvoiceIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
@@ -104,13 +106,22 @@ def list_invoices(status:str|None=None,db:Session=Depends(get_db),user:User=Depe
     if status:
         try: q=q.filter(Invoice.status==InvoiceStatus(status))
         except ValueError: raise HTTPException(400,"Unknown invoice status")
-    return [invoice_view(x) for x in q.order_by(Invoice.created_at.desc()).all()]
+    rows=q.order_by(Invoice.created_at.desc()).all()
+    if not rows: return []
+    counts=dict(db.query(InvoiceApproval.invoice_id,func.count(InvoiceApproval.id)).filter(
+        InvoiceApproval.tenant_id==user.tenant_id,
+        InvoiceApproval.invoice_id.in_([x.id for x in rows])
+    ).group_by(InvoiceApproval.invoice_id).all())
+    return [invoice_view(x,counts.get(x.id,0)) for x in rows]
 
 @app.get("/api/v1/invoices/{invoice_id}")
 def get_invoice(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     x=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not x: raise HTTPException(404,"Invoice not found")
-    return invoice_view(x)
+    approval_count=db.query(func.count(InvoiceApproval.id)).filter(
+        InvoiceApproval.tenant_id==user.tenant_id,InvoiceApproval.invoice_id==x.id
+    ).scalar() or 0
+    return invoice_view(x,approval_count)
 
 @app.post("/api/v1/invoices/upload")
 async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
