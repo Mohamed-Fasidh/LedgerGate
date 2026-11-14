@@ -92,3 +92,35 @@ def test_s3_storage_requires_bucket(monkeypatch):
 
     with pytest.raises(RuntimeError, match="S3_BUCKET"):
         storage.save_document(b"content", "tenant-a", ".txt")
+
+
+def test_delete_document_removes_local_tenant_owned_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage.settings, "storage_backend", "local")
+    monkeypatch.setattr(storage.settings, "upload_dir", str(tmp_path))
+    key = storage.save_document(b"temporary invoice", "tenant-a", ".txt")
+
+    storage.delete_document(key, "tenant-a")
+
+    assert not (tmp_path / key).exists()
+    with pytest.raises(FileNotFoundError):
+        storage.local_document_path(key, "tenant-a")
+
+
+def test_delete_document_rejects_cross_tenant_key():
+    with pytest.raises(FileNotFoundError):
+        storage.delete_document("tenant-a/document.txt", "tenant-b")
+
+
+def test_delete_document_removes_s3_object(monkeypatch):
+    calls = {}
+    class FakeS3:
+        def delete_object(self, **kwargs):
+            calls.update(kwargs)
+
+    monkeypatch.setattr(storage.settings, "storage_backend", "s3")
+    monkeypatch.setattr(storage.settings, "s3_bucket", "ledgergate-private")
+    monkeypatch.setattr(storage, "_s3_client", lambda: FakeS3())
+
+    storage.delete_document("tenant-a/document.txt", "tenant-a")
+
+    assert calls == {"Bucket": "ledgergate-private", "Key": "tenant-a/document.txt"}
