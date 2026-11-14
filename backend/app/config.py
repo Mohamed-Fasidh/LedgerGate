@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     max_upload_mb: int = 15
     max_upload_pdf_pages: int = 100
+    dual_approval_threshold_inr: float = 100000.0
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -30,6 +31,9 @@ if settings.max_upload_mb < 1 or settings.max_upload_mb > 50:
 
 if settings.max_upload_pdf_pages < 1 or settings.max_upload_pdf_pages > 500:
     raise RuntimeError("MAX_UPLOAD_PDF_PAGES must be between 1 and 500")
+
+if settings.dual_approval_threshold_inr <= 0:
+    raise RuntimeError("DUAL_APPROVAL_THRESHOLD_INR must be greater than zero")
 
 if settings.jwt_algorithm != "HS256":
     raise RuntimeError("Only HS256 is supported by this deployment configuration")
