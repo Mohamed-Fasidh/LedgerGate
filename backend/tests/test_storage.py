@@ -194,6 +194,8 @@ def test_successful_document_cleanup_does_not_log(monkeypatch, caplog):
 )
 def test_real_s3_upload_download_and_delete_round_trip():
     import uuid
+    from urllib.parse import parse_qs, urlparse
+    from botocore.exceptions import ClientError
 
     if storage.settings.storage_backend != "s3" or not storage.settings.s3_bucket:
         pytest.skip("Configure STORAGE_BACKEND=s3 and S3_BUCKET for integration testing")
@@ -207,8 +209,13 @@ def test_real_s3_upload_download_and_delete_round_trip():
         assert response["Body"].read() == content
         assert response.get("ServerSideEncryption") == "AES256"
         url = storage.create_download_url(key, tenant_id)
-        assert url.startswith("https://") or storage.settings.s3_endpoint_url
+        parsed = urlparse(url)
+        assert parsed.scheme == ("http" if storage.settings.s3_endpoint_url and parsed.scheme == "http" else "https")
+        query = parse_qs(parsed.query)
+        assert "X-Amz-Signature" in query
+        assert "X-Amz-Credential" in query
     finally:
         storage.delete_document(key, tenant_id)
-    with pytest.raises(Exception):
+    with pytest.raises(ClientError) as missing:
         client.head_object(Bucket=storage.settings.s3_bucket, Key=key)
+    assert missing.value.response["Error"]["Code"] in {"404", "NoSuchKey", "NotFound"}
