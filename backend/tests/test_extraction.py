@@ -17,14 +17,14 @@ def test_extract_invoice_fields_as_candidates():
 
 def test_txt_extraction_requires_valid_utf8(tmp_path: Path):
     path = tmp_path / "bad.txt"
-    path.write_bytes(b"Invoice\\xff")
+    path.write_bytes(b"Invoice\xff")
     with pytest.raises(UnicodeDecodeError):
         extract_file(str(path), ".txt")
 
 
 def test_txt_extraction_rejects_binary_content(tmp_path: Path):
     path = tmp_path / "binary.txt"
-    path.write_bytes(b"Invoice\\x00data")
+    path.write_bytes(b"Invoice\x00data")
     with pytest.raises(ValueError, match="binary"):
         extract_file(str(path), ".txt")
 
