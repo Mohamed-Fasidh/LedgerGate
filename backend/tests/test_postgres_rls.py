@@ -1,11 +1,14 @@
 import os
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
 from app.database import SessionLocal, set_tenant_context
+from app.audit import record_event, verify_event_chain
+from app.models import AuditEvent
 
 
 @pytest.mark.skipif(
@@ -73,3 +76,34 @@ def test_postgres_rls_isolates_tenants_and_reapplies_context_after_commit():
                 {"a": tenant_a, "b": tenant_b},
             )
         admin_engine.dispose()
+
+
+
+@pytest.mark.skipif(
+    not os.getenv("RLS_TEST_ADMIN_DATABASE_URL"),
+    reason="PostgreSQL audit integration test requires RLS_TEST_ADMIN_DATABASE_URL",
+)
+def test_audit_hash_chain_and_database_immutability():
+    tenant_id = str(uuid.uuid4())
+    actor = SimpleNamespace(tenant_id=tenant_id, id=987654321)
+
+    with SessionLocal() as db:
+        set_tenant_context(db, tenant_id)
+        first = record_event(db, actor, "invoice", "audit-test-1", "created", {"amount": 100})
+        db.flush()
+        second = record_event(db, actor, "invoice", "audit-test-1", "reviewed", {"reviewer": "test"})
+        db.commit()
+
+        events = (
+            db.query(AuditEvent)
+            .filter(AuditEvent.tenant_id == tenant_id)
+            .order_by(AuditEvent.id.asc())
+            .all()
+        )
+        assert len(events) == 2
+        assert verify_event_chain(events) == (True, None)
+
+        events[0].action = "tampered"
+        with pytest.raises(DBAPIError):
+            db.commit()
+        db.rollback()
