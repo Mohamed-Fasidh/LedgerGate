@@ -154,7 +154,7 @@ def get_invoice(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_
     return invoice_view(x,approval_count)
 
 @app.post("/api/v1/invoices/upload")
-async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
     suffix=Path(file.filename or "").suffix.lower()
     if suffix not in {".pdf",".txt"}: raise HTTPException(415,"Only PDF and TXT files are accepted")
     content=await file.read(settings.max_upload_mb*1024*1024+1)
@@ -166,6 +166,12 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
         if b"\x00" in content: raise HTTPException(415,"Text file contains binary data")
         try: content.decode("utf-8-sig",errors="strict")
         except UnicodeDecodeError: raise HTTPException(415,"Text files must use UTF-8 encoding")
+    content_hash=hashlib.sha256(content).hexdigest()
+    idem,replay=begin_idempotent_request(
+        db,user,idempotency_key,"invoice.upload",
+        {"file_name":Path(file.filename or "document").name,"suffix":suffix,"sha256":content_hash,"bytes":len(content)},
+    )
+    if replay is not None: return replay
     upload_dir=Path(settings.upload_dir)/user.tenant_id
     upload_dir.mkdir(parents=True,exist_ok=True,mode=0o700)
     try: os.chmod(upload_dir,0o700)
@@ -178,8 +184,11 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
         path.unlink(missing_ok=True); raise HTTPException(422,f"Document extraction failed: {type(exc).__name__}")
     candidate=fields.get("invoice_number") or f"UNCONFIRMED-{uuid.uuid4().hex[:10].upper()}"
     obj=Invoice(tenant_id=user.tenant_id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.extraction_review,created_by_user_id=user.id,file_name=Path(file.filename or "document").name,file_path=str(path),extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
-    db.add(obj); db.flush(); record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":hashlib.sha256(content).hexdigest(),"bytes":len(content)}); db.commit(); db.refresh(obj)
-    return invoice_view(obj)
+    db.add(obj); db.flush(); record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":content_hash,"bytes":len(content)})
+    response=invoice_view(obj)
+    complete_idempotent_request(idem,response)
+    db.commit(); db.refresh(obj)
+    return response
 
 @app.post("/api/v1/invoices/{invoice_id}/confirm-extraction")
 def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
