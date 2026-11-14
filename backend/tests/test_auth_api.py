@@ -360,3 +360,55 @@ def test_session_revocation_cannot_target_another_users_session(auth_client):
 
     still_valid = auth_client.get("/api/v1/me", headers=second_headers)
     assert still_valid.status_code == 200
+
+
+
+def test_session_delete_rejects_current_session_and_requires_logout(auth_client):
+    registered = register_account(auth_client, "session-current@example.com")
+    assert registered.status_code == 200
+    tokens = registered.json()
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    listing = auth_client.get("/api/v1/auth/sessions", headers=headers)
+    assert listing.status_code == 200
+    current_id = listing.json()[0]["id"]
+
+    response = auth_client.delete(
+        f"/api/v1/auth/sessions/{current_id}",
+        headers=headers,
+    )
+    assert response.status_code == 409
+    still_valid = auth_client.get("/api/v1/me", headers=headers)
+    assert still_valid.status_code == 200
+
+
+def test_session_delete_rejects_expired_session(auth_client):
+    from datetime import datetime, timedelta, timezone
+    from app.database import get_db
+    from app.models import AuthSession
+
+    registered = register_account(auth_client, "session-expired@example.com")
+    assert registered.status_code == 200
+    tokens = registered.json()
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    db_generator = app.dependency_overrides[get_db]()
+    db = next(db_generator)
+    try:
+        session = db.query(AuthSession).filter(
+            AuthSession.user_id == 1,
+        ).order_by(AuthSession.id.desc()).first()
+        assert session is not None
+        session.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+        session_id = session.id
+    finally:
+        try:
+            next(db_generator)
+        except StopIteration:
+            pass
+
+    response = auth_client.delete(
+        f"/api/v1/auth/sessions/{session_id}",
+        headers=headers,
+    )
+    assert response.status_code == 401

@@ -1,4 +1,5 @@
 import uuid, hashlib, os, tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 import logging
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header
@@ -107,7 +108,7 @@ def list_auth_sessions(token:str=Depends(oauth2_scheme),db:Session=Depends(get_d
         AuthSession.user_id==user.id,
         AuthSession.tenant_id==user.tenant_id,
         AuthSession.revoked_at.is_(None),
-        AuthSession.expires_at>__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+        AuthSession.expires_at>datetime.now(timezone.utc),
     ).order_by(AuthSession.created_at.desc()).all()
     return [{
         "id":session.id,
@@ -118,16 +119,22 @@ def list_auth_sessions(token:str=Depends(oauth2_scheme),db:Session=Depends(get_d
 
 
 @app.delete("/api/v1/auth/sessions/{session_id}")
-def revoke_auth_session(session_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+def revoke_auth_session(session_id:int,token:str=Depends(oauth2_scheme),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    claims=jwt.decode(token,settings.jwt_secret_key,algorithms=["HS256"])
+    if not isinstance(claims.get("jti"),str):
+        raise HTTPException(401,"Invalid or expired credentials")
     session=db.query(AuthSession).filter(
         AuthSession.id==session_id,
         AuthSession.user_id==user.id,
         AuthSession.tenant_id==user.tenant_id,
         AuthSession.revoked_at.is_(None),
+        AuthSession.expires_at>datetime.now(timezone.utc),
     ).with_for_update().first()
     if not session:
         raise HTTPException(404,"Active session not found")
-    session.revoked_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+    if session.jti==claims["jti"]:
+        raise HTTPException(409,"Use logout to revoke the current session")
+    session.revoked_at=datetime.now(timezone.utc)
     session.refresh_token_hash=None
     session.refresh_expires_at=None
     db.commit()
