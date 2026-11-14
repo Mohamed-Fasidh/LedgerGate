@@ -38,7 +38,7 @@
 3. Invoice files are stored on local disk. Private encrypted object storage, malware scanning, retention/deletion, and access-controlled downloads are not implemented.
 4. SSO/OIDC, MFA, email verification, password reset, refresh-token rotation/revocation, and login throttling are not implemented.
 5. Audit events are hash-chained and protected from ordinary UPDATE/DELETE by a PostgreSQL trigger, but external WORM replication and independent checkpoints remain outstanding.
-6. Idempotency keys, separation of duties, dual approval thresholds, and optimistic locking need implementation.
+6. Idempotency keys, configurable dual approval thresholds, policy versioning, and broader optimistic locking need implementation. Maker-checker creator/decision-maker tracking is now present.
 7. No completed penetration test, load test, disaster-recovery restore drill, or jurisdiction-specific privacy/compliance review.
 8. Render/Vercel deployment has not been executed or smoke-tested.
 
