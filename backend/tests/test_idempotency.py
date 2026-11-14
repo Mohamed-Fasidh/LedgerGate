@@ -125,3 +125,32 @@ def test_upload_idempotency_binds_file_name_and_content_hash(db, user):
             db, user, "upload-key-001", "invoice.upload", changed_payload
         )
     assert exc.value.status_code == 409
+
+
+def test_reconciliation_idempotency_replays_original_decision(db, user):
+    payload = {"invoice_id": 91}
+    record, replay = begin_idempotent_request(
+        db, user, "reconcile-key-001", "invoice.reconcile", payload
+    )
+    assert replay is None
+    response = {
+        "invoice_id": 91,
+        "status": "review_required",
+        "decision": "HUMAN_REVIEW",
+        "findings": [{"code": "CHECK_REQUIRED"}],
+        "evidence": [],
+        "requires_human_review": True,
+    }
+    complete_idempotent_request(record, response)
+    db.commit()
+
+    _, replay = begin_idempotent_request(
+        db, user, "reconcile-key-001", "invoice.reconcile", payload
+    )
+    assert replay == response
+
+    with pytest.raises(HTTPException) as exc:
+        begin_idempotent_request(
+            db, user, "reconcile-key-001", "invoice.reconcile", {"invoice_id": 92}
+        )
+    assert exc.value.status_code == 409
