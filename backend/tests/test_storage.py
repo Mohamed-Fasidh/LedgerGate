@@ -124,3 +124,29 @@ def test_delete_document_removes_s3_object(monkeypatch):
     storage.delete_document("tenant-a/document.txt", "tenant-a")
 
     assert calls == {"Bucket": "ledgergate-private", "Key": "tenant-a/document.txt"}
+
+
+
+def test_local_storage_rejects_tenant_directory_symlink(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage.settings, "storage_backend", "local")
+    monkeypatch.setattr(storage.settings, "upload_dir", str(tmp_path))
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (outside / "document.txt").write_text("outside")
+    (tmp_path / "tenant-a").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(FileNotFoundError):
+        storage.local_document_path("tenant-a/document.txt", "tenant-a")
+
+
+def test_local_storage_rejects_object_symlink(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage.settings, "storage_backend", "local")
+    monkeypatch.setattr(storage.settings, "upload_dir", str(tmp_path))
+    tenant_dir = tmp_path / "tenant-a"
+    tenant_dir.mkdir()
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+    outside.write_text("outside")
+    (tenant_dir / "document.txt").symlink_to(outside)
+
+    with pytest.raises(FileNotFoundError):
+        storage.local_document_path("tenant-a/document.txt", "tenant-a")
