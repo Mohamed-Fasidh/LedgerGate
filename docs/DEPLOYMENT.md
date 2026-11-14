@@ -12,6 +12,31 @@
 - Set `APP_ENV=production`, `DATABASE_URL` to a managed PostgreSQL URL using psycopg, a unique `JWT_SECRET_KEY` of at least 32 bytes, and `CORS_ORIGINS` to the exact HTTPS Vercel origin(s).
 - Set `MAX_UPLOAD_MB` to a conservative limit. The current upload implementation writes to local disk. Do not enable production invoice uploads on an ephemeral filesystem; a private encrypted object-storage adapter, malware scanning, and access-controlled retrieval must be implemented first or a durable encrypted mounted volume must be provisioned with an explicit retention plan.
 - Run `alembic upgrade head` as a controlled pre-deploy/release command from the backend working directory. Do not run migrations independently in every API replica.
+
+### PostgreSQL tenant RLS role separation
+
+The `0002_tenant_rls` migration enables and forces row-level security on `suppliers`, `purchase_orders`, `invoices`, `policy_documents`, `agent_memories`, and `audit_events`. The API sets the transaction-local PostgreSQL setting `app.tenant_id` only after authenticating the user; it is reapplied automatically at each new SQLAlchemy transaction. A missing tenant context matches no rows.
+
+**Do not run the API as a PostgreSQL superuser, a role with `BYPASSRLS`, or the table owner.** Use a migration/owner role for the controlled release command and a separate non-owner runtime role for the API. Example (run as your database administrator; replace both passwords):
+
+```sql
+CREATE ROLE ledgergate_migrator LOGIN PASSWORD 'REPLACE_WITH_MIGRATOR_SECRET' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+CREATE ROLE ledgergate_runtime LOGIN PASSWORD 'REPLACE_WITH_RUNTIME_SECRET' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+
+GRANT CONNECT ON DATABASE ledgergate TO ledgergate_runtime;
+GRANT USAGE ON SCHEMA public TO ledgergate_runtime;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ledgergate_runtime;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ledgergate_runtime;
+
+ALTER DEFAULT PRIVILEGES FOR ROLE ledgergate_migrator IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ledgergate_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE ledgergate_migrator IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO ledgergate_runtime;
+```
+
+Create/own the application schema objects with `ledgergate_migrator`, run migrations using its connection string, and configure the API's `DATABASE_URL` with the `ledgergate_runtime` credentials. Ensure the runtime role is not a member of the migrator role and has no `BYPASSRLS` attribute. If your managed database provider restricts role creation or grants, follow its supported least-privilege procedure before deploying.
+
+The `users` table is intentionally not covered by these tenant-data policies because login must locate a user before a tenant can be established. User lookup is constrained by the authenticated token's user ID and tenant ID; this table still needs a separate identity-store hardening review.
 - Deploy the frontend from `frontend/`. Configure `NEXT_PUBLIC_API_URL` to the public API base URL ending in `/api/v1` and `NEXT_PUBLIC_API_DOCS_URL` to the public API docs URL. These are Next.js public build-time variables; set them before the frontend build.
 - Configure the backend CORS allowlist to include the exact Vercel production domain and any required preview domains. Avoid broad wildcard preview origins.
 - Configure health check path `/health` for the API service. Keep the database private and restrict network access to the API service.
