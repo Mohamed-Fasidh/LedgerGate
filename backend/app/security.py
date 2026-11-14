@@ -186,7 +186,11 @@ import secrets
 
 
 def issue_refresh_token(db: Session, user: User) -> str:
-    token = secrets.token_urlsafe(48)
+    # The tenant prefix lets the refresh endpoint establish transaction-local
+    # RLS context before looking up the hash. The random suffix remains secret.
+    if not user.tenant_id or "." in user.tenant_id:
+        raise RuntimeError("Invalid tenant identifier for refresh token")
+    token = f"{user.tenant_id}.{secrets.token_urlsafe(48)}"
     token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
     session = (
         db.query(AuthSession)
@@ -207,10 +211,23 @@ def issue_refresh_token(db: Session, user: User) -> str:
 def rotate_refresh_token(db: Session, raw_token: str) -> tuple[User, str, str]:
     if not isinstance(raw_token, str) or len(raw_token) < 32 or len(raw_token) > 256:
         raise ValueError("Invalid refresh token")
-    token_hash = hashlib.sha256(raw_token.encode("ascii", "ignore")).hexdigest()
+    tenant_id, separator, secret = raw_token.partition(".")
+    if (not separator or not tenant_id or len(tenant_id) > 64
+            or not secret or "." in secret):
+        raise ValueError("Invalid refresh token")
+    try:
+        raw_token.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError("Invalid refresh token") from exc
+    # AuthSession is protected by FORCE ROW LEVEL SECURITY. Set context
+    # from the untrusted tenant prefix before querying; the unguessable token
+    # hash is still required to match a stored session within that tenant.
+    set_tenant_context(db, tenant_id)
+    token_hash = hashlib.sha256(raw_token.encode("ascii")).hexdigest()
     session = (
         db.query(AuthSession)
-        .filter(AuthSession.refresh_token_hash == token_hash)
+        .filter(AuthSession.refresh_token_hash == token_hash,
+                AuthSession.tenant_id == tenant_id)
         .with_for_update()
         .first()
     )

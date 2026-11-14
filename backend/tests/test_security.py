@@ -193,6 +193,7 @@ def test_refresh_token_is_hashed_and_rotates_once(db_session):
     db_session.commit()
 
     old_session = db_session.query(AuthSession).one()
+    assert refresh.startswith(f"{user.tenant_id}.")
     assert old_session.refresh_token_hash == hashlib.sha256(refresh.encode()).hexdigest()
     assert old_session.refresh_token_hash != refresh
 
@@ -227,3 +228,23 @@ def test_refresh_token_cannot_be_used_after_logout_all(db_session):
     db_session.commit()
     with pytest.raises(ValueError):
         rotate_refresh_token(db_session, refresh)
+
+
+def test_token_response_schema_preserves_refresh_token():
+    from app.schemas import TokenOut
+
+    payload = TokenOut(access_token="access-value", refresh_token="refresh-value")
+    assert payload.refresh_token == "refresh-value"
+
+
+def test_refresh_token_tenant_prefix_is_bound_to_hash(db_session):
+    from app.security import issue_refresh_token, rotate_refresh_token
+
+    user = make_user(db_session)
+    create_access_token(user, db_session)
+    refresh = issue_refresh_token(db_session, user)
+    db_session.commit()
+
+    tampered = "another-tenant." + refresh.split(".", 1)[1]
+    with pytest.raises(ValueError):
+        rotate_refresh_token(db_session, tampered)
