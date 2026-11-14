@@ -101,7 +101,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             raise ValueError("Invalid token claims")
     except (JWTError, KeyError, ValueError, TypeError):
         raise error
-    session = db.query(AuthSession).filter(
+    # Establish tenant context before querying the RLS-protected session registry.\n    set_tenant_context(db, tenant)\n    session = db.query(AuthSession).filter(
         AuthSession.jti == jti, AuthSession.user_id == user_id, AuthSession.tenant_id == tenant,
         AuthSession.revoked_at.is_(None)
     ).first()
