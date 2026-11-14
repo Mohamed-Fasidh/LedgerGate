@@ -37,8 +37,9 @@ def upgrade():
     if "approval_threshold_snapshot" not in invoice_columns:
         op.add_column("invoices", sa.Column("approval_threshold_snapshot", sa.Numeric(14, 2), nullable=True))
     if bind.dialect.name == "postgresql":
-        fk_names = {fk.get("name") for fk in sa.inspect(bind).get_foreign_keys("invoices")}
-        if "fk_invoice_approval_policy" not in fk_names:
+        invoice_fks = sa.inspect(bind).get_foreign_keys("invoices")
+        has_policy_fk = any(fk.get("constrained_columns") == ["approval_policy_id"] and fk.get("referred_table") == "approval_policies" for fk in invoice_fks)
+        if not has_policy_fk:
             op.create_foreign_key("fk_invoice_approval_policy", "invoices", "approval_policies", ["approval_policy_id"], ["id"])
         op.execute('ALTER TABLE "approval_policies" ENABLE ROW LEVEL SECURITY')
         op.execute('ALTER TABLE "approval_policies" FORCE ROW LEVEL SECURITY')
