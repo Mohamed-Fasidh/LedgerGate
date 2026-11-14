@@ -18,6 +18,6 @@ def test_different_reviewer_can_decide_invoice(decision):
     ensure_independent_decision(invoice, 13, decision)
 
 
-def test_legacy_invoice_without_creator_remains_decidable(decision="approve"):
+def test_legacy_invoice_without_creator_remains_decidable():
     invoice = SimpleNamespace(created_by_user_id=None)
-    ensure_independent_decision(invoice, 12, decision)
+    ensure_independent_decision(invoice, 12, "approve")
