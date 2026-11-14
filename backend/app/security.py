@@ -246,3 +246,27 @@ def rotate_refresh_token(db: Session, raw_token: str) -> tuple[User, str, str]:
     access = create_access_token(user, db)
     refresh = issue_refresh_token(db, user)
     return user, access, refresh
+
+
+
+def revoke_current_session(db: Session, user: User, access_token: str) -> None:
+    """Revoke the authenticated access session and its paired refresh token."""
+    try:
+        payload = jwt.decode(access_token, settings.jwt_secret_key, algorithms=["HS256"])
+        if (int(payload.get("sub", -1)) != user.id
+                or payload.get("tenant") != user.tenant_id
+                or not isinstance(payload.get("jti"), str)):
+            raise ValueError("Invalid session")
+    except (JWTError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Invalid session") from exc
+    set_tenant_context(db, user.tenant_id)
+    session = (db.query(AuthSession).filter(
+        AuthSession.jti == payload["jti"], AuthSession.user_id == user.id,
+        AuthSession.tenant_id == user.tenant_id
+    ).with_for_update().first())
+    if session is None or session.revoked_at is not None:
+        raise ValueError("Invalid session")
+    session.revoked_at = datetime.now(timezone.utc)
+    session.refresh_token_hash = None
+    session.refresh_expires_at = None
+    db.flush()

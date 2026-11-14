@@ -248,3 +248,32 @@ def test_refresh_token_tenant_prefix_is_bound_to_hash(db_session):
     tampered = "another-tenant." + refresh.split(".", 1)[1]
     with pytest.raises(ValueError):
         rotate_refresh_token(db_session, tampered)
+
+
+
+def test_logout_revokes_current_access_and_refresh_session(db_session):
+    from app.security import issue_refresh_token, revoke_current_session, rotate_refresh_token
+    user = make_user(db_session)
+    access = create_access_token(user, db_session)
+    refresh = issue_refresh_token(db_session, user)
+    db_session.commit()
+    revoke_current_session(db_session, user, access)
+    db_session.commit()
+    with pytest.raises(HTTPException):
+        get_current_user(token=access, db=db_session)
+    with pytest.raises(ValueError):
+        rotate_refresh_token(db_session, refresh)
+
+
+def test_logout_rejects_token_from_another_user(db_session):
+    from app.security import revoke_current_session
+    user = make_user(db_session)
+    other = User(tenant_id="tenant-test", tenant_name="Test Workspace",
+        email="other-security-test@example.com",
+        hashed_password=hash_password("LedgerGate-test-password-2026"), role=Role.admin, is_active=True)
+    db_session.add(other)
+    db_session.flush()
+    token = create_access_token(user, db_session)
+    db_session.commit()
+    with pytest.raises(ValueError):
+        revoke_current_session(db_session, other, token)
