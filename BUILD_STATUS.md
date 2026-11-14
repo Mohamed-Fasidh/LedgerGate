@@ -18,6 +18,9 @@
 - Docker API container runs as non-root; database migrations run as a one-shot Compose service before API startup instead of in every API replica.
 - Frontend public API and API-docs URLs are configurable at Next.js build time.
 - GitHub Actions workflow added for Python compile/pytest and Next.js production build.
+- PostgreSQL RLS migration added for suppliers, purchase orders, invoices, policy documents, agent memories, and audit events, using ENABLE + FORCE ROW LEVEL SECURITY and tenant-scoped USING/WITH CHECK policies.
+- Authenticated requests now set a transaction-local tenant context; SQLAlchemy reapplies it on each transaction, including transactions opened after commits. Workspace registration sets its new tenant context before inserting the first user.
+- Deployment documentation now requires separate migration-owner and non-owner, NOBYPASSRLS runtime database roles; the users table is explicitly documented as outside this RLS migration.
 
 ## Validation status
 - The GitHub branch and CI workflow have been created.
@@ -26,7 +29,7 @@
 - Earlier baseline checks (before this branch) included Python source compilation, 5/5 deterministic reconciliation smoke cases, and a parser smoke test. These are not substitutes for the new CI run or production integration testing.
 
 ## Known blockers before real production data
-1. No PostgreSQL RLS/FORCE RLS policies or non-owner runtime role; application-level tenant filters alone are insufficient for high-assurance isolation.
+1. RLS migration and transaction-local tenant context are implemented, but must still be validated against a real PostgreSQL instance using a non-owner, NOBYPASSRLS runtime role. The users identity table is not covered by this RLS migration.
 2. The initial Alembic migration uses SQLAlchemy `metadata.create_all`; replace it with a reviewed explicit baseline before production schema management.
 3. Invoice files are stored on local disk. Private encrypted object storage, malware scanning, retention/deletion, and access-controlled downloads are not implemented.
 4. SSO/OIDC, MFA, email verification, password reset, refresh-token rotation/revocation, and login throttling are not implemented.
