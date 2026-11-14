@@ -40,8 +40,13 @@ if settings.storage_backend not in {"local", "s3"}:
 if settings.s3_presigned_url_expiry_seconds < 60 or settings.s3_presigned_url_expiry_seconds > 900:
     raise RuntimeError("S3_PRESIGNED_URL_EXPIRY_SECONDS must be between 60 and 900")
 
-if settings.storage_backend == "s3" and not settings.s3_bucket:
-    raise RuntimeError("S3_BUCKET is required when STORAGE_BACKEND=s3")
+if settings.storage_backend == "s3":
+    if not settings.s3_bucket.strip():
+        raise RuntimeError("S3_BUCKET is required when STORAGE_BACKEND=s3")
+    if not settings.s3_region.strip():
+        raise RuntimeError("S3_REGION is required when STORAGE_BACKEND=s3")
+    if bool(settings.s3_access_key_id) != bool(settings.s3_secret_access_key):
+        raise RuntimeError("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be configured together")
 
 if settings.max_upload_mb < 1 or settings.max_upload_mb > 50:
     raise RuntimeError("MAX_UPLOAD_MB must be between 1 and 50")
@@ -58,6 +63,8 @@ if settings.jwt_algorithm != "HS256":
 if settings.app_env.lower() == "production":
     if settings.storage_backend != "s3":
         raise RuntimeError("Production requires private S3-compatible document storage")
+    if settings.s3_endpoint_url and not settings.s3_endpoint_url.startswith("https://"):
+        raise RuntimeError("Production S3_ENDPOINT_URL must use HTTPS")
     if settings.jwt_secret_key == "unsafe-development-secret-change-this" or len(settings.jwt_secret_key.encode("utf-8")) < 32:
         raise RuntimeError("Production requires a unique JWT_SECRET_KEY of at least 32 bytes")
     if settings.database_url.startswith("sqlite"):
