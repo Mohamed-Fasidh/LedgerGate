@@ -122,3 +122,16 @@ class IdempotencyRecord(Base):
         UniqueConstraint("tenant_id", "user_id", "key", name="uq_idempotency_tenant_user_key"),
         Index("ix_idempotency_expires_at", "expires_at"),
     )
+
+
+class InvoiceApproval(Base):
+    __tablename__ = "invoice_approvals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("invoices.id"), nullable=False, index=True)
+    reviewer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "invoice_id", "reviewer_user_id", name="uq_invoice_approval_reviewer"),
+        Index("ix_invoice_approval_invoice", "tenant_id", "invoice_id"),
+    )
