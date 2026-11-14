@@ -11,6 +11,7 @@
 - Randomized server-side upload names.
 - Tenant-scoped audit events with SHA-256 hash chaining, PostgreSQL transaction advisory locks for serialized writers, and a database trigger that rejects UPDATE/DELETE.
 - PostgreSQL row locks around invoice reconciliation, approval, and rejection to serialize competing state changes.
+- Optional database-backed `Idempotency-Key` support for invoice approval/rejection, scoped to tenant and authenticated user, with request-fingerprint conflict detection, replayed response bodies, PostgreSQL advisory-lock serialization, and 24-hour expiry.
 - Maker-checker enforcement prevents the recorded invoice creator from approving or rejecting their own invoice; creator and decision-maker IDs are persisted.
 - Pydantic validation for API inputs and agent tool arguments.
 - Production startup rejects the default JWT secret and wildcard CORS.
