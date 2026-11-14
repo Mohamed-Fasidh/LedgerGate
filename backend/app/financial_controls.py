@@ -33,3 +33,61 @@ def ensure_extraction_editable(invoice) -> None:
     from app.models import InvoiceStatus
     if invoice.status != InvoiceStatus.extraction_review:
         raise ValueError("Invoice extraction can only be confirmed while awaiting extraction review")
+
+
+def snapshot_approval_policy(db, invoice, tenant_id: str, actor_user_id: int, default_threshold: float):
+    """Attach an invoice to the latest immutable tenant policy exactly once."""
+    from app.models import ApprovalPolicy
+    from sqlalchemy import text
+
+    if invoice.required_approvals_snapshot is not None:
+        return
+    currency = (invoice.currency or "INR").upper()
+    if currency != "INR":
+        invoice.required_approvals_snapshot = 1
+        invoice.approval_threshold_snapshot = None
+        return
+    policy = db.query(ApprovalPolicy).filter(
+        ApprovalPolicy.tenant_id == tenant_id,
+        ApprovalPolicy.currency == currency,
+    ).order_by(ApprovalPolicy.version.desc()).first()
+    if policy is None:
+        policy = ApprovalPolicy(
+            tenant_id=tenant_id, version=1, currency="INR",
+            threshold_amount=default_threshold, required_approvals=2,
+            created_by_user_id=actor_user_id,
+        )
+        db.add(policy)
+        db.flush()
+    invoice.approval_policy_id = policy.id
+    invoice.approval_policy_version = policy.version
+    invoice.approval_threshold_snapshot = policy.threshold_amount
+    invoice.required_approvals_snapshot = (
+        policy.required_approvals
+        if invoice.amount is not None and float(invoice.amount) >= float(policy.threshold_amount)
+        else 1
+    )
+
+
+def create_approval_policy_version(db, tenant_id: str, actor_user_id: int, currency: str, threshold_amount: float, required_approvals: int):
+    """Create a new immutable policy version under a tenant-scoped transaction lock."""
+    from app.models import ApprovalPolicy
+    from sqlalchemy import text
+
+    if db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"), {"lock_key": "approval-policy:" + tenant_id})
+    latest = db.query(ApprovalPolicy).filter(
+        ApprovalPolicy.tenant_id == tenant_id,
+        ApprovalPolicy.currency == currency,
+    ).order_by(ApprovalPolicy.version.desc()).first()
+    policy = ApprovalPolicy(
+        tenant_id=tenant_id,
+        version=(latest.version + 1) if latest else 1,
+        currency=currency,
+        threshold_amount=threshold_amount,
+        required_approvals=required_approvals,
+        created_by_user_id=actor_user_id,
+    )
+    db.add(policy)
+    db.flush()
+    return policy
