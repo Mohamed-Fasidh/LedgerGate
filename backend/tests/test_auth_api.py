@@ -409,26 +409,40 @@ def test_session_delete_rejects_current_session_and_requires_logout(auth_client)
     assert still_valid.status_code == 200
 
 
-def test_session_delete_rejects_expired_session(auth_client):
+def test_session_delete_rejects_expired_other_session_without_invalidating_caller(auth_client):
     from datetime import datetime, timedelta, timezone
     from app.database import get_db
     from app.models import AuthSession
 
     registered = register_account(auth_client, "session-expired@example.com")
     assert registered.status_code == 200
-    tokens = registered.json()
-    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+    caller_tokens = registered.json()
+    caller_headers = {"Authorization": f"Bearer {caller_tokens['access_token']}"}
+
+    second_login = auth_client.post(
+        "/api/v1/auth/token",
+        data={
+            "username": "session-expired@example.com",
+            "password": "LedgerGate-api-test-2026",
+        },
+    )
+    assert second_login.status_code == 200
+
+    listing = auth_client.get("/api/v1/auth/sessions", headers=caller_headers)
+    assert listing.status_code == 200
+    other_sessions = [item for item in listing.json() if not item["current"]]
+    assert len(other_sessions) == 1
+    expired_session_id = other_sessions[0]["id"]
 
     db_generator = app.dependency_overrides[get_db]()
     db = next(db_generator)
     try:
         session = db.query(AuthSession).filter(
-            AuthSession.user_id == 1,
-        ).order_by(AuthSession.id.desc()).first()
+            AuthSession.id == expired_session_id,
+        ).first()
         assert session is not None
         session.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
         db.commit()
-        session_id = session.id
     finally:
         try:
             next(db_generator)
@@ -436,7 +450,21 @@ def test_session_delete_rejects_expired_session(auth_client):
             pass
 
     response = auth_client.delete(
-        f"/api/v1/auth/sessions/{session_id}",
-        headers=headers,
+        f"/api/v1/auth/sessions/{expired_session_id}",
+        headers=caller_headers,
     )
-    assert response.status_code == 401
+    assert response.status_code == 404
+
+    caller_still_valid = auth_client.get("/api/v1/me", headers=caller_headers)
+    assert caller_still_valid.status_code == 200
+
+    remaining = auth_client.get("/api/v1/auth/sessions", headers=caller_headers)
+    assert remaining.status_code == 200
+    assert len(remaining.json()) == 1
+    assert remaining.json()[0]["current"] is True
+
+    expired_headers = {
+        "Authorization": f"Bearer {second_login.json()['access_token']}"
+    }
+    expired_access = auth_client.get("/api/v1/me", headers=expired_headers)
+    assert expired_access.status_code == 401
