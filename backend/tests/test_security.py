@@ -23,3 +23,20 @@ def test_password_hash_and_verify_round_trip():
 
 def test_verify_password_fails_closed_for_invalid_input():
     assert verify_password("short", "not-a-valid-hash") is False
+
+
+def test_registration_rejects_password_over_bcrypt_utf8_byte_limit():
+    from pydantic import ValidationError
+    from app.schemas import RegisterIn
+
+    with pytest.raises(ValidationError):
+        RegisterIn(email="user@example.com", password="é" * 37, tenant_name="Example")
+
+
+def test_registration_accepts_password_within_bcrypt_utf8_byte_limit():
+    from app.schemas import RegisterIn
+
+    payload = RegisterIn(
+        email="user@example.com", password="LedgerGate-test-password-2026", tenant_name="Example"
+    )
+    assert payload.email == "user@example.com"
