@@ -267,7 +267,11 @@ def logout_all_sessions(db:Session=Depends(get_db),user:User=Depends(get_current
         AuthSession.user_id==user.id,
         AuthSession.tenant_id==user.tenant_id,
         AuthSession.revoked_at.is_(None),
-    ).update({AuthSession.revoked_at:now},synchronize_session=False)
+    ).update({
+        AuthSession.revoked_at: now,
+        AuthSession.refresh_token_hash: None,
+        AuthSession.refresh_expires_at: None,
+    }, synchronize_session=False)
     db.commit()
     return {"message":"All active sessions have been revoked. Sign in again on each device."}
 
