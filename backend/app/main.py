@@ -128,7 +128,7 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
     try: os.chmod(upload_dir,0o700)
     except OSError: pass
     safe_name=f"{uuid.uuid4().hex}{suffix}"; path=upload_dir/safe_name
-    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,getattr(os,"O_BINARY",0)|0o600)
+    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,"O_BINARY",0),0o600)
     with os.fdopen(fd,"wb") as stored_file: stored_file.write(content)
     try: extracted,fields=extract_file(str(path),suffix,settings.max_upload_pdf_pages)
     except Exception as exc:
