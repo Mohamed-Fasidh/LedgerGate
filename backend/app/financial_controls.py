@@ -42,6 +42,13 @@ def snapshot_approval_policy(db, invoice, tenant_id: str, actor_user_id: int, de
 
     if invoice.required_approvals_snapshot is not None:
         return
+    # Serialize first-policy creation and version changes with the same tenant
+    # lock. Without this, concurrent first invoices can both attempt version 1.
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": "approval-policy:" + tenant_id},
+        )
     currency = (invoice.currency or "INR").upper()
     if currency != "INR":
         invoice.required_approvals_snapshot = 1
