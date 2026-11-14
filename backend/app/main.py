@@ -1,4 +1,4 @@
-import uuid, hashlib
+import uuid, hashlib, os
 from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -117,11 +117,20 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
     content=await file.read(settings.max_upload_mb*1024*1024+1)
     if len(content)>settings.max_upload_mb*1024*1024: raise HTTPException(413,"File too large")
     if not content: raise HTTPException(400,"Empty file")
-    # Basic signature validation; production should additionally scan with AV and use private object storage.
+    # Content checks are defense-in-depth, not a substitute for malware scanning.
     if suffix==".pdf" and not content.startswith(b"%PDF"): raise HTTPException(415,"File content is not a valid PDF")
-    upload_dir=Path(settings.upload_dir)/user.tenant_id; upload_dir.mkdir(parents=True,exist_ok=True)
-    safe_name=f"{uuid.uuid4().hex}{suffix}"; path=upload_dir/safe_name; path.write_bytes(content)
-    try: extracted,fields=extract_file(str(path),suffix)
+    if suffix==".txt":
+        if b"\\x00" in content: raise HTTPException(415,"Text file contains binary data")
+        try: content.decode("utf-8-sig",errors="strict")
+        except UnicodeDecodeError: raise HTTPException(415,"Text files must use UTF-8 encoding")
+    upload_dir=Path(settings.upload_dir)/user.tenant_id
+    upload_dir.mkdir(parents=True,exist_ok=True,mode=0o700)
+    try: os.chmod(upload_dir,0o700)
+    except OSError: pass
+    safe_name=f"{uuid.uuid4().hex}{suffix}"; path=upload_dir/safe_name
+    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,getattr(os,"O_BINARY",0)|0o600)
+    with os.fdopen(fd,"wb") as stored_file: stored_file.write(content)
+    try: extracted,fields=extract_file(str(path),suffix,settings.max_upload_pdf_pages)
     except Exception as exc:
         path.unlink(missing_ok=True); raise HTTPException(422,f"Document extraction failed: {type(exc).__name__}")
     candidate=fields.get("invoice_number") or f"UNCONFIRMED-{uuid.uuid4().hex[:10].upper()}"
