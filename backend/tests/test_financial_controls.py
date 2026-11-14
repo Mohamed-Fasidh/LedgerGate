@@ -66,3 +66,14 @@ def test_extraction_review_can_be_confirmed():
     from app.financial_controls import ensure_extraction_editable
     from app.models import InvoiceStatus
     ensure_extraction_editable(SimpleNamespace(status=InvoiceStatus.extraction_review))
+
+
+def test_foreign_currency_policy_snapshot_is_single_approval():
+    from app.financial_controls import required_invoice_approvals
+    assert required_invoice_approvals(500000, "USD", 100000) == 1
+
+
+def test_policy_threshold_is_applied_at_version_boundary():
+    from app.financial_controls import required_invoice_approvals
+    assert required_invoice_approvals(150000, "INR", 100000) == 2
+    assert required_invoice_approvals(150000, "INR", 200000) == 1
