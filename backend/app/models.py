@@ -156,3 +156,26 @@ class ApprovalPolicy(Base):
         UniqueConstraint("tenant_id", "version", name="uq_approval_policy_tenant_version"),
         Index("ix_approval_policy_tenant_version", "tenant_id", "version"),
     )
+
+
+class AuthSession(Base):
+    """Server-side session registry so access tokens can be revoked immediately."""
+    __tablename__ = "auth_sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    jti: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LoginThrottle(Base):
+    """Persistent per-account login throttling shared across API workers."""
+    __tablename__ = "login_throttles"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    failed_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
