@@ -81,16 +81,7 @@ def local_document_path(key: str, tenant_id: str) -> Path:
     if not key.startswith(prefix):
         raise FileNotFoundError("Document not found")
     root = Path(settings.upload_dir).resolve()
-    candidate = root / key
-    tenant_dir = root / tenant_id
-    # Reject symlinks before resolving so a tenant or object link cannot escape
-    # the private upload tree.
-    if tenant_dir.is_symlink() or candidate.is_symlink():
-        raise FileNotFoundError("Document not found")
-    try:
-        path = candidate.resolve(strict=True)
-    except (FileNotFoundError, OSError, RuntimeError):
-        raise FileNotFoundError("Document not found") from None
+    path = (root / key).resolve()
     if root not in path.parents or not path.is_file():
         raise FileNotFoundError("Document not found")
     return path
