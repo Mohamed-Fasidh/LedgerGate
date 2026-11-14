@@ -26,6 +26,7 @@
 - Audit events now carry per-tenant SHA-256 hash links; PostgreSQL writers serialize through transaction-scoped advisory locks and UPDATE/DELETE are blocked by a database trigger. Existing audit rows are backfilled by migration.
 - Invoice approve/reject now support optional database-backed idempotency keys, request-hash conflict detection, same-response replay, tenant/user scoping, PostgreSQL advisory-lock serialization, and 24-hour expiry. The migration applies tenant RLS to the idempotency table.
 - High-value INR invoices use a configurable two-reviewer approval threshold (`DUAL_APPROVAL_THRESHOLD_INR`, default INR 100,000); each approval is persisted in a tenant-RLS-protected table, and approval status remains pending until two distinct reviewers have approved.
+- Invoice list/detail API responses expose the required and recorded approval counts; the dashboard displays progress, and a tenant-scoped approval-history endpoint exposes reviewer IDs and timestamps.
 - GitHub Actions backend job now starts PostgreSQL 16, applies Alembic migrations, and runs tests as the restricted runtime role.
 
 ## Validation status
