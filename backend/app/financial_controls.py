@@ -24,12 +24,12 @@ def required_invoice_approvals(amount, currency: str, threshold_inr: float) -> i
 def ensure_reviewable_status(invoice) -> None:
     """Only active, non-final invoices may be reconciled."""
     from app.models import InvoiceStatus
-    if invoice.status not in (InvoiceStatus.RECEIVED, InvoiceStatus.PROCESSING, InvoiceStatus.REVIEW_REQUIRED):
+    if invoice.status not in (InvoiceStatus.received, InvoiceStatus.processing, InvoiceStatus.review_required):
         raise ValueError("Only received or in-review invoices can be reconciled")
 
 
 def ensure_extraction_editable(invoice) -> None:
     """Extraction data is editable only in the initial human-confirmation state."""
     from app.models import InvoiceStatus
-    if invoice.status != InvoiceStatus.EXTRACTION_REVIEW:
+    if invoice.status != InvoiceStatus.extraction_review:
         raise ValueError("Invoice extraction can only be confirmed while awaiting extraction review")
