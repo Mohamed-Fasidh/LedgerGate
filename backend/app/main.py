@@ -169,32 +169,60 @@ async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Head
     # Content checks are defense-in-depth, not a substitute for malware scanning.
     if suffix==".pdf" and not content.startswith(b"%PDF"): raise HTTPException(415,"File content is not a valid PDF")
     if suffix==".txt":
-        if b"\x00" in content: raise HTTPException(415,"Text file contains binary data")
+        if b"\\x00" in content: raise HTTPException(415,"Text file contains binary data")
         try: content.decode("utf-8-sig",errors="strict")
         except UnicodeDecodeError: raise HTTPException(415,"Text files must use UTF-8 encoding")
     content_hash=hashlib.sha256(content).hexdigest()
+    original_name=Path(file.filename or "document").name
     idem,replay=begin_idempotent_request(
         db,user,idempotency_key,"invoice.upload",
-        {"file_name":Path(file.filename or "document").name,"suffix":suffix,"sha256":content_hash,"bytes":len(content)},
+        {"file_name":original_name,"suffix":suffix,"sha256":content_hash,"bytes":len(content)},
     )
     if replay is not None: return replay
-    upload_dir=Path(settings.upload_dir)/user.tenant_id
-    upload_dir.mkdir(parents=True,exist_ok=True,mode=0o700)
-    try: os.chmod(upload_dir,0o700)
-    except OSError: pass
-    safe_name=f"{uuid.uuid4().hex}{suffix}"; path=upload_dir/safe_name
-    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,"O_BINARY",0),0o600)
-    with os.fdopen(fd,"wb") as stored_file: stored_file.write(content)
-    try: extracted,fields=extract_file(str(path),suffix,settings.max_upload_pdf_pages)
+    # Extract from a short-lived private temp file; persisted storage uses an opaque object key.
+    temp_path=None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="ledgergate-extract-",suffix=suffix,delete=False) as temp:
+            temp.write(content)
+            temp_path=Path(temp.name)
+        extracted,fields=extract_file(str(temp_path),suffix,settings.max_upload_pdf_pages)
     except Exception as exc:
-        path.unlink(missing_ok=True); raise HTTPException(422,f"Document extraction failed: {type(exc).__name__}")
+        raise HTTPException(422,f"Document extraction failed: {type(exc).__name__}")
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+    try:
+        storage_key=save_document(content,user.tenant_id,suffix)
+    except Exception as exc:
+        raise HTTPException(503,f"Document storage unavailable: {type(exc).__name__}")
     candidate=fields.get("invoice_number") or f"UNCONFIRMED-{uuid.uuid4().hex[:10].upper()}"
-    obj=Invoice(tenant_id=user.tenant_id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.extraction_review,created_by_user_id=user.id,file_name=Path(file.filename or "document").name,file_path=str(path),extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
-    db.add(obj); db.flush(); record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":content_hash,"bytes":len(content)})
+    obj=Invoice(tenant_id=user.tenant_id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.extraction_review,created_by_user_id=user.id,file_name=original_name,file_path=storage_key,extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
+    db.add(obj); db.flush(); record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":content_hash,"bytes":len(content),"storage_backend":settings.storage_backend})
     response=invoice_view(obj)
     complete_idempotent_request(idem,response)
     db.commit(); db.refresh(obj)
     return response
+
+
+@app.get("/api/v1/invoices/{invoice_id}/document")
+def download_invoice_document(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    if not inv or not inv.file_path:
+        raise HTTPException(404,"Document not found")
+    if settings.storage_backend=="s3":
+        try:
+            url=create_download_url(inv.file_path,user.tenant_id)
+        except (FileNotFoundError,RuntimeError):
+            raise HTTPException(404,"Document not found")
+        except Exception:
+            raise HTTPException(503,"Document storage unavailable")
+        return RedirectResponse(url,status_code=307)
+    try:
+        path=local_document_path(inv.file_path,user.tenant_id)
+    except (FileNotFoundError,ValueError):
+        raise HTTPException(404,"Document not found")
+    return FileResponse(path,filename=inv.file_name or "invoice-document",media_type="application/pdf" if path.suffix==".pdf" else "text/plain")
+
 
 @app.post("/api/v1/invoices/{invoice_id}/confirm-extraction")
 def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
