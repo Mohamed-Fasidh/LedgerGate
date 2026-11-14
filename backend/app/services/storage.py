@@ -81,20 +81,19 @@ def local_document_path(key: str, tenant_id: str) -> Path:
     if not key.startswith(prefix):
         raise FileNotFoundError("Document not found")
     root = Path(settings.upload_dir).resolve()
-    tenant_dir = root / tenant_id
     candidate = root / key
-    # Reject symlinks at both tenant and file level; resolving first would hide
-    # whether the requested object itself was a symlink.
+    tenant_dir = root / tenant_id
+    # Reject symlinks before resolving so a tenant or object link cannot escape
+    # the private upload tree.
     if tenant_dir.is_symlink() or candidate.is_symlink():
         raise FileNotFoundError("Document not found")
-    # The tenant directory must resolve to itself, and the requested file
-    # must be a regular file directly inside that directory.
-    resolved_tenant_dir = tenant_dir.resolve()
-    resolved_parent = candidate.parent.resolve()
-    if resolved_parent != resolved_tenant_dir or not candidate.is_file():
+    try:
+        path = candidate.resolve(strict=True)
+    except (FileNotFoundError, OSError, RuntimeError):
+        raise FileNotFoundError("Document not found") from None
+    if root not in path.parents or not path.is_file():
         raise FileNotFoundError("Document not found")
-    return candidate
-
+    return path
 
 def create_download_url(key: str, tenant_id: str) -> str:
     """Create a short-lived URL only after the caller tenant-checks the invoice."""
