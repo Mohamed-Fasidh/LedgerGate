@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -13,8 +14,9 @@ def test_local_storage_round_trip_and_restrictive_permissions(tmp_path, monkeypa
 
     assert key.startswith("tenant-a/")
     assert storage.local_document_path(key, "tenant-a").read_bytes() == b"invoice text"
-    assert (tmp_path / "tenant-a").stat().st_mode & 0o777 == 0o700
-    assert storage.local_document_path(key, "tenant-a").stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert (tmp_path / "tenant-a").stat().st_mode & 0o777 == 0o700
+        assert storage.local_document_path(key, "tenant-a").stat().st_mode & 0o777 == 0o600
 
 
 def test_local_storage_rejects_cross_tenant_download(tmp_path, monkeypatch):
@@ -124,6 +126,39 @@ def test_delete_document_removes_s3_object(monkeypatch):
     storage.delete_document("tenant-a/document.txt", "tenant-a")
 
     assert calls == {"Bucket": "ledgergate-private", "Key": "tenant-a/document.txt"}
+
+
+def test_list_document_keys_ignores_non_generated_and_symlinked_local_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage.settings, "storage_backend", "local")
+    monkeypatch.setattr(storage.settings, "upload_dir", str(tmp_path))
+    generated = storage.save_document(b"invoice", "tenant-a", ".txt")
+    (tmp_path / "tenant-a" / "notes.txt").write_text("not an application object")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+    outside.write_text("outside")
+    (tmp_path / "tenant-a" / ("f" * 32 + ".pdf")).symlink_to(outside)
+
+    assert storage.list_document_keys() == {generated}
+
+
+def test_list_document_keys_lists_only_generated_s3_keys(monkeypatch):
+    class FakePaginator:
+        def paginate(self, **kwargs):
+            assert kwargs == {"Bucket": "ledgergate-private"}
+            return [{"Contents": [
+                {"Key": "tenant-a/" + "a" * 32 + ".pdf"},
+                {"Key": "tenant-a/not-ledgergate.txt"},
+            ]}]
+
+    class FakeS3:
+        def get_paginator(self, name):
+            assert name == "list_objects_v2"
+            return FakePaginator()
+
+    monkeypatch.setattr(storage.settings, "storage_backend", "s3")
+    monkeypatch.setattr(storage.settings, "s3_bucket", "ledgergate-private")
+    monkeypatch.setattr(storage, "_s3_client", lambda: FakeS3())
+
+    assert storage.list_document_keys() == {"tenant-a/" + "a" * 32 + ".pdf"}
 
 
 

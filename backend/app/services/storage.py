@@ -14,6 +14,7 @@ from app.config import settings
 
 
 _TENANT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_DOCUMENT_KEY = re.compile(r"^[A-Za-z0-9_-]{1,64}/[0-9a-f]{32}\.(?:pdf|txt)$")
 
 
 def _tenant_prefix(tenant_id: str) -> str:
@@ -121,3 +122,32 @@ def delete_document(key: str, tenant_id: str) -> None:
         return
     path = local_document_path(key, tenant_id)
     path.unlink(missing_ok=True)
+
+
+def list_document_keys() -> set[str]:
+    """Return only LedgerGate-generated document keys from the configured store."""
+    if settings.storage_backend == "s3":
+        if not settings.s3_bucket:
+            raise RuntimeError("S3_BUCKET is required for S3 storage")
+        keys = set()
+        for page in _s3_client().get_paginator("list_objects_v2").paginate(Bucket=settings.s3_bucket):
+            for item in page.get("Contents", []):
+                key = item.get("Key", "")
+                if _DOCUMENT_KEY.fullmatch(key):
+                    keys.add(key)
+        return keys
+
+    root = Path(settings.upload_dir).resolve()
+    if not root.exists():
+        return set()
+    keys = set()
+    for path in root.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            key = path.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if _DOCUMENT_KEY.fullmatch(key):
+            keys.add(key)
+    return keys

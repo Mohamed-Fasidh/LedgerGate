@@ -45,7 +45,18 @@ The API validates the file extension, size, basic PDF signature or UTF-8 text co
 
 Production uploads are streamed to a ClamAV `clamd` service using its authenticated-network `INSTREAM` protocol before text extraction or storage. Set `MALWARE_SCAN_HOST`, `MALWARE_SCAN_PORT` (default `3310`), and `MALWARE_SCAN_TIMEOUT_SECONDS` (default `30`). LedgerGate fails closed: it rejects infected uploads and returns service-unavailable when the scanner cannot be contacted or supplies an invalid response. Run the scanner on a private network segment; this protocol has no application-layer authentication or TLS.
 
-Content disarm/reconstruction, parser sandboxing, advanced file signature detection, and automated orphan reconciliation are not implemented. Do not expose invoice upload to untrusted public traffic until those controls are deployed.
+Content disarm/reconstruction, parser sandboxing, and advanced file signature detection are not implemented. Do not expose invoice upload to untrusted public traffic until those controls are deployed.
+
+## Orphan reconciliation
+
+Run the maintenance inventory on a schedule using a database role that can read every invoice record (the API runtime role is deliberately tenant-restricted):
+
+```bash
+cd backend
+python -m app.reconcile_storage
+```
+
+It is dry-run only by default and reports unreferenced stored objects plus database references whose objects are missing. Deletion requires both `--delete-orphans` and `--confirm-delete`; only LedgerGate-generated UUID keys are considered, and the command never follows local-storage symlinks. Review a dry-run result and investigate missing objects before using deletion in production.
 
 ## Validation and release checks
 
