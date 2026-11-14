@@ -10,7 +10,7 @@ from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, Polic
 from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn
 from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
 from app.audit import record_event, verify_event_chain
-from app.financial_controls import ensure_independent_decision
+from app.financial_controls import ensure_independent_decision, required_invoice_approvals
 from app.idempotency import begin_idempotent_request, complete_idempotent_request
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
@@ -189,7 +189,7 @@ def approve(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempoten
     if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before approval")
     prior=db.query(InvoiceApproval).filter(InvoiceApproval.tenant_id==user.tenant_id,InvoiceApproval.invoice_id==inv.id,InvoiceApproval.reviewer_user_id==user.id).first()
     if prior: raise HTTPException(409,"This reviewer has already approved the invoice")
-    required=2 if inv.currency.upper()=="INR" and float(inv.amount or 0)>=settings.dual_approval_threshold_inr else 1
+    required=required_invoice_approvals(inv.amount,inv.currency,settings.dual_approval_threshold_inr)
     approval=InvoiceApproval(tenant_id=user.tenant_id,invoice_id=inv.id,reviewer_user_id=user.id)
     db.add(approval)
     db.flush()
