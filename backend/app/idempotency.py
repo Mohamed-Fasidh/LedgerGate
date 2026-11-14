@@ -26,7 +26,14 @@ def _request_hash(operation: str, payload: dict) -> str:
         ensure_ascii=False,
         default=str,
     )
-    # Key the fingerprint so low-entropy secrets (for example, a password in a\n    # user-provisioning request) cannot be guessed from a database dump.\n    return hmac.new(\n        settings.jwt_secret_key.encode("utf-8"),\n        canonical.encode("utf-8"),\n        hashlib.sha256,\n    ).hexdigest()\n
+    # Key the fingerprint so low-entropy secrets (for example, a password in a
+    # user-provisioning request) cannot be guessed from a database dump.
+    return hmac.new(
+        settings.jwt_secret_key.encode("utf-8"),
+        canonical.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
 
 def begin_idempotent_request(db, user, key: str | None, operation: str, payload: dict):
     """Return (record, replay_body); serialize same-key requests on PostgreSQL.
