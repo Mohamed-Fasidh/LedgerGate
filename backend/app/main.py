@@ -147,7 +147,7 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
     except Exception as exc:
         path.unlink(missing_ok=True); raise HTTPException(422,f"Document extraction failed: {type(exc).__name__}")
     candidate=fields.get("invoice_number") or f"UNCONFIRMED-{uuid.uuid4().hex[:10].upper()}"
-    obj=Invoice(tenant_id=user.tenant_id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.EXTRACTION_REVIEW,created_by_user_id=user.id,file_name=Path(file.filename or "document").name,file_path=str(path),extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
+    obj=Invoice(tenant_id=user.tenant_id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.extraction_review,created_by_user_id=user.id,file_name=Path(file.filename or "document").name,file_path=str(path),extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
     db.add(obj); db.flush(); record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":hashlib.sha256(content).hexdigest(),"bytes":len(content)}); db.commit(); db.refresh(obj)
     return invoice_view(obj)
 
@@ -160,7 +160,8 @@ def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,db:Session=Dep
     if payload.supplier_id and not db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Supplier not found")
     if payload.purchase_order_id and not db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Purchase order not found")
     for k,v in payload.model_dump().items(): setattr(inv,k,v)
-    inv.status=InvoiceStatus.RECEIVED
+    inv.status=InvoiceStatus.received
+    snapshot_approval_policy(db,inv,user.tenant_id,user.id,settings.dual_approval_threshold_inr)
     record_event(db,user,"invoice",inv.id,"extraction_confirmed",{"invoice_number":inv.invoice_number,"amount":payload.amount})
     db.commit(); db.refresh(inv); return invoice_view(inv)
 
@@ -187,7 +188,7 @@ def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_cu
     policies=retrieve_policy(db,user.tenant_id,f"invoice {inv.invoice_number} approval amount discrepancy duplicate")
     evidence=result.evidence+[{"source":"policy_document","reference":p["title"],"snippet":p["snippet"],"score":p["score"]} for p in policies]
     decision="HUMAN_REVIEW" if result.state.value=="human_review" or duplicate else "MATCHED"
-    inv.status=InvoiceStatus.REVIEW_REQUIRED
+    inv.status=InvoiceStatus.review_required
     inv.reconciliation={"decision":decision,"findings":result.findings,"evidence":evidence,"trace":result.trace,"policy_matches":policies}
     record_event(db,user,"invoice",inv.id,"reconciled",{"decision":decision,"finding_count":len(result.findings)})
     db.commit()
@@ -199,7 +200,7 @@ def approve(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempoten
     if replay is not None: return replay
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
-    if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
+    if inv.status not in (InvoiceStatus.review_required,InvoiceStatus.processing): raise HTTPException(409,"Invoice is not awaiting a decision")
     try: ensure_independent_decision(inv,user.id,"approve")
     except ValueError as exc: raise HTTPException(409,str(exc))
     if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before approval")
@@ -212,7 +213,7 @@ def approve(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempoten
     db.flush()
     approval_count=db.query(InvoiceApproval).filter(InvoiceApproval.tenant_id==user.tenant_id,InvoiceApproval.invoice_id==inv.id).count()
     if approval_count>=required:
-        inv.status=InvoiceStatus.APPROVED
+        inv.status=InvoiceStatus.approved
         inv.approved_by_user_id=user.id
         action="human_approved"
         message="Required human approval(s) recorded. No payment was initiated."
@@ -238,10 +239,10 @@ def reject(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempotenc
     if replay is not None: return replay
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
-    if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Only reconciled invoices awaiting a decision can be rejected")
+    if inv.status not in (InvoiceStatus.review_required,InvoiceStatus.processing): raise HTTPException(409,"Only reconciled invoices awaiting a decision can be rejected")
     try: ensure_independent_decision(inv,user.id,"reject")
     except ValueError as exc: raise HTTPException(409,str(exc))
-    inv.status=InvoiceStatus.REJECTED
+    inv.status=InvoiceStatus.rejected
     inv.rejected_by_user_id=user.id
     record_event(db,user,"invoice",inv.id,"human_rejected",{})
     response={"id":inv.id,"status":inv.status.value}
