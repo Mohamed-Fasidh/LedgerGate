@@ -54,7 +54,13 @@ def login_email_key(email: str) -> str:
     return hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
 
 
+def _lock_login_key(db: Session, key: str) -> None:
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:login_key))"), {"login_key": key})
+
+
 def login_is_locked(db: Session, email: str) -> bool:
+    _lock_login_key(db, login_email_key(email))
     row = db.query(LoginThrottle).filter(LoginThrottle.email_key == login_email_key(email)).with_for_update().first()
     return bool(row and row.locked_until and _utc(row.locked_until) > datetime.now(timezone.utc))
 
@@ -62,6 +68,7 @@ def login_is_locked(db: Session, email: str) -> bool:
 def record_login_failure(db: Session, email: str) -> None:
     now = datetime.now(timezone.utc)
     key = login_email_key(email)
+    _lock_login_key(db, key)
     row = db.query(LoginThrottle).filter(LoginThrottle.email_key == key).with_for_update().first()
     if row is None:
         row = LoginThrottle(email_key=key, failed_attempts=0, window_started_at=now, updated_at=now)
@@ -76,6 +83,7 @@ def record_login_failure(db: Session, email: str) -> None:
 
 
 def clear_login_failures(db: Session, email: str) -> None:
+    _lock_login_key(db, login_email_key(email))
     row = db.query(LoginThrottle).filter(LoginThrottle.email_key == login_email_key(email)).with_for_update().first()
     if row:
         now = datetime.now(timezone.utc)
