@@ -5,6 +5,7 @@ from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Hea
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
+from jose import jwt
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from app.config import settings
@@ -97,6 +98,41 @@ def refresh_auth_tokens(payload:RefreshTokenIn,db:Session=Depends(get_db)):
         db.rollback()
         raise HTTPException(401,"Invalid or expired refresh token")
     return {"access_token":access_token,"refresh_token":refresh_token,"token_type":"bearer"}
+
+@app.post("/api/v1/auth/logout")
+def list_auth_sessions(token:str=Depends(oauth2_scheme),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    claims=jwt.decode(token,settings.jwt_secret_key,algorithms=["HS256"])
+    current_jti=claims["jti"]
+    sessions=db.query(AuthSession).filter(
+        AuthSession.user_id==user.id,
+        AuthSession.tenant_id==user.tenant_id,
+        AuthSession.revoked_at.is_(None),
+        AuthSession.expires_at>__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+    ).order_by(AuthSession.created_at.desc()).all()
+    return [{
+        "id":session.id,
+        "created_at":session.created_at.isoformat(),
+        "expires_at":session.expires_at.isoformat(),
+        "current":session.jti==current_jti,
+    } for session in sessions]
+
+
+@app.delete("/api/v1/auth/sessions/{session_id}")
+def revoke_auth_session(session_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    session=db.query(AuthSession).filter(
+        AuthSession.id==session_id,
+        AuthSession.user_id==user.id,
+        AuthSession.tenant_id==user.tenant_id,
+        AuthSession.revoked_at.is_(None),
+    ).with_for_update().first()
+    if not session:
+        raise HTTPException(404,"Active session not found")
+    session.revoked_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+    session.refresh_token_hash=None
+    session.refresh_expires_at=None
+    db.commit()
+    return {"revoked":True}
+
 
 @app.post("/api/v1/auth/logout")
 def logout_current_session(token:str=Depends(oauth2_scheme),db:Session=Depends(get_db),user:User=Depends(get_current_user)):

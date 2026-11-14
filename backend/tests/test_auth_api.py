@@ -294,3 +294,69 @@ def test_mfa_disable_invalid_password_is_throttled(auth_client, monkeypatch):
         data={"password": "LedgerGate-api-test-2026", "code": security.totp_code(secret)},
     )
     assert locked.status_code == 429
+
+
+
+def test_user_can_list_sessions_and_revoke_another_session(auth_client):
+    registered = register_account(auth_client, "sessions-api@example.com")
+    assert registered.status_code == 200
+    first_tokens = registered.json()
+    first_headers = {"Authorization": f"Bearer {first_tokens['access_token']}"}
+
+    login = auth_client.post(
+        "/api/v1/auth/token",
+        data={
+            "username": "sessions-api@example.com",
+            "password": "LedgerGate-api-test-2026",
+        },
+    )
+    assert login.status_code == 200
+    second_tokens = login.json()
+
+    listing = auth_client.get("/api/v1/auth/sessions", headers=first_headers)
+    assert listing.status_code == 200
+    sessions = listing.json()
+    assert len(sessions) == 2
+    current = [item for item in sessions if item["current"]]
+    other = [item for item in sessions if not item["current"]]
+    assert len(current) == 1
+    assert len(other) == 1
+
+    revoked = auth_client.delete(
+        f"/api/v1/auth/sessions/{other[0]['id']}",
+        headers=first_headers,
+    )
+    assert revoked.status_code == 200
+    assert revoked.json() == {"revoked": True}
+
+    second_headers = {"Authorization": f"Bearer {second_tokens['access_token']}"}
+    denied = auth_client.get("/api/v1/me", headers=second_headers)
+    assert denied.status_code == 401
+
+    refreshed = auth_client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_token": second_tokens["refresh_token"]},
+    )
+    assert refreshed.status_code == 401
+
+
+def test_session_revocation_cannot_target_another_users_session(auth_client):
+    first = register_account(auth_client, "session-owner@example.com")
+    second = register_account(auth_client, "session-other@example.com")
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    first_headers = {"Authorization": f"Bearer {first.json()['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second.json()['access_token']}"}
+    other_sessions = auth_client.get("/api/v1/auth/sessions", headers=second_headers)
+    assert other_sessions.status_code == 200
+    other_id = other_sessions.json()[0]["id"]
+
+    response = auth_client.delete(
+        f"/api/v1/auth/sessions/{other_id}",
+        headers=first_headers,
+    )
+    assert response.status_code == 404
+
+    still_valid = auth_client.get("/api/v1/me", headers=second_headers)
+    assert still_valid.status_code == 200
