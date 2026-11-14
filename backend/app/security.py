@@ -179,3 +179,53 @@ def verify_totp(secret: str, code: str, timestamp: int | None = None) -> bool:
 def totp_provisioning_uri(secret: str, email: str, issuer: str = "LedgerGate") -> str:
     label = quote(f"{issuer}:{email}")
     return f"otpauth://totp/{label}?secret={secret}&issuer={quote(issuer)}&algorithm=SHA1&digits=6&period=30"
+
+
+# Opaque, one-time refresh tokens are stored only as SHA-256 hashes.
+import secrets
+
+
+def issue_refresh_token(db: Session, user: User) -> str:
+    token = secrets.token_urlsafe(48)
+    token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
+    session = (
+        db.query(AuthSession)
+        .filter(AuthSession.user_id == user.id, AuthSession.tenant_id == user.tenant_id,
+                AuthSession.revoked_at.is_(None), AuthSession.refresh_token_hash.is_(None))
+        .order_by(AuthSession.id.desc())
+        .with_for_update()
+        .first()
+    )
+    if session is None:
+        raise RuntimeError("An active access session is required")
+    session.refresh_token_hash = token_hash
+    session.refresh_expires_at = datetime.now(timezone.utc) + timedelta(days=14)
+    db.flush()
+    return token
+
+
+def rotate_refresh_token(db: Session, raw_token: str) -> tuple[User, str, str]:
+    if not isinstance(raw_token, str) or len(raw_token) < 32 or len(raw_token) > 256:
+        raise ValueError("Invalid refresh token")
+    token_hash = hashlib.sha256(raw_token.encode("ascii", "ignore")).hexdigest()
+    session = (
+        db.query(AuthSession)
+        .filter(AuthSession.refresh_token_hash == token_hash)
+        .with_for_update()
+        .first()
+    )
+    now = datetime.now(timezone.utc)
+    if (session is None or session.revoked_at is not None or session.refresh_expires_at is None
+            or _utc(session.refresh_expires_at) <= now):
+        raise ValueError("Invalid refresh token")
+    # One-time use: invalidate the old refresh and its associated access token.
+    session.revoked_at = now
+    session.refresh_token_hash = None
+    user = db.query(User).filter(
+        User.id == session.user_id, User.tenant_id == session.tenant_id, User.is_active.is_(True)
+    ).first()
+    if user is None:
+        raise ValueError("Invalid refresh token")
+    access = create_access_token(user, db)
+    refresh = issue_refresh_token(db, user)
+    return user, access, refresh

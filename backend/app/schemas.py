@@ -69,3 +69,7 @@ class ApprovalPolicyIn(BaseModel):
         if normalized != "INR":
             raise ValueError("Only INR approval policies are supported until FX policy support is implemented")
         return normalized
+
+
+class RefreshTokenIn(BaseModel):
+    refresh_token: str = Field(min_length=32, max_length=256)

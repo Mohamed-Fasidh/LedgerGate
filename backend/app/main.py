@@ -10,8 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.database import Base, engine, get_db, set_tenant_context
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, IdempotencyRecord, InvoiceApproval, ApprovalPolicy, AuthSession, Role, InvoiceStatus
-from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn
-from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles, login_is_locked, record_login_failure, clear_login_failures, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, verify_totp, totp_provisioning_uri
+from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, RefreshTokenIn
+from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles, login_is_locked, record_login_failure, clear_login_failures, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, verify_totp, totp_provisioning_uri, issue_refresh_token, rotate_refresh_token
 from app.audit import record_event, verify_event_chain
 from app.financial_controls import ensure_independent_decision, required_invoice_approvals, ensure_reviewable_status, ensure_extraction_editable, snapshot_approval_policy, create_approval_policy_version
 from app.idempotency import begin_idempotent_request, complete_idempotent_request
@@ -55,8 +55,9 @@ def register(payload:RegisterIn,db:Session=Depends(get_db)):
     except IntegrityError: db.rollback(); raise HTTPException(409,"Account already exists")
     db.refresh(user)
     token=create_access_token(user,db)
+    refresh_token=issue_refresh_token(db,user)
     db.commit()
-    return {"access_token":token}
+    return {"access_token":token,"refresh_token":refresh_token}
 
 @app.post("/api/v1/auth/token",response_model=TokenOut)
 def login(username:str=Form(...),password:str=Form(...),totp_code:str|None=Form(None),db:Session=Depends(get_db)):
@@ -82,9 +83,20 @@ def login(username:str=Form(...),password:str=Form(...),totp_code:str|None=Form(
     set_tenant_context(db,user.tenant_id)
     clear_login_failures(db,email)
     token=create_access_token(user,db)
+    refresh_token=issue_refresh_token(db,user)
     db.commit()
-    return {"access_token":token}
+    return {"access_token":token,"refresh_token":refresh_token}
 
+
+@app.post("/api/v1/auth/refresh")
+def refresh_auth_tokens(payload:RefreshTokenIn,db:Session=Depends(get_db)):
+    try:
+        user,access_token,refresh_token=rotate_refresh_token(db,payload.refresh_token)
+        db.commit()
+    except ValueError:
+        db.rollback()
+        raise HTTPException(401,"Invalid or expired refresh token")
+    return {"access_token":access_token,"refresh_token":refresh_token,"token_type":"bearer"}
 
 
 @app.post("/api/v1/auth/mfa/enroll")
