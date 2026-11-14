@@ -91,3 +91,37 @@ def test_short_idempotency_key_is_rejected(db, user):
     with pytest.raises(HTTPException) as exc:
         begin_idempotent_request(db, user, "short", "invoice.approve", {"invoice_id": 42})
     assert exc.value.status_code == 400
+
+
+def test_upload_idempotency_binds_file_name_and_content_hash(db, user):
+    import hashlib
+
+    first_content = b"%PDF-1.7 invoice A"
+    first_payload = {
+        "file_name": "invoice.pdf",
+        "suffix": ".pdf",
+        "sha256": hashlib.sha256(first_content).hexdigest(),
+        "bytes": len(first_content),
+    }
+    record, replay = begin_idempotent_request(
+        db, user, "upload-key-001", "invoice.upload", first_payload
+    )
+    assert replay is None
+    response = {"id": 123, "status": "extraction_review"}
+    complete_idempotent_request(record, response)
+    db.commit()
+
+    _, replay = begin_idempotent_request(
+        db, user, "upload-key-001", "invoice.upload", first_payload
+    )
+    assert replay == response
+
+    changed_payload = {
+        **first_payload,
+        "sha256": hashlib.sha256(b"%PDF-1.7 invoice B").hexdigest(),
+    }
+    with pytest.raises(HTTPException) as exc:
+        begin_idempotent_request(
+            db, user, "upload-key-001", "invoice.upload", changed_payload
+        )
+    assert exc.value.status_code == 409
