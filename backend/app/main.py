@@ -99,7 +99,7 @@ def refresh_auth_tokens(payload:RefreshTokenIn,db:Session=Depends(get_db)):
         raise HTTPException(401,"Invalid or expired refresh token")
     return {"access_token":access_token,"refresh_token":refresh_token,"token_type":"bearer"}
 
-@app.post("/api/v1/auth/logout")
+@app.get("/api/v1/auth/sessions")
 def list_auth_sessions(token:str=Depends(oauth2_scheme),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     claims=jwt.decode(token,settings.jwt_secret_key,algorithms=["HS256"])
     current_jti=claims["jti"]
