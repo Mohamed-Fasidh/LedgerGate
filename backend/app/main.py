@@ -35,7 +35,9 @@ def register(payload:RegisterIn,db:Session=Depends(get_db)):
     try: db.commit()
     except IntegrityError: db.rollback(); raise HTTPException(409,"Account already exists")
     db.refresh(user)
-    token=create_access_token(user,db)\n    db.commit()\n    return {"access_token":token}
+    token=create_access_token(user,db)
+    db.commit()
+    return {"access_token":token}
 
 @app.post("/api/v1/auth/token",response_model=TokenOut)
 def login(username:str=Form(...),password:str=Form(...),db:Session=Depends(get_db)):
