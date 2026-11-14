@@ -29,6 +29,8 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255))
     role: Mapped[Role] = mapped_column(Enum(Role), default=Role.analyst)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    mfa_secret_encrypted: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     __table_args__ = (UniqueConstraint("email", name="uq_user_email"),)
 

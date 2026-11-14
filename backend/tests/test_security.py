@@ -149,3 +149,35 @@ def test_revoked_access_token_is_rejected(db_session):
     with pytest.raises(HTTPException) as exc:
         get_current_user(token=token, db=db_session)
     assert exc.value.status_code == 401
+
+
+def test_totp_matches_rfc6238_six_digit_vector():
+    from app.security import totp_code, verify_totp
+    secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    assert totp_code(secret, 59) == "287082"
+    assert verify_totp(secret, "287082", 59)
+    assert not verify_totp(secret, "000000", 59)
+
+
+def test_totp_rejects_malformed_codes():
+    from app.security import verify_totp
+    secret = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    assert not verify_totp(secret, "12345", 59)
+    assert not verify_totp(secret, "12A456", 59)
+
+
+def test_totp_secret_encryption_round_trip(monkeypatch):
+    from app import security
+    monkeypatch.setattr(security.settings, "app_encryption_key", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+    secret = security.generate_totp_secret()
+    encrypted = security.encrypt_totp_secret(secret)
+    assert encrypted != secret
+    assert security.decrypt_totp_secret(encrypted) == secret
+
+
+def test_totp_provisioning_uri_contains_issuer_and_secret():
+    from app.security import totp_provisioning_uri
+    uri = totp_provisioning_uri("ABC123", "user@example.com")
+    assert uri.startswith("otpauth://totp/")
+    assert "secret=ABC123" in uri
+    assert "issuer=LedgerGate" in uri

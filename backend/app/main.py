@@ -11,7 +11,7 @@ from app.config import settings
 from app.database import Base, engine, get_db, set_tenant_context
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, IdempotencyRecord, InvoiceApproval, ApprovalPolicy, AuthSession, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn
-from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles, login_is_locked, record_login_failure, clear_login_failures
+from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles, login_is_locked, record_login_failure, clear_login_failures, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, verify_totp, totp_provisioning_uri
 from app.audit import record_event, verify_event_chain
 from app.financial_controls import ensure_independent_decision, required_invoice_approvals, ensure_reviewable_status, ensure_extraction_editable, snapshot_approval_policy, create_approval_policy_version
 from app.idempotency import begin_idempotent_request, complete_idempotent_request
@@ -59,7 +59,7 @@ def register(payload:RegisterIn,db:Session=Depends(get_db)):
     return {"access_token":token}
 
 @app.post("/api/v1/auth/token",response_model=TokenOut)
-def login(username:str=Form(...),password:str=Form(...),db:Session=Depends(get_db)):
+def login(username:str=Form(...),password:str=Form(...),totp_code:str|None=Form(None),db:Session=Depends(get_db)):
     email=username.strip().lower()
     if login_is_locked(db,email):
         raise HTTPException(429,"Too many failed login attempts. Try again in 15 minutes.")
@@ -68,11 +68,73 @@ def login(username:str=Form(...),password:str=Form(...),db:Session=Depends(get_d
         record_login_failure(db,email)
         db.commit()
         raise HTTPException(401,"Incorrect email or password")
+    if user.mfa_enabled:
+        try:
+            valid_mfa = bool(user.mfa_secret_encrypted and totp_code and verify_totp(decrypt_totp_secret(user.mfa_secret_encrypted), totp_code))
+        except (RuntimeError, ValueError):
+            valid_mfa = False
+        if not valid_mfa:
+            record_login_failure(db,email)
+            db.commit()
+            raise HTTPException(401,"Incorrect email or password or MFA code")
+    elif totp_code:
+        raise HTTPException(400,"MFA is not enabled for this account")
     set_tenant_context(db,user.tenant_id)
     clear_login_failures(db,email)
     token=create_access_token(user,db)
     db.commit()
     return {"access_token":token}
+
+
+
+@app.post("/api/v1/auth/mfa/enroll")
+def enroll_mfa(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    if user.mfa_enabled:
+        raise HTTPException(409,"MFA is already enabled")
+    try:
+        secret=generate_totp_secret()
+        user.mfa_secret_encrypted=encrypt_totp_secret(secret)
+    except RuntimeError:
+        raise HTTPException(503,"MFA encryption is not configured")
+    db.commit()
+    return {"secret":secret,"provisioning_uri":totp_provisioning_uri(secret,user.email),"message":"Add this account to an authenticator app, then verify the current code to enable MFA."}
+
+
+@app.post("/api/v1/auth/mfa/verify-enrollment")
+def verify_mfa_enrollment(code:str=Form(...),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    if user.mfa_enabled:
+        raise HTTPException(409,"MFA is already enabled")
+    if not user.mfa_secret_encrypted:
+        raise HTTPException(409,"Start MFA enrollment first")
+    try:
+        valid=verify_totp(decrypt_totp_secret(user.mfa_secret_encrypted),code)
+    except (RuntimeError,ValueError):
+        valid=False
+    if not valid:
+        raise HTTPException(400,"Invalid authenticator code")
+    user.mfa_enabled=True
+    record_event(db,user,"user",str(user.id),"mfa_enabled",{})
+    db.commit()
+    return {"mfa_enabled":True}
+
+
+@app.post("/api/v1/auth/mfa/disable")
+def disable_mfa(password:str=Form(...),code:str=Form(...),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    if not user.mfa_enabled or not user.mfa_secret_encrypted:
+        raise HTTPException(409,"MFA is not enabled")
+    if not verify_password(password,user.hashed_password):
+        raise HTTPException(401,"Invalid credentials")
+    try:
+        valid=verify_totp(decrypt_totp_secret(user.mfa_secret_encrypted),code)
+    except (RuntimeError,ValueError):
+        valid=False
+    if not valid:
+        raise HTTPException(400,"Invalid authenticator code")
+    user.mfa_enabled=False
+    user.mfa_secret_encrypted=None
+    record_event(db,user,"user",str(user.id),"mfa_disabled",{})
+    db.commit()
+    return {"mfa_enabled":False}
 
 
 @app.post("/api/v1/auth/logout-all")

@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "sqlite:///./ledgergate.db"
     jwt_secret_key: str = "unsafe-development-secret-change-this"
+    app_encryption_key: str = ""
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     cors_origins: str = "http://localhost:3000"
@@ -78,6 +79,13 @@ if settings.app_env.lower() == "production":
         raise RuntimeError("Production S3_ENDPOINT_URL must use HTTPS")
     if settings.jwt_secret_key == "unsafe-development-secret-change-this" or len(settings.jwt_secret_key.encode("utf-8")) < 32:
         raise RuntimeError("Production requires a unique JWT_SECRET_KEY of at least 32 bytes")
+    if len(settings.app_encryption_key) != 44:
+        raise RuntimeError("Production requires APP_ENCRYPTION_KEY as a generated Fernet key")
+    try:
+        from cryptography.fernet import Fernet
+        Fernet(settings.app_encryption_key.encode("ascii"))
+    except Exception as exc:
+        raise RuntimeError("APP_ENCRYPTION_KEY must be a valid Fernet key") from exc
     if settings.database_url.startswith("sqlite"):
         raise RuntimeError("Production requires PostgreSQL; SQLite is development-only")
     if not settings.database_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg://")):

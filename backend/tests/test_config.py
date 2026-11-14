@@ -32,6 +32,7 @@ def valid_s3_env(**overrides):
         "S3_BUCKET": "ledgergate-private",
         "S3_REGION": "ap-south-1",
         "JWT_SECRET_KEY": "a-production-secret-with-at-least-32-bytes",
+        "APP_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
         "DATABASE_URL": "postgresql+psycopg://ledgergate:secret@db:5432/ledgergate",
         "CORS_ORIGINS": "https://ledgergate.example.com",
         "MALWARE_SCAN_HOST": "clamav",

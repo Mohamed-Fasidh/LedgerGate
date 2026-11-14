@@ -123,3 +123,59 @@ def require_roles(*roles: str):
         return user
 
     return checker
+
+
+# TOTP MFA helpers (RFC 6238, SHA-1, 30-second steps).
+import base64
+import hmac
+import secrets
+import struct
+import time
+from urllib.parse import quote
+from cryptography.fernet import Fernet, InvalidToken
+
+
+def _mfa_fernet() -> Fernet:
+    if not settings.app_encryption_key:
+        raise RuntimeError("MFA encryption is not configured")
+    try:
+        return Fernet(settings.app_encryption_key.encode("ascii"))
+    except (ValueError, UnicodeEncodeError) as exc:
+        raise RuntimeError("MFA encryption is not configured correctly") from exc
+
+
+def generate_totp_secret() -> str:
+    return base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
+
+
+def encrypt_totp_secret(secret: str) -> str:
+    return _mfa_fernet().encrypt(secret.encode("ascii")).decode("ascii")
+
+
+def decrypt_totp_secret(encrypted: str) -> str:
+    try:
+        return _mfa_fernet().decrypt(encrypted.encode("ascii")).decode("ascii")
+    except (InvalidToken, ValueError, UnicodeError) as exc:
+        raise ValueError("Stored MFA secret cannot be decrypted") from exc
+
+
+def totp_code(secret: str, timestamp: int | None = None) -> str:
+    counter = int((time.time() if timestamp is None else timestamp) // 30)
+    padded = secret.upper() + "=" * ((8 - len(secret) % 8) % 8)
+    key = base64.b32decode(padded, casefold=True)
+    digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    binary = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF
+    return f"{binary % 1000000:06d}"
+
+
+def verify_totp(secret: str, code: str, timestamp: int | None = None) -> bool:
+    if not isinstance(code, str) or len(code) != 6 or not code.isdigit():
+        return False
+    now = int(time.time() if timestamp is None else timestamp)
+    return any(hmac.compare_digest(totp_code(secret, now + drift * 30), code) for drift in (-1, 0, 1))
+
+
+def totp_provisioning_uri(secret: str, email: str, issuer: str = "LedgerGate") -> str:
+    label = quote(f"{issuer}:{email}")
+    return f"otpauth://totp/{label}?secret={secret}&issuer={quote(issuer)}&algorithm=SHA1&digits=6&period=30"
