@@ -1,5 +1,6 @@
 import uuid, hashlib, os, tempfile
 from pathlib import Path
+import logging
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
@@ -21,6 +22,8 @@ from app.services.retrieval import retrieve_policy, retrieve_business_records
 from app.services.evaluation import run_evaluation
 from app.services.model_router import explain_findings, ModelUnavailable
 from app.services.memory import remember, recall
+
+logger = logging.getLogger(__name__)
 
 app=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
 app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type","Idempotency-Key"])
@@ -214,8 +217,13 @@ async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Head
         # fails so retries do not leave unreferenced private documents behind.
         try:
             delete_document(storage_key,user.tenant_id)
-        except Exception:
-            pass
+        except Exception as cleanup_error:
+            # Do not log object keys, tenant identifiers, or exception text:
+            # those may contain sensitive storage details.
+            logger.error(
+                "Invoice document cleanup failed after persistence error (error_type=%s)",
+                type(cleanup_error).__name__,
+            )
         raise HTTPException(500,"Invoice record could not be saved; document cleanup was attempted")
 
 

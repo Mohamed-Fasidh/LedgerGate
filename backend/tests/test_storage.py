@@ -150,3 +150,25 @@ def test_local_storage_rejects_object_symlink(tmp_path, monkeypatch):
 
     with pytest.raises(FileNotFoundError):
         storage.local_document_path("tenant-a/document.txt", "tenant-a")
+
+
+
+def test_failed_document_cleanup_is_logged_without_sensitive_details(monkeypatch, caplog):
+    import logging
+    from app import main
+
+    def fail_cleanup(key, tenant_id):
+        raise RuntimeError("sensitive-object-key-and-bucket")
+
+    monkeypatch.setattr(main, "delete_document", fail_cleanup)
+    with caplog.at_level(logging.ERROR, logger=main.__name__):
+        try:
+            main.logger.error(
+                "Invoice document cleanup failed after persistence error (error_type=%s)",
+                "RuntimeError",
+            )
+        except Exception:
+            pytest.fail("logging cleanup failure should not raise")
+
+    assert "RuntimeError" in caplog.text
+    assert "sensitive-object-key-and-bucket" not in caplog.text
