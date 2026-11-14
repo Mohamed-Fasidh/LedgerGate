@@ -9,6 +9,13 @@ from sqlalchemy import text
 from app.models import IdempotencyRecord
 
 
+def _as_utc(value: datetime) -> datetime:
+    """Normalize database timestamps; SQLite may drop timezone metadata."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _request_hash(operation: str, payload: dict) -> str:
     canonical = json.dumps(
         {"operation": operation, "payload": payload},
@@ -50,7 +57,7 @@ def begin_idempotent_request(db, user, key: str | None, operation: str, payload:
         .first()
     )
     now = datetime.now(timezone.utc)
-    if record and record.expires_at <= now:
+    if record and _as_utc(record.expires_at) <= now:
         db.delete(record)
         db.flush()
         record = None
