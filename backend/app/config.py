@@ -10,6 +10,14 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     cors_origins: str = "http://localhost:3000"
     upload_dir: str = "./uploads"
+    storage_backend: str = "local"
+    s3_bucket: str = ""
+    s3_region: str = "ap-south-1"
+    s3_endpoint_url: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    s3_force_path_style: bool = False
+    s3_presigned_url_expiry_seconds: int = 300
     max_upload_mb: int = 15
     max_upload_pdf_pages: int = 100
     dual_approval_threshold_inr: float = 100000.0
@@ -26,6 +34,15 @@ settings = Settings()
 if settings.access_token_expire_minutes < 5 or settings.access_token_expire_minutes > 60:
     raise RuntimeError("ACCESS_TOKEN_EXPIRE_MINUTES must be between 5 and 60")
 
+if settings.storage_backend not in {"local", "s3"}:
+    raise RuntimeError("STORAGE_BACKEND must be local or s3")
+
+if settings.s3_presigned_url_expiry_seconds < 60 or settings.s3_presigned_url_expiry_seconds > 900:
+    raise RuntimeError("S3_PRESIGNED_URL_EXPIRY_SECONDS must be between 60 and 900")
+
+if settings.storage_backend == "s3" and not settings.s3_bucket:
+    raise RuntimeError("S3_BUCKET is required when STORAGE_BACKEND=s3")
+
 if settings.max_upload_mb < 1 or settings.max_upload_mb > 50:
     raise RuntimeError("MAX_UPLOAD_MB must be between 1 and 50")
 
@@ -39,6 +56,8 @@ if settings.jwt_algorithm != "HS256":
     raise RuntimeError("Only HS256 is supported by this deployment configuration")
 
 if settings.app_env.lower() == "production":
+    if settings.storage_backend != "s3":
+        raise RuntimeError("Production requires private S3-compatible document storage")
     if settings.jwt_secret_key == "unsafe-development-secret-change-this" or len(settings.jwt_secret_key.encode("utf-8")) < 32:
         raise RuntimeError("Production requires a unique JWT_SECRET_KEY of at least 32 bytes")
     if settings.database_url.startswith("sqlite"):
