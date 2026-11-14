@@ -55,3 +55,17 @@ class ReconcileOut(BaseModel):
     findings: list[dict[str, Any]]
     evidence: list[dict[str, Any]]
     requires_human_review: bool
+
+
+class ApprovalPolicyIn(BaseModel):
+    currency: str = Field(default="INR", min_length=3, max_length=3)
+    threshold_amount: float = Field(gt=0, le=1000000000000)
+    required_approvals: int = Field(default=2, ge=1, le=5)
+
+    @field_validator("currency")
+    @classmethod
+    def only_supported_policy_currency(cls, value: str) -> str:
+        normalized = value.upper()
+        if normalized != "INR":
+            raise ValueError("Only INR approval policies are supported until FX policy support is implemented")
+        return normalized
