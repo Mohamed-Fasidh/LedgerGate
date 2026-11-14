@@ -6,7 +6,7 @@ Requests without a tenant context see no rows and cannot insert tenant rows.
 from alembic import op
 
 revision = "0002_tenant_rls"
-down_revision = "0001_initial"
+down_revision = "0002_expand_workflows"
 branch_labels = None
 depends_on = None
 
