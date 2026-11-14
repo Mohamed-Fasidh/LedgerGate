@@ -1,6 +1,12 @@
-"""Add one-time password-reset tokens."""
+"""Add one-time password-reset tokens.
+
+The initial baseline currently creates tables from current SQLAlchemy metadata.
+That means this table may already exist when this revision is reached. Keep
+this revision safe for both that baseline and explicitly migrated databases.
+"""
 from alembic import op
 import sqlalchemy as sa
+
 
 revision = "0011_password_reset_tokens"
 down_revision = "0010_refresh_token_rotation"
@@ -11,7 +17,9 @@ depends_on = None
 def upgrade():
     # 0001 creates current SQLAlchemy metadata for legacy installations, so a
     # fresh database can already contain this table before this revision runs.
-    if "password_reset_tokens" not in sa.inspect(op.get_bind()).get_table_names():
+    inspector = sa.inspect(op.get_bind())
+    tables = set(inspector.get_table_names())
+    if "password_reset_tokens" not in tables:
         op.create_table(
             "password_reset_tokens",
             sa.Column("id", sa.Integer(), primary_key=True),
@@ -22,10 +30,19 @@ def upgrade():
             sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         )
-        op.create_index("ix_password_reset_tokens_user_id", "password_reset_tokens", ["user_id"])
-        op.create_index("ix_password_reset_tokens_tenant_id", "password_reset_tokens", ["tenant_id"])
-        op.create_index("ix_password_reset_tokens_expires_at", "password_reset_tokens", ["expires_at"])
+    inspector = sa.inspect(op.get_bind())
+    indexes = {index["name"] for index in inspector.get_indexes("password_reset_tokens")}
+    expected_indexes = (
+        ("ix_password_reset_tokens_user_id", ["user_id"]),
+        ("ix_password_reset_tokens_tenant_id", ["tenant_id"]),
+        ("ix_password_reset_tokens_expires_at", ["expires_at"]),
+    )
+    for name, columns in expected_indexes:
+        if name not in indexes:
+            op.create_index(name, "password_reset_tokens", columns)
 
 
 def downgrade():
-    op.drop_table("password_reset_tokens")
+    inspector = sa.inspect(op.get_bind())
+    if "password_reset_tokens" in set(inspector.get_table_names()):
+        op.drop_table("password_reset_tokens")
