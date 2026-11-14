@@ -218,7 +218,11 @@ def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_ke
     db.commit(); db.refresh(inv); return response
 
 @app.post("/api/v1/invoices/{invoice_id}/reconcile",response_model=ReconcileOut)
-def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+def reconcile(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    idem,replay=begin_idempotent_request(
+        db,user,idempotency_key,"invoice.reconcile",{"invoice_id":invoice_id}
+    )
+    if replay is not None: return replay
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     try: ensure_reviewable_status(inv)
@@ -243,8 +247,10 @@ def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_cu
     inv.status=InvoiceStatus.review_required
     inv.reconciliation={"decision":decision,"findings":result.findings,"evidence":evidence,"trace":result.trace,"policy_matches":policies}
     record_event(db,user,"invoice",inv.id,"reconciled",{"decision":decision,"finding_count":len(result.findings)})
+    response={"invoice_id":inv.id,"status":inv.status.value,"decision":decision,"findings":result.findings,"evidence":evidence,"requires_human_review":decision=="HUMAN_REVIEW"}
+    complete_idempotent_request(idem,response)
     db.commit()
-    return {"invoice_id":inv.id,"status":inv.status.value,"decision":decision,"findings":result.findings,"evidence":evidence,"requires_human_review":decision=="HUMAN_REVIEW"}
+    return response
 
 @app.post("/api/v1/invoices/{invoice_id}/approve")
 def approve(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
