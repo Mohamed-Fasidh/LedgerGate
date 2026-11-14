@@ -36,6 +36,9 @@ def valid_s3_env(**overrides):
         "DATABASE_URL": "postgresql+psycopg://ledgergate:secret@db:5432/ledgergate",
         "CORS_ORIGINS": "https://ledgergate.example.com",
         "MALWARE_SCAN_HOST": "clamav",
+        "SMTP_HOST": "smtp.example.com",
+        "SMTP_FROM": "security@example.com",
+        "PASSWORD_RESET_URL_BASE": "https://ledgergate.example.com/reset-password",
     }
     env.update(overrides)
     return env

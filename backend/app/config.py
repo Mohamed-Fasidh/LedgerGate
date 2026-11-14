@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     malware_scan_host: str = ""
     malware_scan_port: int = 3310
     malware_scan_timeout_seconds: int = 30
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    password_reset_url_base: str = ""
     max_upload_mb: int = 15
     max_upload_pdf_pages: int = 100
     dual_approval_threshold_inr: float = 100000.0
@@ -50,6 +56,9 @@ if settings.malware_scan_port < 1 or settings.malware_scan_port > 65535:
 if settings.malware_scan_timeout_seconds < 1 or settings.malware_scan_timeout_seconds > 120:
     raise RuntimeError("MALWARE_SCAN_TIMEOUT_SECONDS must be between 1 and 120")
 
+if settings.smtp_port < 1 or settings.smtp_port > 65535:
+    raise RuntimeError("SMTP_PORT must be between 1 and 65535")
+
 if settings.storage_backend == "s3":
     if not settings.s3_bucket.strip():
         raise RuntimeError("S3_BUCKET is required when STORAGE_BACKEND=s3")
@@ -75,6 +84,10 @@ if settings.app_env.lower() == "production":
         raise RuntimeError("Production requires private S3-compatible document storage")
     if not settings.malware_scan_host.strip():
         raise RuntimeError("Production requires MALWARE_SCAN_HOST for fail-closed document scanning")
+    if not all((settings.smtp_host.strip(), settings.smtp_from.strip(), settings.password_reset_url_base.strip())):
+        raise RuntimeError("Production requires SMTP_HOST, SMTP_FROM, and PASSWORD_RESET_URL_BASE for account recovery")
+    if not settings.password_reset_url_base.startswith("https://"):
+        raise RuntimeError("PASSWORD_RESET_URL_BASE must use HTTPS in production")
     if settings.s3_endpoint_url and not settings.s3_endpoint_url.startswith("https://"):
         raise RuntimeError("Production S3_ENDPOINT_URL must use HTTPS")
     if settings.jwt_secret_key == "unsafe-development-secret-change-this" or len(settings.jwt_secret_key.encode("utf-8")) < 32:

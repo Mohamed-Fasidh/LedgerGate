@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
 import uuid
+import secrets
 
 from jose import jwt, JWTError
 from passlib.context import CryptContext
@@ -11,7 +12,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.database import get_db, set_tenant_context
-from app.models import User, AuthSession, LoginThrottle
+from app.models import User, AuthSession, LoginThrottle, PasswordResetToken
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
@@ -270,3 +271,50 @@ def revoke_current_session(db: Session, user: User, access_token: str) -> None:
     session.refresh_token_hash = None
     session.refresh_expires_at = None
     db.flush()
+
+
+def issue_password_reset_token(db: Session, user: User) -> str:
+    """Create a one-time 15-minute reset token and invalidate earlier tokens."""
+    now = datetime.now(timezone.utc)
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used_at.is_(None),
+    ).update({PasswordResetToken.used_at: now}, synchronize_session=False)
+    raw_token = secrets.token_urlsafe(32)
+    db.add(PasswordResetToken(
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+        expires_at=now + timedelta(minutes=15),
+    ))
+    return raw_token
+
+
+def reset_password_with_token(db: Session, raw_token: str, password: str) -> User:
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    reset = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash,
+        PasswordResetToken.used_at.is_(None),
+    ).with_for_update().first()
+    if reset is None or _utc(reset.expires_at) <= now:
+        raise ValueError("Invalid password reset token")
+    user = db.query(User).filter(
+        User.id == reset.user_id,
+        User.tenant_id == reset.tenant_id,
+        User.is_active.is_(True),
+    ).first()
+    if user is None:
+        raise ValueError("Invalid password reset token")
+    reset.used_at = now
+    user.hashed_password = hash_password(password)
+    db.query(AuthSession).filter(
+        AuthSession.user_id == user.id,
+        AuthSession.tenant_id == user.tenant_id,
+        AuthSession.revoked_at.is_(None),
+    ).update({
+        AuthSession.revoked_at: now,
+        AuthSession.refresh_token_hash: None,
+        AuthSession.refresh_expires_at: None,
+    }, synchronize_session=False)
+    return user

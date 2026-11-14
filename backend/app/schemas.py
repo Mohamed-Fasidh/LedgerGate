@@ -74,3 +74,19 @@ class ApprovalPolicyIn(BaseModel):
 
 class RefreshTokenIn(BaseModel):
     refresh_token: str = Field(min_length=32, max_length=256)
+
+
+class PasswordResetRequestIn(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmIn(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+    password: str = Field(min_length=12, max_length=72)
+
+    @field_validator("password")
+    @classmethod
+    def password_must_fit_bcrypt_bytes(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must not exceed 72 UTF-8 bytes")
+        return value

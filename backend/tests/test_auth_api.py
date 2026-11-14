@@ -129,6 +129,34 @@ def test_logout_requires_authentication(auth_client):
     assert response.status_code == 401
 
 
+def test_password_reset_is_one_time_and_revokes_existing_sessions(auth_client, monkeypatch):
+    from app import main
+
+    registered = register_account(auth_client, "recovery@example.com")
+    assert registered.status_code == 200
+    delivered = []
+    monkeypatch.setattr(main, "send_password_reset_email", lambda email, token: delivered.append((email, token)))
+
+    requested = auth_client.post("/api/v1/auth/password-reset/request", json={"email": "recovery@example.com"})
+    unknown = auth_client.post("/api/v1/auth/password-reset/request", json={"email": "nobody@example.com"})
+    assert requested.status_code == unknown.status_code == 202
+    assert requested.json() == unknown.json()
+    assert len(delivered) == 1
+
+    reset = auth_client.post("/api/v1/auth/password-reset/confirm", json={
+        "token": delivered[0][1], "password": "New-ledgergate-password-2026",
+    })
+    assert reset.status_code == 200
+    assert auth_client.get("/api/v1/me", headers={"Authorization": f"Bearer {registered.json()['access_token']}"}).status_code == 401
+    assert auth_client.post("/api/v1/auth/password-reset/confirm", json={
+        "token": delivered[0][1], "password": "Another-ledgergate-password-2026",
+    }).status_code == 400
+    login = auth_client.post("/api/v1/auth/token", data={
+        "username": "recovery@example.com", "password": "New-ledgergate-password-2026",
+    })
+    assert login.status_code == 200
+
+
 
 def test_mfa_enrollment_login_and_disable_flow(auth_client, monkeypatch):
     from app import security

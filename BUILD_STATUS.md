@@ -29,6 +29,9 @@
 - Invoice list/detail API responses expose the required and recorded approval counts; the dashboard displays progress, and a tenant-scoped approval-history endpoint exposes reviewer IDs and timestamps.
 - GitHub Actions backend job now starts PostgreSQL 16, applies Alembic migrations, and runs tests as the restricted runtime role.
 - Production invoice uploads now stream to a private ClamAV `clamd` service before extraction or storage and fail closed when scanning is unavailable or malware is detected.
+- TOTP MFA, login throttling, session revocation, refresh-token rotation, and SMTP-backed one-time password recovery are implemented. Password resets expire after 15 minutes and revoke active sessions.
+- Storage reconciliation provides a dry-run inventory of orphaned/missing generated document objects and requires explicit double confirmation before deletion.
+- API responses include baseline security headers; HSTS is enabled when `APP_ENV=production`.
 
 ## Validation status
 - The GitHub branch and CI workflow have been created.
@@ -39,8 +42,8 @@
 ## Known blockers before real production data
 1. The PostgreSQL RLS migration and transaction-local tenant context now have a dedicated PostgreSQL 16 CI integration test. Wait for the latest CI run to pass before treating this change as validated. The users identity table is not covered by this RLS migration.
 2. The initial Alembic migration uses SQLAlchemy `metadata.create_all`; replace it with a reviewed explicit baseline before production schema management.
-3. Private S3-compatible storage, tenant-scoped keys, server-side encryption requests, access-controlled presigned downloads, and fail-closed ClamAV scanning are implemented. Bucket lifecycle/retention configuration and automated orphan reconciliation remain external operational requirements.
-4. SSO/OIDC, MFA, email verification, password reset, refresh-token rotation/revocation, and login throttling are not implemented.
+3. Private S3-compatible storage, tenant-scoped keys, server-side encryption requests, access-controlled presigned downloads, fail-closed ClamAV scanning, and reconciliation tooling are implemented. Bucket lifecycle/retention configuration remains an external operational requirement.
+4. SSO/OIDC, email verification, device notifications, and account-recovery delivery credentials remain external or unimplemented requirements. Production password recovery requires SMTP credentials and a hosted HTTPS reset page.
 5. Audit events are hash-chained and protected from ordinary UPDATE/DELETE by a PostgreSQL trigger, but external WORM replication and independent checkpoints remain outstanding.
 6. Idempotency is implemented for invoice approve/reject only. Foreign-currency approval thresholds/FX conversion, idempotency for mutations beyond approve/reject, and broader optimistic locking remain outstanding. Maker-checker creator/decision-maker tracking is present.
 7. No completed penetration test, load test, disaster-recovery restore drill, or jurisdiction-specific privacy/compliance review.

@@ -50,7 +50,8 @@ Internet → managed WAF/load balancer/TLS → frontend and API services → pri
 ## Production gates
 - The initial migration currently creates tables from SQLAlchemy metadata; replace it with a reviewed, explicit baseline migration before adopting an existing production database or relying on schema drift detection.
 - Configure PostgreSQL RLS with FORCE ROW LEVEL SECURITY, a non-owner runtime DB role, and cross-tenant integration tests.
-- Add SSO/OIDC, MFA, login throttling, password reset, refresh-token rotation/revocation, and account recovery.
+- Configure SMTP (`SMTP_HOST`, `SMTP_FROM`, and `PASSWORD_RESET_URL_BASE`) for password recovery. The reset page must be HTTPS and submit the token to `POST /api/v1/auth/password-reset/confirm`; the API never returns reset tokens.
+- Add SSO/OIDC, email verification, device notifications, and account recovery runbooks.
 - Use private encrypted object storage, malware scanning, content sniffing, retention/deletion, and signed download URLs.
 - Use append-only/WORM audit storage, idempotency keys, separation of duties, dual approval thresholds, and optimistic locking.
 - Use managed secrets, TLS, rate limiting, WAF, backups/PITR, and tested restore procedures.
