@@ -39,7 +39,7 @@ For local development without Docker:
 - Use HTTPS behind a trusted reverse proxy.
 - Use managed PostgreSQL, encrypted object storage, managed secrets, backups, and restricted network access in production.
 - Configure CORS to exact trusted origins.
-- Add malware scanning and file-type/content validation before enabling public uploads.
+- Configure the required private ClamAV service (`MALWARE_SCAN_HOST`) and file-type/content validation before enabling public uploads.
 - Configure identity provider/SSO, rate limiting, WAF, alerting, retention policies, and disaster recovery.
 - Review tenant isolation and authorization tests before production.
 - Do not store card data, bank credentials, or payment secrets in LedgerGate.
