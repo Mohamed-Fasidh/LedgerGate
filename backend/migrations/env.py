@@ -8,7 +8,15 @@ from app import models
 from app.config import settings
 config=context.config
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%","%%"))
-if config.config_file_name: fileConfig(config.config_file_name)
+# The repository's alembic.ini intentionally omits logging sections.
+# Only configure file-based logging when all required sections are present.
+if (
+    config.config_file_name
+    and config.get_section("loggers")
+    and config.get_section("handlers")
+    and config.get_section("formatters")
+):
+    fileConfig(config.config_file_name)
 target_metadata=Base.metadata
 def run_migrations_offline():
     context.configure(url=settings.database_url,target_metadata=target_metadata,literal_binds=True,compare_type=True)
