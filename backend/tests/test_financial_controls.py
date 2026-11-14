@@ -21,3 +21,19 @@ def test_different_reviewer_can_decide_invoice(decision):
 def test_legacy_invoice_without_creator_remains_decidable():
     invoice = SimpleNamespace(created_by_user_id=None)
     ensure_independent_decision(invoice, 12, "approve")
+
+
+@pytest.mark.parametrize(
+    ("amount", "currency", "threshold", "expected"),
+    [
+        (99999.99, "INR", 100000, 1),
+        (100000, "INR", 100000, 2),
+        (250000, "inr", 100000, 2),
+        (500000, "USD", 100000, 1),
+        (None, "INR", 100000, 1),
+    ],
+)
+def test_high_value_invoice_approval_threshold(amount, currency, threshold, expected):
+    from app.financial_controls import required_invoice_approvals
+
+    assert required_invoice_approvals(amount, currency, threshold) == expected
