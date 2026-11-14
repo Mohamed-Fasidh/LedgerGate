@@ -33,7 +33,7 @@ def _event_hash(previous_hash, row):
         "created_at": created_at.astimezone(timezone.utc).isoformat(),
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
-    return hashlib.sha256(previous_hash.encode("ascii") + b"\\n" + canonical.encode("utf-8")).hexdigest()
+    return hashlib.sha256(previous_hash.encode("ascii") + b"\n" + canonical.encode("utf-8")).hexdigest()
 
 
 def upgrade():
