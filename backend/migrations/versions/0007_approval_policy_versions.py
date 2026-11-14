@@ -57,7 +57,10 @@ def downgrade():
         op.execute('DROP POLICY IF EXISTS approval_policy_tenant_isolation ON "approval_policies"')
         op.execute('ALTER TABLE "approval_policies" NO FORCE ROW LEVEL SECURITY')
         op.execute('ALTER TABLE "approval_policies" DISABLE ROW LEVEL SECURITY')
-        op.drop_constraint("fk_invoice_approval_policy", "invoices", type_="foreignkey")
+        invoice_fks = sa.inspect(bind).get_foreign_keys("invoices")
+        policy_fk = next((fk.get("name") for fk in invoice_fks if fk.get("constrained_columns") == ["approval_policy_id"] and fk.get("referred_table") == "approval_policies"), None)
+        if policy_fk:
+            op.drop_constraint(policy_fk, "invoices", type_="foreignkey")
     op.drop_column("invoices", "approval_threshold_snapshot")
     op.drop_column("invoices", "required_approvals_snapshot")
     op.drop_column("invoices", "approval_policy_version")
