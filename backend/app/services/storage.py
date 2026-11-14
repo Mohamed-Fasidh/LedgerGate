@@ -52,10 +52,17 @@ def save_document(content: bytes, tenant_id: str, suffix: str) -> str:
         return key
 
     root = Path(settings.upload_dir).resolve()
-    destination = (root / key).resolve()
-    if root not in destination.parents:
-        raise ValueError("Invalid storage key")
-    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    tenant_dir = root / prefix
+    # Never follow a pre-existing tenant-directory symlink, even if it points
+    # somewhere else inside the upload root.
+    if tenant_dir.is_symlink():
+        raise ValueError("Invalid storage directory")
+    tenant_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if tenant_dir.is_symlink():
+        raise ValueError("Invalid storage directory")
+    destination = tenant_dir / f"{uuid.uuid4().hex}{suffix}"
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError("Generated storage key already exists")
     try:
         destination.parent.chmod(0o700)
     except OSError:
@@ -74,8 +81,15 @@ def local_document_path(key: str, tenant_id: str) -> Path:
     if not key.startswith(prefix):
         raise FileNotFoundError("Document not found")
     root = Path(settings.upload_dir).resolve()
-    path = (root / key).resolve()
-    if root not in path.parents or not path.is_file():
+    tenant_dir = root / tenant_id
+    candidate = root / key
+    # Reject symlinks at both tenant and file level; resolving first would hide
+    # whether the requested object itself was a symlink.
+    if tenant_dir.is_symlink() or candidate.is_symlink():
+        raise FileNotFoundError("Document not found")
+    path = candidate.resolve()
+    resolved_tenant_dir = tenant_dir.resolve()
+    if resolved_tenant_dir != tenant_dir or resolved_tenant_dir not in path.parents or not path.is_file():
         raise FileNotFoundError("Document not found")
     return path
 
