@@ -153,6 +153,8 @@ def test_local_storage_rejects_object_symlink(tmp_path, monkeypatch):
 
 
 
+
+
 def test_failed_document_cleanup_is_logged_without_sensitive_details(monkeypatch, caplog):
     import logging
     from app import main
@@ -162,13 +164,25 @@ def test_failed_document_cleanup_is_logged_without_sensitive_details(monkeypatch
 
     monkeypatch.setattr(main, "delete_document", fail_cleanup)
     with caplog.at_level(logging.ERROR, logger=main.__name__):
-        try:
-            main.logger.error(
-                "Invoice document cleanup failed after persistence error (error_type=%s)",
-                "RuntimeError",
-            )
-        except Exception:
-            pytest.fail("logging cleanup failure should not raise")
+        result = main._cleanup_uploaded_document("tenant-secret/object-secret.pdf", "tenant-secret")
 
+    assert result is False
+    assert "Invoice document cleanup failed" in caplog.text
     assert "RuntimeError" in caplog.text
+    assert "tenant-secret" not in caplog.text
+    assert "object-secret" not in caplog.text
     assert "sensitive-object-key-and-bucket" not in caplog.text
+
+
+def test_successful_document_cleanup_does_not_log(monkeypatch, caplog):
+    import logging
+    from app import main
+
+    calls = []
+    monkeypatch.setattr(main, "delete_document", lambda key, tenant_id: calls.append((key, tenant_id)))
+    with caplog.at_level(logging.ERROR, logger=main.__name__):
+        result = main._cleanup_uploaded_document("tenant-a/object.pdf", "tenant-a")
+
+    assert result is True
+    assert calls == [("tenant-a/object.pdf", "tenant-a")]
+    assert caplog.text == ""

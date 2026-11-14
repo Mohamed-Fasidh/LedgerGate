@@ -25,6 +25,19 @@ from app.services.memory import remember, recall
 
 logger = logging.getLogger(__name__)
 
+def _cleanup_uploaded_document(storage_key: str, tenant_id: str) -> bool:
+    """Best-effort cleanup; report failure without logging sensitive identifiers."""
+    try:
+        delete_document(storage_key, tenant_id)
+        return True
+    except Exception as cleanup_error:
+        logger.error(
+            "Invoice document cleanup failed after persistence error (error_type=%s)",
+            type(cleanup_error).__name__,
+        )
+        return False
+
+
 app=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
 app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type","Idempotency-Key"])
 
@@ -215,15 +228,7 @@ async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Head
         db.rollback()
         # The object is written before the database row. Remove it if persistence
         # fails so retries do not leave unreferenced private documents behind.
-        try:
-            delete_document(storage_key,user.tenant_id)
-        except Exception as cleanup_error:
-            # Do not log object keys, tenant identifiers, or exception text:
-            # those may contain sensitive storage details.
-            logger.error(
-                "Invoice document cleanup failed after persistence error (error_type=%s)",
-                type(cleanup_error).__name__,
-            )
+        _cleanup_uploaded_document(storage_key, user.tenant_id)
         raise HTTPException(500,"Invoice record could not be saved; document cleanup was attempted")
 
 
