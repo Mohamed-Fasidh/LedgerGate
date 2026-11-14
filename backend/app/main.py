@@ -83,7 +83,7 @@ def list_pos(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     return [po_view(x) for x in db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id==user.tenant_id).all()]
 
 def invoice_view(x):
-    return {"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"created_at":x.created_at.isoformat()}
+    return {"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"created_by_user_id":x.created_by_user_id,"approved_by_user_id":x.approved_by_user_id,"rejected_by_user_id":x.rejected_by_user_id,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"created_at":x.created_at.isoformat()}
 
 @app.post("/api/v1/invoices")
 def create_invoice(payload:InvoiceIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
@@ -92,7 +92,7 @@ def create_invoice(payload:InvoiceIn,db:Session=Depends(get_db),user:User=Depend
     if payload.purchase_order_id:
         po=db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first()
         if not po: raise HTTPException(404,"Purchase order not found")
-    obj=Invoice(tenant_id=user.tenant_id,**payload.model_dump()); db.add(obj); db.flush()
+    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,**payload.model_dump()); db.add(obj); db.flush()
     record_event(db,user,"invoice",obj.id,"created",{"invoice_number":obj.invoice_number}); db.commit(); db.refresh(obj)
     return invoice_view(obj)
 
@@ -134,7 +134,7 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
     except Exception as exc:
         path.unlink(missing_ok=True); raise HTTPException(422,f"Document extraction failed: {type(exc).__name__}")
     candidate=fields.get("invoice_number") or f"UNCONFIRMED-{uuid.uuid4().hex[:10].upper()}"
-    obj=Invoice(tenant_id=user.tenant_id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.EXTRACTION_REVIEW,file_name=Path(file.filename or "document").name,file_path=str(path),extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
+    obj=Invoice(tenant_id=user.tenant_id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.EXTRACTION_REVIEW,created_by_user_id=user.id,file_name=Path(file.filename or "document").name,file_path=str(path),extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
     db.add(obj); db.flush(); record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":hashlib.sha256(content).hexdigest(),"bytes":len(content)}); db.commit(); db.refresh(obj)
     return invoice_view(obj)
 
@@ -180,8 +180,10 @@ def approve(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
+    if inv.created_by_user_id is not None and inv.created_by_user_id == user.id: raise HTTPException(409,"Maker-checker policy: the invoice creator cannot approve their own invoice")
     if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before approval")
     inv.status=InvoiceStatus.APPROVED
+    inv.approved_by_user_id=user.id
     record_event(db,user,"invoice",inv.id,"human_approved",{"warning":"Approval recorded; no payment is initiated."})
     db.commit(); return {"id":inv.id,"status":inv.status.value,"message":"Human approval recorded. No payment was initiated."}
 
@@ -190,7 +192,8 @@ def reject(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_r
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status in (InvoiceStatus.APPROVED,InvoiceStatus.REJECTED): raise HTTPException(409,"Invoice is already finalized")
-    inv.status=InvoiceStatus.REJECTED; record_event(db,user,"invoice",inv.id,"human_rejected",{})
+    if inv.created_by_user_id is not None and inv.created_by_user_id == user.id: raise HTTPException(409,"Maker-checker policy: the invoice creator cannot reject their own invoice")
+    inv.status=InvoiceStatus.REJECTED; inv.rejected_by_user_id=user.id; record_event(db,user,"invoice",inv.id,"human_rejected",{})
     db.commit(); return {"id":inv.id,"status":inv.status.value}
 
 @app.post("/api/v1/agent/memory")
