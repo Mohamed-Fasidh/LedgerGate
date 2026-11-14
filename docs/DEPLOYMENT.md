@@ -13,7 +13,7 @@ The PostgreSQL init script runs only when the data volume is first created. If y
 ## Render and Vercel deployment notes
 - Deploy the FastAPI service from `backend/` and configure its start command as `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Set the working directory to `backend`.
 - Set `APP_ENV=production`, `DATABASE_URL` to a managed PostgreSQL URL using psycopg, a unique `JWT_SECRET_KEY` of at least 32 bytes, and `CORS_ORIGINS` to the exact HTTPS Vercel origin(s).
-- Set `MAX_UPLOAD_MB` to a conservative limit. The current upload implementation writes to local disk. Do not enable production invoice uploads on an ephemeral filesystem; a private encrypted object-storage adapter, malware scanning, and access-controlled retrieval must be implemented first or a durable encrypted mounted volume must be provisioned with an explicit retention plan.
+- Set `STORAGE_BACKEND=s3`, `S3_BUCKET`, and `S3_REGION`; configure a workload identity or both static S3 credentials. Production startup rejects local storage and non-HTTPS custom S3 endpoints. Follow [Private document storage](OBJECT_STORAGE.md) to configure bucket privacy, IAM, TLS, encryption, lifecycle, and monitoring. The code requests SSE-S3 AES-256 and uses tenant-scoped object keys with short-lived presigned downloads. A real cloud-bucket integration and policy review are still required.
 - Run `alembic upgrade head` as a controlled pre-deploy/release command from the backend working directory. Do not run migrations independently in every API replica.
 
 ### PostgreSQL tenant RLS role separation
