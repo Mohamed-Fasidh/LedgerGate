@@ -60,7 +60,7 @@ def save_document(content: bytes, tenant_id: str, suffix: str) -> str:
     tenant_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     if tenant_dir.is_symlink():
         raise ValueError("Invalid storage directory")
-    destination = tenant_dir / f"{uuid.uuid4().hex}{suffix}"
+    destination = root / key
     if destination.exists() or destination.is_symlink():
         raise FileExistsError("Generated storage key already exists")
     try:
