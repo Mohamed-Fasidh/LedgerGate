@@ -171,7 +171,7 @@ async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Head
     # Content checks are defense-in-depth, not a substitute for malware scanning.
     if suffix==".pdf" and not content.startswith(b"%PDF"): raise HTTPException(415,"File content is not a valid PDF")
     if suffix==".txt":
-        if b"\\x00" in content: raise HTTPException(415,"Text file contains binary data")
+        if b"\x00" in content: raise HTTPException(415,"Text file contains binary data")
         try: content.decode("utf-8-sig",errors="strict")
         except UnicodeDecodeError: raise HTTPException(415,"Text files must use UTF-8 encoding")
     content_hash=hashlib.sha256(content).hexdigest()
