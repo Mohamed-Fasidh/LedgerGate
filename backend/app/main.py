@@ -68,13 +68,19 @@ def logout_all_sessions(db:Session=Depends(get_db),user:User=Depends(get_current
     return {"message":"All active sessions have been revoked. Sign in again on each device."}
 
 @app.post("/api/v1/users")
-def create_tenant_user(email:str,password:str=Form(...),role:str=Form("analyst"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+def create_tenant_user(email:str,password:str=Form(...),role:str=Form("analyst"),idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+    normalized_email=email.strip().lower()
     if len(password)<12 or len(password.encode("utf-8"))>72: raise HTTPException(400,"Password must be at least 12 characters and no more than 72 UTF-8 bytes")
     if role not in ("analyst","reviewer"): raise HTTPException(400,"Only analyst or reviewer accounts can be created here")
-    if db.query(User).filter(User.email==email.lower()).first(): raise HTTPException(409,"Email already registered")
-    member=User(tenant_id=user.tenant_id,tenant_name=user.tenant_name,email=email.lower(),hashed_password=hash_password(password),role=Role(role))
-    db.add(member); db.flush(); record_event(db,user,"user",member.id,"tenant_user_created",{"email":member.email,"role":role}); db.commit()
-    return {"id":member.id,"email":member.email,"role":member.role.value}
+    idem,replay=begin_idempotent_request(db,user,idempotency_key,"tenant_user.create",{"email":normalized_email,"password":password,"role":role})
+    if replay is not None: return replay
+    if db.query(User).filter(User.email==normalized_email).first(): raise HTTPException(409,"Email already registered")
+    member=User(tenant_id=user.tenant_id,tenant_name=user.tenant_name,email=normalized_email,hashed_password=hash_password(password),role=Role(role))
+    db.add(member); db.flush(); record_event(db,user,"user",member.id,"tenant_user_created",{"email":member.email,"role":role})
+    response={"id":member.id,"email":member.email,"role":member.role.value}
+    complete_idempotent_request(idem,response)
+    db.commit()
+    return response
 
 @app.get("/api/v1/me")
 def me(user:User=Depends(get_current_user)):
@@ -297,12 +303,17 @@ def reject(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempotenc
     return response
 
 @app.post("/api/v1/agent/memory")
-def add_agent_memory(content:str,memory_type:str="episodic",db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+def add_agent_memory(content:str,memory_type:str="episodic",idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
     if len(content.strip())<5 or len(content)>10000: raise HTTPException(400,"Memory content must be 5-10000 characters")
+    idem,replay=begin_idempotent_request(db,user,idempotency_key,"agent_memory.create",{"content":content,"memory_type":memory_type})
+    if replay is not None: return replay
     try: obj=remember(db,user.tenant_id,content,memory_type,{"created_by":user.id})
     except ValueError as exc: raise HTTPException(400,str(exc))
-    record_event(db,user,"agent_memory",obj.id,"created",{"memory_type":memory_type}); db.commit()
-    return {"id":obj.id,"memory_type":obj.memory_type}
+    record_event(db,user,"agent_memory",obj.id,"created",{"memory_type":obj.memory_type})
+    response={"id":obj.id,"memory_type":obj.memory_type}
+    complete_idempotent_request(idem,response)
+    db.commit()
+    return response
 
 @app.get("/api/v1/agent/memory/search")
 def search_agent_memory(q:str,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
