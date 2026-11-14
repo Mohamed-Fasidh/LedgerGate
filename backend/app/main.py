@@ -326,20 +326,26 @@ def list_approval_policies(db:Session=Depends(get_db),user:User=Depends(require_
 
 
 @app.post("/api/v1/approval-policies")
-def create_approval_policy(payload:ApprovalPolicyIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+def create_approval_policy(payload:ApprovalPolicyIn,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+    idem,replay=begin_idempotent_request(
+        db,user,idempotency_key,"approval_policy.create_version",payload.model_dump()
+    )
+    if replay is not None: return replay
     policy=create_approval_policy_version(db,user.tenant_id,user.id,payload.currency,payload.threshold_amount,payload.required_approvals)
     record_event(db,user,"approval_policy",policy.id,"version_created",{
         "version":policy.version,"currency":policy.currency,
         "threshold_amount":float(policy.threshold_amount),
         "required_approvals":policy.required_approvals,
     })
-    db.commit()
-    return {
+    response={
         "id":policy.id,"version":policy.version,"currency":policy.currency,
         "threshold_amount":float(policy.threshold_amount),
         "required_approvals":policy.required_approvals,
         "message":"New immutable policy version created. Existing invoices retain their policy snapshot.",
     }
+    complete_idempotent_request(idem,response)
+    db.commit()
+    return response
 
 @app.post("/api/v1/policies")
 def add_policy(payload:PolicyIn,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
