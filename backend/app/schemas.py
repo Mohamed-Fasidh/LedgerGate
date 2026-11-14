@@ -6,6 +6,13 @@ class RegisterIn(BaseModel):
     password: str = Field(min_length=12, max_length=72)
     tenant_name: str = Field(min_length=2, max_length=100)
 
+    @field_validator("password")
+    @classmethod
+    def password_must_fit_bcrypt_bytes(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must not exceed 72 UTF-8 bytes")
+        return value
+
 class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
