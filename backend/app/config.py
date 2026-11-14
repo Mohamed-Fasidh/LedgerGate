@@ -35,7 +35,7 @@ if settings.app_env.lower() == "production":
         raise RuntimeError("Production requires a unique JWT_SECRET_KEY of at least 32 bytes")
     if settings.database_url.startswith("sqlite"):
         raise RuntimeError("Production requires PostgreSQL; SQLite is development-only")
-    if not settings.database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+    if not settings.database_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg://")):
         raise RuntimeError("Production DATABASE_URL must use PostgreSQL with psycopg")
     if not settings.cors_origin_list or "*" in settings.cors_origin_list:
         raise RuntimeError("Production CORS_ORIGINS must contain explicit HTTPS origins")
