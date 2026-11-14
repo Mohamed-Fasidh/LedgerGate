@@ -37,3 +37,32 @@ def test_high_value_invoice_approval_threshold(amount, currency, threshold, expe
     from app.financial_controls import required_invoice_approvals
 
     assert required_invoice_approvals(amount, currency, threshold) == expected
+
+
+@pytest.mark.parametrize("status", ["approved", "rejected", "extraction_review"])
+def test_final_or_unconfirmed_invoice_cannot_be_reconciled(status):
+    from app.financial_controls import ensure_reviewable_status
+    from app.models import InvoiceStatus
+    invoice = SimpleNamespace(status=InvoiceStatus(status))
+    with pytest.raises(ValueError, match="Only received"):
+        ensure_reviewable_status(invoice)
+
+
+def test_received_invoice_can_be_reconciled():
+    from app.financial_controls import ensure_reviewable_status
+    from app.models import InvoiceStatus
+    ensure_reviewable_status(SimpleNamespace(status=InvoiceStatus.RECEIVED))
+
+
+@pytest.mark.parametrize("status", ["received", "review_required", "approved", "rejected"])
+def test_extraction_confirmation_is_one_time(status):
+    from app.financial_controls import ensure_extraction_editable
+    from app.models import InvoiceStatus
+    with pytest.raises(ValueError, match="awaiting extraction review"):
+        ensure_extraction_editable(SimpleNamespace(status=InvoiceStatus(status)))
+
+
+def test_extraction_review_can_be_confirmed():
+    from app.financial_controls import ensure_extraction_editable
+    from app.models import InvoiceStatus
+    ensure_extraction_editable(SimpleNamespace(status=InvoiceStatus.EXTRACTION_REVIEW))
