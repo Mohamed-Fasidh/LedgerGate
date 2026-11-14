@@ -77,3 +77,61 @@ def test_policy_threshold_is_applied_at_version_boundary():
     from app.financial_controls import required_invoice_approvals
     assert required_invoice_approvals(150000, "INR", 100000) == 2
     assert required_invoice_approvals(150000, "INR", 200000) == 1
+
+
+
+def test_first_invoice_creates_default_policy_and_snapshots_it():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.database import Base
+    from app.models import ApprovalPolicy, Invoice, Role, User
+    from app.financial_controls import snapshot_approval_policy, create_approval_policy_version
+
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine)()
+    try:
+        user = User(
+            tenant_id="policy-tenant",
+            tenant_name="Policy Tenant",
+            email="policy-admin@example.com",
+            hashed_password="test-hash",
+            role=Role.admin,
+        )
+        db.add(user)
+        db.flush()
+        invoice = Invoice(
+            tenant_id="policy-tenant",
+            invoice_number="INV-100",
+            currency="INR",
+            amount=150000,
+            created_by_user_id=user.id,
+        )
+        db.add(invoice)
+        db.flush()
+
+        snapshot_approval_policy(db, invoice, user.tenant_id, user.id, 100000)
+        db.flush()
+        assert invoice.approval_policy_version == 1
+        assert invoice.required_approvals_snapshot == 2
+        assert float(invoice.approval_threshold_snapshot) == 100000
+
+        create_approval_policy_version(
+            db, user.tenant_id, user.id, "INR", 200000, 2
+        )
+        db.flush()
+        # Existing invoice keeps the policy decision made at creation time.
+        snapshot_approval_policy(db, invoice, user.tenant_id, user.id, 100000)
+        assert invoice.approval_policy_version == 1
+        assert invoice.required_approvals_snapshot == 2
+        policies = db.query(ApprovalPolicy).filter_by(tenant_id=user.tenant_id).all()
+        assert [p.version for p in policies] == [1, 2]
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
