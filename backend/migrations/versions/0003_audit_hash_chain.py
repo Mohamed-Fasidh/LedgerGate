@@ -88,8 +88,8 @@ def upgrade():
         END;
         $$ LANGUAGE plpgsql;
         """)
+        op.execute("DROP TRIGGER IF EXISTS audit_events_immutable ON audit_events")
         op.execute("""
-        DROP TRIGGER IF EXISTS audit_events_immutable ON audit_events;
         CREATE TRIGGER audit_events_immutable
         BEFORE UPDATE OR DELETE ON audit_events
         FOR EACH ROW EXECUTE FUNCTION prevent_audit_event_mutation();
