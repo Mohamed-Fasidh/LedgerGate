@@ -51,7 +51,7 @@ def test_final_or_unconfirmed_invoice_cannot_be_reconciled(status):
 def test_received_invoice_can_be_reconciled():
     from app.financial_controls import ensure_reviewable_status
     from app.models import InvoiceStatus
-    ensure_reviewable_status(SimpleNamespace(status=InvoiceStatus.RECEIVED))
+    ensure_reviewable_status(SimpleNamespace(status=InvoiceStatus.received))
 
 
 @pytest.mark.parametrize("status", ["received", "review_required", "approved", "rejected"])
@@ -65,4 +65,4 @@ def test_extraction_confirmation_is_one_time(status):
 def test_extraction_review_can_be_confirmed():
     from app.financial_controls import ensure_extraction_editable
     from app.models import InvoiceStatus
-    ensure_extraction_editable(SimpleNamespace(status=InvoiceStatus.EXTRACTION_REVIEW))
+    ensure_extraction_editable(SimpleNamespace(status=InvoiceStatus.extraction_review))
