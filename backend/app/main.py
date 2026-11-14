@@ -57,26 +57,30 @@ def me(user:User=Depends(get_current_user)):
     return {"id":user.id,"email":user.email,"tenant_id":user.tenant_id,"tenant_name":user.tenant_name,"role":user.role.value}
 
 @app.post("/api/v1/suppliers")
-def create_supplier(payload:SupplierIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+def create_supplier(payload:SupplierIn,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    idem,replay=begin_idempotent_request(db,user,idempotency_key,"supplier.create",payload.model_dump())
+    if replay is not None: return replay
     obj=Supplier(tenant_id=user.tenant_id,**payload.model_dump()); db.add(obj)
     try:
-        db.flush(); record_event(db,user,"supplier",obj.id,"created",{"name":obj.name}); db.commit(); db.refresh(obj)
+        db.flush(); record_event(db,user,"supplier",obj.id,"created",{"name":obj.name}); response={"id":obj.id,"name":obj.name,"tax_id":obj.tax_id}; complete_idempotent_request(idem,response); db.commit()
     except IntegrityError: db.rollback(); raise HTTPException(409,"Supplier already exists")
-    return {"id":obj.id,"name":obj.name,"tax_id":obj.tax_id}
+    return response
 
 @app.get("/api/v1/suppliers")
 def list_suppliers(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     return [{"id":x.id,"name":x.name,"tax_id":x.tax_id} for x in db.query(Supplier).filter(Supplier.tenant_id==user.tenant_id).all()]
 
 @app.post("/api/v1/purchase-orders")
-def create_po(payload:POIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+def create_po(payload:POIn,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    idem,replay=begin_idempotent_request(db,user,idempotency_key,"purchase_order.create",payload.model_dump())
+    if replay is not None: return replay
     supplier=db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first()
     if not supplier: raise HTTPException(404,"Supplier not found")
     obj=PurchaseOrder(tenant_id=user.tenant_id,**payload.model_dump()); db.add(obj)
     try:
-        db.flush(); record_event(db,user,"purchase_order",obj.id,"created",{"po_number":obj.po_number}); db.commit(); db.refresh(obj)
+        db.flush(); record_event(db,user,"purchase_order",obj.id,"created",{"po_number":obj.po_number}); response=po_view(obj); complete_idempotent_request(idem,response); db.commit()
     except IntegrityError: db.rollback(); raise HTTPException(409,"Purchase order number already exists")
-    return po_view(obj)
+    return response
 
 def po_view(x):
     return {"id":x.id,"po_number":x.po_number,"supplier_id":x.supplier_id,"currency":x.currency,"total_amount":float(x.total_amount),"description":x.description}
@@ -90,15 +94,17 @@ def invoice_view(x,approval_count:int=0):
     return {"approval_count":approval_count,"required_approvals":required,"approval_policy_version":x.approval_policy_version,"approval_threshold_snapshot":float(x.approval_threshold_snapshot) if x.approval_threshold_snapshot is not None else None,"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"created_by_user_id":x.created_by_user_id,"approved_by_user_id":x.approved_by_user_id,"rejected_by_user_id":x.rejected_by_user_id,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"created_at":x.created_at.isoformat()}
 
 @app.post("/api/v1/invoices")
-def create_invoice(payload:InvoiceIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+def create_invoice(payload:InvoiceIn,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    idem,replay=begin_idempotent_request(db,user,idempotency_key,"invoice.create",payload.model_dump())
+    if replay is not None: return replay
     if payload.supplier_id and not db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Supplier not found")
     po=None
     if payload.purchase_order_id:
         po=db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first()
         if not po: raise HTTPException(404,"Purchase order not found")
     obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,**payload.model_dump()); db.add(obj); db.flush(); snapshot_approval_policy(db,obj,user.tenant_id,user.id,settings.dual_approval_threshold_inr)
-    record_event(db,user,"invoice",obj.id,"created",{"invoice_number":obj.invoice_number}); db.commit(); db.refresh(obj)
-    return invoice_view(obj)
+    record_event(db,user,"invoice",obj.id,"created",{"invoice_number":obj.invoice_number}); response=invoice_view(obj); complete_idempotent_request(idem,response); db.commit()
+    return response
 
 @app.get("/api/v1/invoices")
 def list_invoices(status:str|None=None,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
@@ -305,10 +311,12 @@ def create_approval_policy(payload:ApprovalPolicyIn,db:Session=Depends(get_db),u
     }
 
 @app.post("/api/v1/policies")
-def add_policy(payload:PolicyIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+def add_policy(payload:PolicyIn,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    idem,replay=begin_idempotent_request(db,user,idempotency_key,"policy.create",payload.model_dump())
+    if replay is not None: return replay
     doc=PolicyDocument(tenant_id=user.tenant_id,**payload.model_dump()); db.add(doc); db.flush()
-    record_event(db,user,"policy",doc.id,"created",{"title":doc.title}); db.commit(); db.refresh(doc)
-    return {"id":doc.id,"title":doc.title}
+    record_event(db,user,"policy",doc.id,"created",{"title":doc.title}); response={"id":doc.id,"title":doc.title}; complete_idempotent_request(idem,response); db.commit()
+    return response
 
 @app.get("/api/v1/policies/search")
 def search_policies(q:str,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
