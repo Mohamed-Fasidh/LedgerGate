@@ -6,6 +6,9 @@
 3. Run `docker compose up --build`.
 4. Compose waits for PostgreSQL, runs the one-shot Alembic migration service, then starts the API and web services.
 5. Confirm `/health`, `/docs`, and the dashboard.
+6. Compose initializes a separate `ledgergate_runtime` role for the API; migrations use the database bootstrap account. The runtime role is non-owner and `NOBYPASSRLS`.
+
+The PostgreSQL init script runs only when the data volume is first created. If you already have a `ledgergate_pgdata` volume, create the runtime role and grants manually using `docker/postgres/01-create-runtime-role.sh` logic, or back up your data and recreate the volume for a clean local development database. Do not delete a volume containing data you need.
 
 ## Render and Vercel deployment notes
 - Deploy the FastAPI service from `backend/` and configure its start command as `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Set the working directory to `backend`.
