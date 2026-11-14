@@ -1,9 +1,9 @@
 # Build and verification status
 
-## Implemented in this ZIP
-- FastAPI application and PostgreSQL/Docker configuration.
-- JWT authentication, workspace registration, admin-created tenant users, and roles.
-- Tenant-scoped suppliers, purchase orders, invoices, policies, memories, and audit events.
+## Implemented in this branch
+- Existing FastAPI application and PostgreSQL/Docker configuration.
+- JWT authentication, workspace registration, admin-created tenant users, and role checks.
+- Tenant-scoped suppliers, purchase orders, invoices, policies, memories, and audit events at the application-query layer.
 - PDF/TXT upload, text extraction, regex-based candidate extraction, optional Tesseract OCR fallback.
 - Human confirmation gate before invoice reconciliation.
 - Deterministic invoice-vs-PO reconciliation for amount, currency, supplier, missing PO, and duplicate cases.
@@ -12,15 +12,27 @@
 - MCP stdio tools delegating through a tenant-authenticated API token.
 - Hybrid lexical/fuzzy retrieval baseline and tenant-scoped memory retrieval.
 - Optional Ollama and vLLM advisory explanation adapters.
-- Evaluation suite, unit tests, Next.js dashboard, docs, Docker Compose, and Alembic migrations.
+- Next.js dashboard, docs, Docker Compose, and Alembic migrations.
+- Production configuration now rejects SQLite, non-PostgreSQL URLs, weak JWT secrets, wildcard/non-HTTPS CORS origins, unsupported JWT algorithms, and invalid token/upload limits.
+- Password validation enforces bcrypt's 72-byte input limit; added focused password tests.
+- Docker API container runs as non-root; database migrations run as a one-shot Compose service before API startup instead of in every API replica.
+- Frontend public API and API-docs URLs are configurable at Next.js build time.
+- GitHub Actions workflow added for Python compile/pytest and Next.js production build.
 
-## Checks performed in this environment
-- Python source compilation succeeded.
-- Deterministic evaluation smoke suite: 5/5 designed scenarios passed.
-- Invoice extraction parser smoke test successfully detected a sample invoice number, amount, currency, and date.
+## Validation status
+- The GitHub branch and CI workflow have been created.
+- The GitHub Actions workflow is configured to run on pushes to `main` and `production-readiness`, pull requests to `main`, and manual dispatch.
+- Do not treat the branch as validated until the workflow completes successfully. The current editing environment cannot run the full Docker, PostgreSQL, npm, or integration-test stack locally.
+- Earlier baseline checks (before this branch) included Python source compilation, 5/5 deterministic reconciliation smoke cases, and a parser smoke test. These are not substitutes for the new CI run or production integration testing.
 
-## Not independently verified here
-The environment could not reach the Python package index, so dependencies could not be installed and the full FastAPI integration tests, Docker image build, frontend npm build, PostgreSQL migrations, MCP runtime, OCR binary, and model-provider connections were not executed. The ZIP includes pinned dependencies and test/run instructions for verification on your machine.
+## Known blockers before real production data
+1. No PostgreSQL RLS/FORCE RLS policies or non-owner runtime role; application-level tenant filters alone are insufficient for high-assurance isolation.
+2. The initial Alembic migration uses SQLAlchemy `metadata.create_all`; replace it with a reviewed explicit baseline before production schema management.
+3. Invoice files are stored on local disk. Private encrypted object storage, malware scanning, retention/deletion, and access-controlled downloads are not implemented.
+4. SSO/OIDC, MFA, email verification, password reset, refresh-token rotation/revocation, and login throttling are not implemented.
+5. Audit events are stored in the application database, not immutable/WORM storage.
+6. Idempotency keys, separation of duties, dual approval thresholds, and optimistic locking need implementation.
+7. No completed penetration test, load test, disaster-recovery restore drill, or jurisdiction-specific privacy/compliance review.
+8. Render/Vercel deployment has not been executed or smoke-tested.
 
-## Still required before real production use
-SSO/MFA, PostgreSQL RLS, non-owner DB role, private object storage, malware scanning, immutable/WORM audit, idempotency and dual approval, rate limiting, secrets management, backups/restore drills, security review, penetration testing, load testing, and jurisdiction-specific financial/privacy controls.
+LedgerGate remains a deployable foundation/reference implementation, not a certified financial system. Do not use it to initiate payments or as the sole control for approving financial transactions.
