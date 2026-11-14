@@ -7,9 +7,9 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.database import Base, engine, get_db, set_tenant_context
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, IdempotencyRecord, InvoiceApproval, ApprovalPolicy, Role, InvoiceStatus
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, IdempotencyRecord, InvoiceApproval, ApprovalPolicy, AuthSession, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn
-from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
+from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles, login_is_locked, record_login_failure, clear_login_failures
 from app.audit import record_event, verify_event_chain
 from app.financial_controls import ensure_independent_decision, required_invoice_approvals, ensure_reviewable_status, ensure_extraction_editable, snapshot_approval_policy, create_approval_policy_version
 from app.idempotency import begin_idempotent_request, complete_idempotent_request
@@ -35,13 +35,34 @@ def register(payload:RegisterIn,db:Session=Depends(get_db)):
     try: db.commit()
     except IntegrityError: db.rollback(); raise HTTPException(409,"Account already exists")
     db.refresh(user)
-    return {"access_token":create_access_token(user)}
+    token=create_access_token(user,db)\n    db.commit()\n    return {"access_token":token}
 
 @app.post("/api/v1/auth/token",response_model=TokenOut)
 def login(username:str=Form(...),password:str=Form(...),db:Session=Depends(get_db)):
-    user=db.query(User).filter(User.email==username.lower()).first()
-    if not user or not verify_password(password,user.hashed_password): raise HTTPException(401,"Incorrect email or password")
-    return {"access_token":create_access_token(user)}
+    email=username.strip().lower()
+    if login_is_locked(db,email):
+        raise HTTPException(429,"Too many failed login attempts. Try again in 15 minutes.")
+    user=db.query(User).filter(User.email==email).first()
+    if not user or not user.is_active or not verify_password(password,user.hashed_password):
+        record_login_failure(db,email)
+        db.commit()
+        raise HTTPException(401,"Incorrect email or password")
+    clear_login_failures(db,email)
+    token=create_access_token(user,db)
+    db.commit()
+    return {"access_token":token}
+
+
+@app.post("/api/v1/auth/logout-all")
+def logout_all_sessions(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    now=__import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+    db.query(AuthSession).filter(
+        AuthSession.user_id==user.id,
+        AuthSession.tenant_id==user.tenant_id,
+        AuthSession.revoked_at.is_(None),
+    ).update({AuthSession.revoked_at:now},synchronize_session=False)
+    db.commit()
+    return {"message":"All active sessions have been revoked. Sign in again on each device."}
 
 @app.post("/api/v1/users")
 def create_tenant_user(email:str,password:str=Form(...),role:str=Form("analyst"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
