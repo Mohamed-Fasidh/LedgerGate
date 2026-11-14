@@ -89,7 +89,9 @@ def local_document_path(key: str, tenant_id: str) -> Path:
         raise FileNotFoundError("Document not found")
     # The tenant directory must resolve to itself, and the requested file
     # must be a regular file directly inside that directory.
-    if tenant_dir.resolve() != tenant_dir or candidate.parent != tenant_dir or not candidate.is_file():
+    resolved_tenant_dir = tenant_dir.resolve()
+    resolved_parent = candidate.parent.resolve()
+    if resolved_parent != resolved_tenant_dir or not candidate.is_file():
         raise FileNotFoundError("Document not found")
     return candidate
 
