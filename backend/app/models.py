@@ -99,4 +99,6 @@ class AuditEvent(Base):
     entity_id: Mapped[str] = mapped_column(String(80))
     action: Mapped[str] = mapped_column(String(100))
     details: Mapped[dict] = mapped_column(JSON, default=dict)
+    previous_hash: Mapped[str] = mapped_column(String(64), nullable=False, default=lambda: "0" * 64)
+    event_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
