@@ -18,6 +18,20 @@ jobs:
   backend:
     name: Backend checks
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ledgergate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ledgergate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,12 +44,39 @@ jobs:
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
       - name: Compile Python sources
         working-directory: backend
-        run: python -m compileall -q app migrations
-      - name: Run backend tests
+        run: python -m compileall -q app migrations tests
+      - name: Create restricted runtime database role
+        run: |
+          python - <<'PY'
+          import psycopg
+          with psycopg.connect("postgresql://postgres:postgres@localhost:5432/ledgergate", autocommit=True) as conn:
+              conn.execute("CREATE ROLE ledgergate_runtime LOGIN PASSWORD 'runtime-ci-password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS")
+              conn.execute("GRANT CONNECT ON DATABASE ledgergate TO ledgergate_runtime")
+              conn.execute("GRANT USAGE ON SCHEMA public TO ledgergate_runtime")
+              conn.execute("ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ledgergate_runtime")
+              conn.execute("ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ledgergate_runtime")
+          PY
+      - name: Apply database migrations as administrator
         working-directory: backend
         env:
           APP_ENV: test
-          DATABASE_URL: sqlite:///./ci-ledgergate.db
+          DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/ledgergate
+          JWT_SECRET_KEY: ci-only-secret-key-not-for-production-000000
+        run: alembic upgrade head
+      - name: Grant runtime access to migrated schema
+        run: |
+          python - <<'PY'
+          import psycopg
+          with psycopg.connect("postgresql://postgres:postgres@localhost:5432/ledgergate", autocommit=True) as conn:
+              conn.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ledgergate_runtime")
+              conn.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ledgergate_runtime")
+          PY
+      - name: Run backend tests including PostgreSQL RLS integration
+        working-directory: backend
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+psycopg://ledgergate_runtime:runtime-ci-password@localhost:5432/ledgergate
+          RLS_TEST_ADMIN_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/ledgergate
           JWT_SECRET_KEY: ci-only-secret-key-not-for-production-000000
         run: python -m pytest -q
 
