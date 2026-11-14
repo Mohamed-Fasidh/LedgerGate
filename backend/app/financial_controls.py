@@ -8,3 +8,14 @@ def ensure_independent_decision(invoice, actor_user_id: int, decision: str) -> N
         raise ValueError(
             f"Maker-checker policy: the invoice creator cannot {decision} their own invoice"
         )
+
+
+def required_invoice_approvals(amount, currency: str, threshold_inr: float) -> int:
+    """Return two approvals for invoices at/above the INR threshold.
+
+    Foreign-currency invoices retain the existing single-reviewer workflow
+    until tenant-specific FX conversion and threshold policies are configured.
+    """
+    if (currency or "").upper() == "INR" and amount is not None and float(amount) >= threshold_inr:
+        return 2
+    return 1
