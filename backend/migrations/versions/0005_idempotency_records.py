@@ -31,21 +31,13 @@ def upgrade():
     if bind.dialect.name == "postgresql":
         op.execute('ALTER TABLE "idempotency_records" ENABLE ROW LEVEL SECURITY')
         op.execute('ALTER TABLE "idempotency_records" FORCE ROW LEVEL SECURITY')
+        # Keep policy DDL outside a PL/pgSQL DO block: CREATE POLICY is utility
+        # DDL and should be executed as its own migration statement.
+        op.execute('DROP POLICY IF EXISTS tenant_isolation ON "idempotency_records"')
         op.execute("""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_policies
-                WHERE schemaname = current_schema()
-                  AND tablename = 'idempotency_records'
-                  AND policyname = 'tenant_isolation'
-            ) THEN
-                CREATE POLICY tenant_isolation ON idempotency_records
-                USING (tenant_id = current_setting('app.tenant_id', true))
-                WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-            END IF;
-        END
-        $$;
+            CREATE POLICY tenant_isolation ON "idempotency_records"
+            USING (tenant_id = current_setting('app.tenant_id', true))
+            WITH CHECK (tenant_id = current_setting('app.tenant_id', true))
         """)
 
 
