@@ -87,11 +87,11 @@ def local_document_path(key: str, tenant_id: str) -> Path:
     # whether the requested object itself was a symlink.
     if tenant_dir.is_symlink() or candidate.is_symlink():
         raise FileNotFoundError("Document not found")
-    path = candidate.resolve()
-    resolved_tenant_dir = tenant_dir.resolve()
-    if resolved_tenant_dir != tenant_dir or resolved_tenant_dir not in path.parents or not path.is_file():
+    # The tenant directory must resolve to itself, and the requested file
+    # must be a regular file directly inside that directory.
+    if tenant_dir.resolve() != tenant_dir or candidate.parent != tenant_dir or not candidate.is_file():
         raise FileNotFoundError("Document not found")
-    return path
+    return candidate
 
 
 def create_download_url(key: str, tenant_id: str) -> str:
