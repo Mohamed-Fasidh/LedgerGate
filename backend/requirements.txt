@@ -16,3 +16,4 @@ pytesseract==0.3.13
 pytest==8.3.5
 httpx==0.28.1
 mcp==1.9.4
+boto3==1.37.18\n
