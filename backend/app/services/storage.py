@@ -92,3 +92,17 @@ def create_download_url(key: str, tenant_id: str) -> str:
         Params={"Bucket": settings.s3_bucket, "Key": key},
         ExpiresIn=settings.s3_presigned_url_expiry_seconds,
     )
+
+
+def delete_document(key: str, tenant_id: str) -> None:
+    """Delete a tenant-owned document when its database transaction fails."""
+    prefix = _tenant_prefix(tenant_id) + "/"
+    if not key.startswith(prefix):
+        raise FileNotFoundError("Document not found")
+    if settings.storage_backend == "s3":
+        if not settings.s3_bucket:
+            raise RuntimeError("S3_BUCKET is required for S3 storage")
+        _s3_client().delete_object(Bucket=settings.s3_bucket, Key=key)
+        return
+    path = local_document_path(key, tenant_id)
+    path.unlink(missing_ok=True)

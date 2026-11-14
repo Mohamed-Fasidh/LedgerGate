@@ -16,7 +16,7 @@ from app.financial_controls import ensure_independent_decision, required_invoice
 from app.idempotency import begin_idempotent_request, complete_idempotent_request
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
-from app.services.storage import save_document, local_document_path, create_download_url
+from app.services.storage import save_document, local_document_path, create_download_url, delete_document
 from app.services.retrieval import retrieve_policy, retrieve_business_records
 from app.services.evaluation import run_evaluation
 from app.services.model_router import explain_findings, ModelUnavailable
@@ -199,11 +199,24 @@ async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Head
         raise HTTPException(503,f"Document storage unavailable: {type(exc).__name__}")
     candidate=fields.get("invoice_number") or f"UNCONFIRMED-{uuid.uuid4().hex[:10].upper()}"
     obj=Invoice(tenant_id=user.tenant_id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.extraction_review,created_by_user_id=user.id,file_name=original_name,file_path=storage_key,extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
-    db.add(obj); db.flush(); record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":content_hash,"bytes":len(content),"storage_backend":settings.storage_backend})
-    response=invoice_view(obj)
-    complete_idempotent_request(idem,response)
-    db.commit(); db.refresh(obj)
-    return response
+    try:
+        db.add(obj)
+        db.flush()
+        record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":content_hash,"bytes":len(content),"storage_backend":settings.storage_backend})
+        response=invoice_view(obj)
+        complete_idempotent_request(idem,response)
+        db.commit()
+        db.refresh(obj)
+        return response
+    except Exception:
+        db.rollback()
+        # The object is written before the database row. Remove it if persistence
+        # fails so retries do not leave unreferenced private documents behind.
+        try:
+            delete_document(storage_key,user.tenant_id)
+        except Exception:
+            pass
+        raise HTTPException(500,"Invoice record could not be saved; document cleanup was attempted")
 
 
 @app.get("/api/v1/invoices/{invoice_id}/document")
