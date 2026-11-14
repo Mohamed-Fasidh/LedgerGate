@@ -7,7 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database import get_db
+from app.database import get_db, set_tenant_context
 from app.models import User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -67,6 +67,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     )
     if not user:
         raise error
+    set_tenant_context(db, user.tenant_id)
     return user
 
 
