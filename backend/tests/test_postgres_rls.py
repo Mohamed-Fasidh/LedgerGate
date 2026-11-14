@@ -24,8 +24,9 @@ def test_postgres_rls_isolates_tenants_and_reapplies_context_after_commit():
         with admin_engine.begin() as conn:
             conn.execute(
                 text(
-                    "INSERT INTO suppliers (tenant_id, name) "
-                    "VALUES (:tenant_a, :name_a), (:tenant_b, :name_b)"
+                    "INSERT INTO suppliers (tenant_id, name, created_at) "
+                    "VALUES (:tenant_a, :name_a, CURRENT_TIMESTAMP), "
+                    "(:tenant_b, :name_b, CURRENT_TIMESTAMP)"
                 ),
                 {
                     "tenant_a": tenant_a,
@@ -60,7 +61,8 @@ def test_postgres_rls_isolates_tenants_and_reapplies_context_after_commit():
 
             with pytest.raises(DBAPIError):
                 db.execute(
-                    text("INSERT INTO suppliers (tenant_id, name) VALUES (:tenant, :name)"),
+                    text("INSERT INTO suppliers (tenant_id, name, created_at) "
+                         "VALUES (:tenant, :name, CURRENT_TIMESTAMP)"),
                     {"tenant": tenant_b, "name": f"cross-tenant-{uuid.uuid4()}"},
                 )
             db.rollback()
