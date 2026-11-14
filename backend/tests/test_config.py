@@ -9,6 +9,11 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 def run_config_with_env(overrides):
     env = {"PATH": os.environ.get("PATH", "")}
+    # Windows Python needs its OS entropy provider available during startup.
+    # Keep the subprocess otherwise isolated from ambient app configuration.
+    for name in ("SYSTEMROOT", "WINDIR"):
+        if os.environ.get(name):
+            env[name] = os.environ[name]
     env.update(overrides)
     return subprocess.run(
         [sys.executable, "-c", "import app.config"],
@@ -29,6 +34,7 @@ def valid_s3_env(**overrides):
         "JWT_SECRET_KEY": "a-production-secret-with-at-least-32-bytes",
         "DATABASE_URL": "postgresql+psycopg://ledgergate:secret@db:5432/ledgergate",
         "CORS_ORIGINS": "https://ledgergate.example.com",
+        "MALWARE_SCAN_HOST": "clamav",
     }
     env.update(overrides)
     return env
@@ -55,3 +61,9 @@ def test_production_s3_configuration_rejects_http_endpoint():
     result = run_config_with_env(valid_s3_env(S3_ENDPOINT_URL="http://object-store.internal"))
     assert result.returncode != 0
     assert "must use HTTPS" in result.stderr
+
+
+def test_production_configuration_requires_malware_scanner():
+    result = run_config_with_env(valid_s3_env(MALWARE_SCAN_HOST=""))
+    assert result.returncode != 0
+    assert "MALWARE_SCAN_HOST" in result.stderr

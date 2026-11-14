@@ -18,6 +18,7 @@ from app.idempotency import begin_idempotent_request, complete_idempotent_reques
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
 from app.services.storage import save_document, local_document_path, create_download_url, delete_document
+from app.services.malware_scan import MalwareDetected, MalwareScanUnavailable, scan_document
 from app.services.retrieval import retrieve_policy, retrieve_business_records
 from app.services.evaluation import run_evaluation
 from app.services.model_router import explain_findings, ModelUnavailable
@@ -190,6 +191,12 @@ async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Head
         if b"\x00" in content: raise HTTPException(415,"Text file contains binary data")
         try: content.decode("utf-8-sig",errors="strict")
         except UnicodeDecodeError: raise HTTPException(415,"Text files must use UTF-8 encoding")
+    try:
+        scan_document(content)
+    except MalwareDetected:
+        raise HTTPException(422,"Document failed malware scanning")
+    except MalwareScanUnavailable:
+        raise HTTPException(503,"Document scanning is unavailable")
     content_hash=hashlib.sha256(content).hexdigest()
     original_name=Path(file.filename or "document").name
     idem,replay=begin_idempotent_request(

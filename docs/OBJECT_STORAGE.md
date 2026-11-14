@@ -43,7 +43,9 @@ The application requests encryption on upload but cannot prove the bucket policy
 
 The API validates the file extension, size, basic PDF signature or UTF-8 text content, and extraction page limit. It writes the object before committing the invoice row. If the database persistence step fails, it rolls back and attempts to delete the newly written object. Cleanup is best-effort: a storage outage or permission error can leave an orphaned object. Monitor and periodically reconcile objects against database references before enabling large-scale use.
 
-Malware scanning, content disarm/reconstruction, parser sandboxing, advanced file signature detection, and automated orphan reconciliation are not implemented. Do not expose invoice upload to untrusted public traffic until those controls are deployed.
+Production uploads are streamed to a ClamAV `clamd` service using its authenticated-network `INSTREAM` protocol before text extraction or storage. Set `MALWARE_SCAN_HOST`, `MALWARE_SCAN_PORT` (default `3310`), and `MALWARE_SCAN_TIMEOUT_SECONDS` (default `30`). LedgerGate fails closed: it rejects infected uploads and returns service-unavailable when the scanner cannot be contacted or supplies an invalid response. Run the scanner on a private network segment; this protocol has no application-layer authentication or TLS.
+
+Content disarm/reconstruction, parser sandboxing, advanced file signature detection, and automated orphan reconciliation are not implemented. Do not expose invoice upload to untrusted public traffic until those controls are deployed.
 
 ## Validation and release checks
 
