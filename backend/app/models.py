@@ -72,6 +72,10 @@ class Invoice(Base):
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     extraction_fields: Mapped[dict] = mapped_column(JSON, default=dict)
     reconciliation: Mapped[dict] = mapped_column(JSON, default=dict)
+    approval_policy_id: Mapped[int | None] = mapped_column(ForeignKey("approval_policies.id"), nullable=True)
+    approval_policy_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    required_approvals_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    approval_threshold_snapshot: Mapped[float | None] = mapped_column(Numeric(14,2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     __table_args__ = (Index("ix_invoice_tenant_number_supplier", "tenant_id", "invoice_number", "supplier_id"),)
 
@@ -134,4 +138,21 @@ class InvoiceApproval(Base):
     __table_args__ = (
         UniqueConstraint("tenant_id", "invoice_id", "reviewer_user_id", name="uq_invoice_approval_reviewer"),
         Index("ix_invoice_approval_invoice", "tenant_id", "invoice_id"),
+    )
+
+
+class ApprovalPolicy(Base):
+    """Append-only policy versions; the highest version is current."""
+    __tablename__ = "approval_policies"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
+    threshold_amount: Mapped[float] = mapped_column(Numeric(14,2), nullable=False)
+    required_approvals: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "version", name="uq_approval_policy_tenant_version"),
+        Index("ix_approval_policy_tenant_version", "tenant_id", "version"),
     )
