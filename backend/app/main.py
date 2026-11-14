@@ -44,6 +44,23 @@ def _cleanup_uploaded_document(storage_key: str, tenant_id: str) -> bool:
 app=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
 app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type","Idempotency-Key"])
 
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    # Restrict API responses without breaking the interactive Swagger/ReDoc UI.
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+    if request.url.path.startswith("/api/v1/auth/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    if settings.app_env.lower() == "production":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
+
 @app.get("/health")
 def health(): return {"status":"ok","service":"ledgergate-api"}
 
