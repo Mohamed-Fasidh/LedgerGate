@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.config import settings
-from app.database import Base, engine, get_db
+from app.database import Base, engine, get_db, set_tenant_context
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn
 from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
@@ -26,6 +26,7 @@ def health(): return {"status":"ok","service":"ledgergate-api"}
 @app.post("/api/v1/auth/register",response_model=TokenOut)
 def register(payload:RegisterIn,db:Session=Depends(get_db)):
     tenant_id=str(uuid.uuid4())
+    set_tenant_context(db, tenant_id)
     user=User(tenant_id=tenant_id,tenant_name=payload.tenant_name,email=payload.email.lower(),hashed_password=hash_password(payload.password),role=Role.admin)
     db.add(user)
     try: db.commit()
