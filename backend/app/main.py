@@ -47,6 +47,7 @@ def login(username:str=Form(...),password:str=Form(...),db:Session=Depends(get_d
         record_login_failure(db,email)
         db.commit()
         raise HTTPException(401,"Incorrect email or password")
+    set_tenant_context(db,user.tenant_id)
     clear_login_failures(db,email)
     token=create_access_token(user,db)
     db.commit()
