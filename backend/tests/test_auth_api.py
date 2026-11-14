@@ -468,3 +468,38 @@ def test_session_delete_rejects_expired_other_session_without_invalidating_calle
     }
     expired_access = auth_client.get("/api/v1/me", headers=expired_headers)
     assert expired_access.status_code == 401
+
+
+
+def test_logout_all_revokes_every_access_and_refresh_session(auth_client):
+    registered = register_account(auth_client, "logout-all@example.com")
+    assert registered.status_code == 200
+    first_tokens = registered.json()
+
+    second_login = auth_client.post(
+        "/api/v1/auth/token",
+        data={
+            "username": "logout-all@example.com",
+            "password": "LedgerGate-api-test-2026",
+        },
+    )
+    assert second_login.status_code == 200
+    second_tokens = second_login.json()
+
+    headers = {"Authorization": f"Bearer {first_tokens['access_token']}"}
+    response = auth_client.post("/api/v1/auth/logout-all", headers=headers)
+    assert response.status_code == 200
+
+    for token in (first_tokens["access_token"], second_tokens["access_token"]):
+        denied = auth_client.get(
+            "/api/v1/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert denied.status_code == 401
+
+    for token in (first_tokens["refresh_token"], second_tokens["refresh_token"]):
+        denied = auth_client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": token},
+        )
+        assert denied.status_code == 401
