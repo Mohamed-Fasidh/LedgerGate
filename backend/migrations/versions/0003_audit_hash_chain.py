@@ -1,4 +1,9 @@
-"""Add hash-chained immutable audit events."""
+"""Add hash-chained immutable audit events.
+
+The initial migration builds tables from current ORM metadata, so on a fresh
+install these columns may already exist. This migration supports both that
+case and databases created by earlier model versions.
+"""
 import hashlib
 import json
 from datetime import timezone
@@ -28,13 +33,19 @@ def _event_hash(previous_hash, row):
         "created_at": created_at.astimezone(timezone.utc).isoformat(),
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
-    return hashlib.sha256(previous_hash.encode("ascii") + b"\n" + canonical.encode("utf-8")).hexdigest()
+    return hashlib.sha256(previous_hash.encode("ascii") + b"\\n" + canonical.encode("utf-8")).hexdigest()
 
 
 def upgrade():
-    op.add_column("audit_events", sa.Column("previous_hash", sa.String(64), nullable=True))
-    op.add_column("audit_events", sa.Column("event_hash", sa.String(64), nullable=True))
     bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {column["name"]: column for column in inspector.get_columns("audit_events")}
+
+    if "previous_hash" not in columns:
+        op.add_column("audit_events", sa.Column("previous_hash", sa.String(64), nullable=True))
+    if "event_hash" not in columns:
+        op.add_column("audit_events", sa.Column("event_hash", sa.String(64), nullable=True))
+
     rows = bind.execute(sa.text(
         "SELECT id, tenant_id, actor_user_id, entity_type, entity_id, action, details, created_at "
         "FROM audit_events ORDER BY tenant_id, id"
@@ -49,9 +60,23 @@ def upgrade():
         )
         heads[row["tenant_id"]] = current
 
-    op.alter_column("audit_events", "previous_hash", existing_type=sa.String(64), nullable=False)
-    op.alter_column("audit_events", "event_hash", existing_type=sa.String(64), nullable=False)
-    op.create_unique_constraint("uq_audit_event_hash", "audit_events", ["event_hash"])
+    inspector = sa.inspect(bind)
+    columns = {column["name"]: column for column in inspector.get_columns("audit_events")}
+    if columns["previous_hash"]["nullable"]:
+        op.alter_column("audit_events", "previous_hash", existing_type=sa.String(64), nullable=False)
+    if columns["event_hash"]["nullable"]:
+        op.alter_column("audit_events", "event_hash", existing_type=sa.String(64), nullable=False)
+
+    unique_columns = {
+        tuple(item.get("column_names") or ())
+        for item in inspector.get_unique_constraints("audit_events")
+    }
+    unique_columns.update(
+        tuple(item.get("column_names") or ())
+        for item in inspector.get_indexes("audit_events") if item.get("unique")
+    )
+    if ("event_hash",) not in unique_columns:
+        op.create_unique_constraint("uq_audit_event_hash", "audit_events", ["event_hash"])
 
     if bind.dialect.name == "postgresql":
         op.execute("""
@@ -64,6 +89,7 @@ def upgrade():
         $$ LANGUAGE plpgsql;
         """)
         op.execute("""
+        DROP TRIGGER IF EXISTS audit_events_immutable ON audit_events;
         CREATE TRIGGER audit_events_immutable
         BEFORE UPDATE OR DELETE ON audit_events
         FOR EACH ROW EXECUTE FUNCTION prevent_audit_event_mutation();
@@ -75,6 +101,12 @@ def downgrade():
     if bind.dialect.name == "postgresql":
         op.execute("DROP TRIGGER IF EXISTS audit_events_immutable ON audit_events")
         op.execute("DROP FUNCTION IF EXISTS prevent_audit_event_mutation()")
-    op.drop_constraint("uq_audit_event_hash", "audit_events", type_="unique")
+    inspector = sa.inspect(bind)
+    unique_columns = {
+        tuple(item.get("column_names") or ())
+        for item in inspector.get_unique_constraints("audit_events")
+    }
+    if ("event_hash",) in unique_columns:
+        op.drop_constraint("uq_audit_event_hash", "audit_events", type_="unique")
     op.drop_column("audit_events", "event_hash")
     op.drop_column("audit_events", "previous_hash")
