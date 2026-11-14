@@ -124,6 +124,8 @@ def enroll_mfa(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
 
 @app.post("/api/v1/auth/mfa/verify-enrollment")
 def verify_mfa_enrollment(code:str=Form(...),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    if login_is_locked(db,user.email):
+        raise HTTPException(429,"Too many failed authentication attempts. Try again in 15 minutes.")
     if user.mfa_enabled:
         raise HTTPException(409,"MFA is already enabled")
     if not user.mfa_secret_encrypted:
@@ -133,7 +135,10 @@ def verify_mfa_enrollment(code:str=Form(...),db:Session=Depends(get_db),user:Use
     except (RuntimeError,ValueError):
         valid=False
     if not valid:
+        record_login_failure(db,user.email)
+        db.commit()
         raise HTTPException(400,"Invalid authenticator code")
+    clear_login_failures(db,user.email)
     user.mfa_enabled=True
     record_event(db,user,"user",str(user.id),"mfa_enabled",{})
     db.commit()
@@ -142,16 +147,23 @@ def verify_mfa_enrollment(code:str=Form(...),db:Session=Depends(get_db),user:Use
 
 @app.post("/api/v1/auth/mfa/disable")
 def disable_mfa(password:str=Form(...),code:str=Form(...),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    if login_is_locked(db,user.email):
+        raise HTTPException(429,"Too many failed authentication attempts. Try again in 15 minutes.")
     if not user.mfa_enabled or not user.mfa_secret_encrypted:
         raise HTTPException(409,"MFA is not enabled")
     if not verify_password(password,user.hashed_password):
+        record_login_failure(db,user.email)
+        db.commit()
         raise HTTPException(401,"Invalid credentials")
     try:
         valid=verify_totp(decrypt_totp_secret(user.mfa_secret_encrypted),code)
     except (RuntimeError,ValueError):
         valid=False
     if not valid:
+        record_login_failure(db,user.email)
+        db.commit()
         raise HTTPException(400,"Invalid authenticator code")
+    clear_login_failures(db,user.email)
     user.mfa_enabled=False
     user.mfa_secret_encrypted=None
     record_event(db,user,"user",str(user.id),"mfa_disabled",{})

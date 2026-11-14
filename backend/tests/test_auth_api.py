@@ -224,3 +224,73 @@ def test_mfa_enrollment_rejects_invalid_code(auth_client, monkeypatch):
         data={"code": "000000"},
     )
     assert invalid.status_code == 400
+
+
+
+def test_mfa_enrollment_verification_is_throttled_after_repeated_invalid_codes(auth_client, monkeypatch):
+    from app import security
+
+    monkeypatch.setattr(
+        security.settings,
+        "app_encryption_key",
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+    )
+    registered = register_account(auth_client, "mfa-throttle@example.com")
+    assert registered.status_code == 200
+    headers = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+    enrollment = auth_client.post("/api/v1/auth/mfa/enroll", headers=headers)
+    assert enrollment.status_code == 200
+
+    for _ in range(5):
+        response = auth_client.post(
+            "/api/v1/auth/mfa/verify-enrollment",
+            headers=headers,
+            data={"code": "000000"},
+        )
+        assert response.status_code == 400
+
+    locked = auth_client.post(
+        "/api/v1/auth/mfa/verify-enrollment",
+        headers=headers,
+        data={"code": "000000"},
+    )
+    assert locked.status_code == 429
+
+
+def test_mfa_disable_invalid_password_is_throttled(auth_client, monkeypatch):
+    from app import security
+
+    monkeypatch.setattr(
+        security.settings,
+        "app_encryption_key",
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+    )
+    registered = register_account(auth_client, "mfa-disable-throttle@example.com")
+    assert registered.status_code == 200
+    initial = registered.json()
+    headers = {"Authorization": f"Bearer {initial['access_token']}"}
+
+    enrollment = auth_client.post("/api/v1/auth/mfa/enroll", headers=headers)
+    assert enrollment.status_code == 200
+    secret = enrollment.json()["secret"]
+    enabled = auth_client.post(
+        "/api/v1/auth/mfa/verify-enrollment",
+        headers=headers,
+        data={"code": security.totp_code(secret)},
+    )
+    assert enabled.status_code == 200
+
+    for _ in range(5):
+        response = auth_client.post(
+            "/api/v1/auth/mfa/disable",
+            headers=headers,
+            data={"password": "incorrect-password", "code": security.totp_code(secret)},
+        )
+        assert response.status_code == 401
+
+    locked = auth_client.post(
+        "/api/v1/auth/mfa/disable",
+        headers=headers,
+        data={"password": "LedgerGate-api-test-2026", "code": security.totp_code(secret)},
+    )
+    assert locked.status_code == 429
