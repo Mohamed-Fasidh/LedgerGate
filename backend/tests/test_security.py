@@ -1,6 +1,56 @@
 import pytest
+from datetime import datetime, timedelta, timezone
 
-from app.security import hash_password, validate_password, verify_password
+from fastapi import HTTPException
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.database import Base
+from app.models import AuthSession, LoginThrottle, Role, User
+from app.security import (
+    clear_login_failures,
+    create_access_token,
+    get_current_user,
+    hash_password,
+    login_email_key,
+    login_is_locked,
+    record_login_failure,
+    validate_password,
+    verify_password,
+)
+
+
+@pytest.fixture
+def db_session():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    db = factory()
+    try:
+        yield db
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+def make_user(db):
+    user = User(
+        tenant_id="tenant-test",
+        tenant_name="Test Workspace",
+        email="security-test@example.com",
+        hashed_password=hash_password("LedgerGate-test-password-2026"),
+        role=Role.admin,
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+    return user
 
 
 def test_password_requires_minimum_length():
@@ -40,3 +90,62 @@ def test_registration_accepts_password_within_bcrypt_utf8_byte_limit():
         email="user@example.com", password="LedgerGate-test-password-2026", tenant_name="Example"
     )
     assert payload.email == "user@example.com"
+
+
+def test_login_throttle_locks_after_five_failures_and_clears_on_success(db_session):
+    email = "LOCKOUT@example.com"
+    assert not login_is_locked(db_session, email)
+    for _ in range(5):
+        record_login_failure(db_session, email)
+        db_session.commit()
+
+    assert login_is_locked(db_session, email)
+    row = db_session.query(LoginThrottle).filter_by(email_key=login_email_key(email)).one()
+    assert row.failed_attempts == 5
+    assert row.locked_until is not None
+
+    clear_login_failures(db_session, email)
+    db_session.commit()
+    assert not login_is_locked(db_session, email)
+    row = db_session.query(LoginThrottle).filter_by(email_key=login_email_key(email)).one()
+    assert row.failed_attempts == 0
+    assert row.locked_until is None
+
+
+def test_login_throttle_lock_expires(db_session):
+    email = "expired-lock@example.com"
+    for _ in range(5):
+        record_login_failure(db_session, email)
+        db_session.commit()
+
+    row = db_session.query(LoginThrottle).filter_by(email_key=login_email_key(email)).one()
+    row.locked_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db_session.commit()
+    assert not login_is_locked(db_session, email)
+
+
+def test_access_token_creates_persisted_session_and_authenticates_user(db_session):
+    user = make_user(db_session)
+    token = create_access_token(user, db_session)
+    db_session.commit()
+
+    session = db_session.query(AuthSession).one()
+    assert session.user_id == user.id
+    assert session.tenant_id == user.tenant_id
+    assert session.jti
+    assert session.revoked_at is None
+    assert get_current_user(token=token, db=db_session).id == user.id
+
+
+def test_revoked_access_token_is_rejected(db_session):
+    user = make_user(db_session)
+    token = create_access_token(user, db_session)
+    db_session.commit()
+
+    session = db_session.query(AuthSession).one()
+    session.revoked_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        get_current_user(token=token, db=db_session)
+    assert exc.value.status_code == 401
