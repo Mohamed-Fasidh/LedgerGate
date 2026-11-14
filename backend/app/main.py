@@ -7,11 +7,11 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.database import Base, engine, get_db, set_tenant_context
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, IdempotencyRecord, InvoiceApproval, Role, InvoiceStatus
-from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, IdempotencyRecord, InvoiceApproval, ApprovalPolicy, Role, InvoiceStatus
+from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn
 from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
 from app.audit import record_event, verify_event_chain
-from app.financial_controls import ensure_independent_decision, required_invoice_approvals, ensure_reviewable_status, ensure_extraction_editable
+from app.financial_controls import ensure_independent_decision, required_invoice_approvals, ensure_reviewable_status, ensure_extraction_editable, snapshot_approval_policy, create_approval_policy_version
 from app.idempotency import begin_idempotent_request, complete_idempotent_request
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
@@ -86,7 +86,7 @@ def list_pos(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     return [po_view(x) for x in db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id==user.tenant_id).all()]
 
 def invoice_view(x,approval_count:int=0):
-    required=required_invoice_approvals(x.amount,x.currency,settings.dual_approval_threshold_inr)
+    required=x.required_approvals_snapshot or required_invoice_approvals(x.amount,x.currency,settings.dual_approval_threshold_inr)
     return {"approval_count":approval_count,"required_approvals":required,"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"created_by_user_id":x.created_by_user_id,"approved_by_user_id":x.approved_by_user_id,"rejected_by_user_id":x.rejected_by_user_id,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"created_at":x.created_at.isoformat()}
 
 @app.post("/api/v1/invoices")
@@ -96,7 +96,7 @@ def create_invoice(payload:InvoiceIn,db:Session=Depends(get_db),user:User=Depend
     if payload.purchase_order_id:
         po=db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first()
         if not po: raise HTTPException(404,"Purchase order not found")
-    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,**payload.model_dump()); db.add(obj); db.flush()
+    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,**payload.model_dump()); db.add(obj); db.flush(); snapshot_approval_policy(db,obj,user.tenant_id,user.id,settings.dual_approval_threshold_inr)
     record_event(db,user,"invoice",obj.id,"created",{"invoice_number":obj.invoice_number}); db.commit(); db.refresh(obj)
     return invoice_view(obj)
 
@@ -170,6 +170,7 @@ def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_cu
     if not inv: raise HTTPException(404,"Invoice not found")
     try: ensure_reviewable_status(inv)
     except ValueError as exc: raise HTTPException(409,str(exc))
+    snapshot_approval_policy(db,inv,user.tenant_id,user.id,settings.dual_approval_threshold_inr)
     if inv.amount is None or inv.invoice_number.startswith("UNCONFIRMED-"):
         raise HTTPException(409,"Confirm extracted invoice fields before reconciliation")
     po=None
@@ -204,7 +205,8 @@ def approve(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempoten
     if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before approval")
     prior=db.query(InvoiceApproval).filter(InvoiceApproval.tenant_id==user.tenant_id,InvoiceApproval.invoice_id==inv.id,InvoiceApproval.reviewer_user_id==user.id).first()
     if prior: raise HTTPException(409,"This reviewer has already approved the invoice")
-    required=required_invoice_approvals(inv.amount,inv.currency,settings.dual_approval_threshold_inr)
+    snapshot_approval_policy(db,inv,user.tenant_id,user.id,settings.dual_approval_threshold_inr)
+    required=inv.required_approvals_snapshot or required_invoice_approvals(inv.amount,inv.currency,settings.dual_approval_threshold_inr)
     approval=InvoiceApproval(tenant_id=user.tenant_id,invoice_id=inv.id,reviewer_user_id=user.id)
     db.add(approval)
     db.flush()
@@ -217,7 +219,7 @@ def approve(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempoten
     else:
         action="human_approval_recorded"
         message="First approval recorded. A second independent reviewer is required before approval is final."
-    record_event(db,user,"invoice",inv.id,action,{"approval_count":approval_count,"required_approvals":required,"threshold_currency":"INR","threshold_amount":settings.dual_approval_threshold_inr})
+    record_event(db,user,"invoice",inv.id,action,{"approval_count":approval_count,"required_approvals":required,"threshold_currency":"INR","threshold_amount":float(inv.approval_threshold_snapshot) if inv.approval_threshold_snapshot is not None else None,"approval_policy_version":inv.approval_policy_version})
     response={"id":inv.id,"status":inv.status.value,"approval_count":approval_count,"required_approvals":required,"message":message}
     complete_idempotent_request(idem,response)
     db.commit()
@@ -271,6 +273,35 @@ def explain_invoice(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(
     record_event(db,user,"invoice",inv.id,"ai_explanation_generated",{"provider":explanation.get("provider"),"advisory_only":True})
     db.commit()
     return {"invoice_id":inv.id,**explanation,"advisory_only":True}
+
+
+@app.get("/api/v1/approval-policies")
+def list_approval_policies(db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+    rows=db.query(ApprovalPolicy).filter(ApprovalPolicy.tenant_id==user.tenant_id).order_by(ApprovalPolicy.version.desc()).all()
+    return [{
+        "id":row.id,"version":row.version,"currency":row.currency,
+        "threshold_amount":float(row.threshold_amount),
+        "required_approvals":row.required_approvals,
+        "created_by_user_id":row.created_by_user_id,
+        "created_at":row.created_at.isoformat(),
+    } for row in rows]
+
+
+@app.post("/api/v1/approval-policies")
+def create_approval_policy(payload:ApprovalPolicyIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+    policy=create_approval_policy_version(db,user.tenant_id,user.id,payload.currency,payload.threshold_amount,payload.required_approvals)
+    record_event(db,user,"approval_policy",policy.id,"version_created",{
+        "version":policy.version,"currency":policy.currency,
+        "threshold_amount":float(policy.threshold_amount),
+        "required_approvals":policy.required_approvals,
+    })
+    db.commit()
+    return {
+        "id":policy.id,"version":policy.version,"currency":policy.currency,
+        "threshold_amount":float(policy.threshold_amount),
+        "required_approvals":policy.required_approvals,
+        "message":"New immutable policy version created. Existing invoices retain their policy snapshot.",
+    }
 
 @app.post("/api/v1/policies")
 def add_policy(payload:PolicyIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
