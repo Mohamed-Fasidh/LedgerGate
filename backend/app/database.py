@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings
@@ -16,6 +16,16 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 class Base(DeclarativeBase):
     pass
+
+
+def set_tenant_context(db, tenant_id: str) -> None:
+    """Set transaction-local tenant context for PostgreSQL RLS policies.
+
+    SQLite remains available for isolated development/unit tests; production
+    configuration rejects SQLite.
+    """
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": tenant_id})
 
 
 def get_db():
