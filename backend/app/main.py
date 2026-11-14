@@ -11,7 +11,7 @@ from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, Polic
 from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn
 from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
 from app.audit import record_event, verify_event_chain
-from app.financial_controls import ensure_independent_decision, required_invoice_approvals
+from app.financial_controls import ensure_independent_decision, required_invoice_approvals, ensure_reviewable_status, ensure_extraction_editable
 from app.idempotency import begin_idempotent_request, complete_idempotent_request
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
@@ -153,8 +153,10 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
 
 @app.post("/api/v1/invoices/{invoice_id}/confirm-extraction")
 def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
-    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
+    try: ensure_extraction_editable(inv)
+    except ValueError as exc: raise HTTPException(409,str(exc))
     if payload.supplier_id and not db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Supplier not found")
     if payload.purchase_order_id and not db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Purchase order not found")
     for k,v in payload.model_dump().items(): setattr(inv,k,v)
@@ -166,6 +168,8 @@ def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,db:Session=Dep
 def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
+    try: ensure_reviewable_status(inv)
+    except ValueError as exc: raise HTTPException(409,str(exc))
     if inv.amount is None or inv.invoice_number.startswith("UNCONFIRMED-"):
         raise HTTPException(409,"Confirm extracted invoice fields before reconciliation")
     po=None
@@ -232,7 +236,7 @@ def reject(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempotenc
     if replay is not None: return replay
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
-    if inv.status in (InvoiceStatus.APPROVED,InvoiceStatus.REJECTED): raise HTTPException(409,"Invoice is already finalized")
+    if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Only reconciled invoices awaiting a decision can be rejected")
     try: ensure_independent_decision(inv,user.id,"reject")
     except ValueError as exc: raise HTTPException(409,str(exc))
     inv.status=InvoiceStatus.REJECTED
