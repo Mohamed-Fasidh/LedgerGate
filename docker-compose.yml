@@ -5,8 +5,10 @@ services:
       POSTGRES_DB: ledgergate
       POSTGRES_USER: ledgergate
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_local_only}
+      LEDGERGATE_RUNTIME_PASSWORD: ${LEDGERGATE_RUNTIME_PASSWORD:-runtime_local_only_change_me}
     volumes:
       - ledgergate_pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/01-create-runtime-role.sh:/docker-entrypoint-initdb.d/01-create-runtime-role.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ledgergate -d ledgergate"]
       interval: 5s
@@ -29,7 +31,7 @@ services:
     build: ./backend
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://ledgergate:${POSTGRES_PASSWORD:-change_me_local_only}@db:5432/ledgergate
+      DATABASE_URL: postgresql+psycopg://ledgergate_runtime:${LEDGERGATE_RUNTIME_PASSWORD:-runtime_local_only_change_me}@db:5432/ledgergate
       UPLOAD_DIR: /app/uploads
     ports:
       - "8000:8000"
