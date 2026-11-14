@@ -1,5 +1,6 @@
 """Database-backed idempotency for state-changing API operations."""
 import hashlib
+import hmac
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -7,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 
 from app.models import IdempotencyRecord
+from app.config import settings
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -24,8 +26,7 @@ def _request_hash(operation: str, payload: dict) -> str:
         ensure_ascii=False,
         default=str,
     )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
+    # Key the fingerprint so low-entropy secrets (for example, a password in a\n    # user-provisioning request) cannot be guessed from a database dump.\n    return hmac.new(\n        settings.jwt_secret_key.encode("utf-8"),\n        canonical.encode("utf-8"),\n        hashlib.sha256,\n    ).hexdigest()\n
 
 def begin_idempotent_request(db, user, key: str | None, operation: str, payload: dict):
     """Return (record, replay_body); serialize same-key requests on PostgreSQL.
