@@ -127,3 +127,100 @@ def test_logout_revokes_access_and_paired_refresh_token(auth_client):
 def test_logout_requires_authentication(auth_client):
     response = auth_client.post("/api/v1/auth/logout")
     assert response.status_code == 401
+
+
+
+def test_mfa_enrollment_login_and_disable_flow(auth_client, monkeypatch):
+    from app import security
+
+    monkeypatch.setattr(
+        security.settings,
+        "app_encryption_key",
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+    )
+    registered = register_account(auth_client, "mfa-api@example.com")
+    assert registered.status_code == 200
+    initial = registered.json()
+    auth_headers = {"Authorization": f"Bearer {initial['access_token']}"}
+
+    enrollment = auth_client.post(
+        "/api/v1/auth/mfa/enroll",
+        headers=auth_headers,
+    )
+    assert enrollment.status_code == 200
+    secret = enrollment.json()["secret"]
+    assert enrollment.json()["provisioning_uri"].startswith("otpauth://totp/")
+    assert secret
+
+    code = security.totp_code(secret)
+    verified = auth_client.post(
+        "/api/v1/auth/mfa/verify-enrollment",
+        headers=auth_headers,
+        data={"code": code},
+    )
+    assert verified.status_code == 200
+    assert verified.json()["mfa_enabled"] is True
+
+    missing_code = auth_client.post(
+        "/api/v1/auth/token",
+        data={
+            "username": "mfa-api@example.com",
+            "password": "LedgerGate-api-test-2026",
+        },
+    )
+    assert missing_code.status_code == 401
+
+    mfa_login = auth_client.post(
+        "/api/v1/auth/token",
+        data={
+            "username": "mfa-api@example.com",
+            "password": "LedgerGate-api-test-2026",
+            "totp_code": security.totp_code(secret),
+        },
+    )
+    assert mfa_login.status_code == 200
+    logged_in = mfa_login.json()
+    login_headers = {"Authorization": f"Bearer {logged_in['access_token']}"}
+
+    disabled = auth_client.post(
+        "/api/v1/auth/mfa/disable",
+        headers=login_headers,
+        data={
+            "password": "LedgerGate-api-test-2026",
+            "code": security.totp_code(secret),
+        },
+    )
+    assert disabled.status_code == 200
+    assert disabled.json()["mfa_enabled"] is False
+
+    password_login = auth_client.post(
+        "/api/v1/auth/token",
+        data={
+            "username": "mfa-api@example.com",
+            "password": "LedgerGate-api-test-2026",
+        },
+    )
+    assert password_login.status_code == 200
+
+
+def test_mfa_enrollment_rejects_invalid_code(auth_client, monkeypatch):
+    from app import security
+
+    monkeypatch.setattr(
+        security.settings,
+        "app_encryption_key",
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+    )
+    registered = register_account(auth_client, "mfa-invalid@example.com")
+    assert registered.status_code == 200
+    headers = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+
+    enrollment = auth_client.post("/api/v1/auth/mfa/enroll", headers=headers)
+    assert enrollment.status_code == 200
+
+    invalid = auth_client.post(
+        "/api/v1/auth/mfa/verify-enrollment",
+        headers=headers,
+        data={"code": "000000"},
+    )
+    assert invalid.status_code == 400
