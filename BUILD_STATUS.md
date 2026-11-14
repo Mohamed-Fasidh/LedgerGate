@@ -24,6 +24,7 @@
 - Docker Compose now provisions a separate non-owner `ledgergate_runtime` role for API traffic; migrations continue to use the database bootstrap/migration account.
 - Added a PostgreSQL RLS integration test covering no-context denial, tenant-only visibility, cross-tenant insert rejection, and tenant-context reapplication after commit.
 - Audit events now carry per-tenant SHA-256 hash links; PostgreSQL writers serialize through transaction-scoped advisory locks and UPDATE/DELETE are blocked by a database trigger. Existing audit rows are backfilled by migration.
+- Invoice approve/reject now support optional database-backed idempotency keys, request-hash conflict detection, same-response replay, tenant/user scoping, PostgreSQL advisory-lock serialization, and 24-hour expiry. The migration applies tenant RLS to the idempotency table.
 - GitHub Actions backend job now starts PostgreSQL 16, applies Alembic migrations, and runs tests as the restricted runtime role.
 
 ## Validation status
@@ -38,7 +39,7 @@
 3. Invoice files are stored on local disk. Private encrypted object storage, malware scanning, retention/deletion, and access-controlled downloads are not implemented.
 4. SSO/OIDC, MFA, email verification, password reset, refresh-token rotation/revocation, and login throttling are not implemented.
 5. Audit events are hash-chained and protected from ordinary UPDATE/DELETE by a PostgreSQL trigger, but external WORM replication and independent checkpoints remain outstanding.
-6. Idempotency keys, configurable dual approval thresholds, policy versioning, and broader optimistic locking need implementation. Maker-checker creator/decision-maker tracking is now present.
+6. Idempotency is implemented for invoice approve/reject only. Configurable dual-approval thresholds, policy versioning, idempotency for other mutations, and broader optimistic locking remain outstanding. Maker-checker creator/decision-maker tracking is present.
 7. No completed penetration test, load test, disaster-recovery restore drill, or jurisdiction-specific privacy/compliance review.
 8. Render/Vercel deployment has not been executed or smoke-tested.
 
