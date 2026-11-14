@@ -41,7 +41,7 @@ def login(username:str=Form(...),password:str=Form(...),db:Session=Depends(get_d
 
 @app.post("/api/v1/users")
 def create_tenant_user(email:str,password:str=Form(...),role:str=Form("analyst"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
-    if len(password)<12 or len(password)>72: raise HTTPException(400,"Password must be 12-72 characters")
+    if len(password)<12 or len(password.encode("utf-8"))>72: raise HTTPException(400,"Password must be at least 12 characters and no more than 72 UTF-8 bytes")
     if role not in ("analyst","reviewer"): raise HTTPException(400,"Only analyst or reviewer accounts can be created here")
     if db.query(User).filter(User.email==email.lower()).first(): raise HTTPException(409,"Email already registered")
     member=User(tenant_id=user.tenant_id,tenant_name=user.tenant_name,email=email.lower(),hashed_password=hash_password(password),role=Role(role))
