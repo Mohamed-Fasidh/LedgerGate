@@ -1,6 +1,7 @@
 'use client';
 import {useEffect,useState} from 'react';
-const API=process.env.NEXT_PUBLIC_API_URL||'http://localhost:8000/api/v1';\nconst API_DOCS=process.env.NEXT_PUBLIC_API_DOCS_URL||'http://localhost:8000/docs';
+const API=process.env.NEXT_PUBLIC_API_URL||'http://localhost:8000/api/v1';
+const API_DOCS=process.env.NEXT_PUBLIC_API_DOCS_URL||'http://localhost:8000/docs';
 type Invoice={id:number;invoice_number:string;amount:number|null;currency:string;status:string;reconciliation:any;extraction_fields:any;purchase_order_id:number|null};
 type Supplier={id:number;name:string};
 type PO={id:number;po_number:string;supplier_id:number;total_amount:number;currency:string};
@@ -14,7 +15,8 @@ export default function Home(){
  async function request(path:string,opts:any={}){const r=await fetch(API+path,{...opts,headers:{...(opts.headers||{}),...(token?{Authorization:`Bearer ${token}`}:{})}});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Request failed');return d;}
  async function auth(mode:'register'|'login'){setBusy(true);setError('');try{let d;if(mode==='register')d=await request('/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,tenant_name:tenant})});else{const f=new URLSearchParams({username:email,password});const r=await fetch(API+'/auth/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:f});d=await r.json();if(!r.ok)throw new Error(d.detail||'Login failed');}sessionStorage.setItem('ledgergate_token',d.access_token);setToken(d.access_token);}catch(e:any){setError(e.message)}finally{setBusy(false)}}
  async function load(){try{const [i,s,p]=await Promise.all([request('/invoices'),request('/suppliers'),request('/purchase-orders')]);setInvoices(i);setSuppliers(s);setPos(p);}catch(e:any){setError(e.message)}}
- useEffect(()=>{const saved=sessionStorage.getItem('ledgergate_token');if(saved)setToken(saved);},[]);\n useEffect(()=>{if(token)load();},[token]);
+ useEffect(()=>{const saved=sessionStorage.getItem('ledgergate_token');if(saved)setToken(saved);},[]);
+ useEffect(()=>{if(token)load();},[token]);
  async function run(action:()=>Promise<any>,message:string){setBusy(true);setError('');setNotice('');try{await action();await load();setNotice(message);}catch(e:any){setError(e.message)}finally{setBusy(false)}}
  async function addSupplier(){await run(async()=>{await request('/suppliers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:supplierName})});setSupplierName('');},'Supplier created.')}
  async function addPO(){await run(async()=>{await request('/purchase-orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({po_number:poNo,supplier_id:Number(poSupplier),currency:'INR',total_amount:Number(poAmount)})});setPoNo('');setPoAmount('');},'Purchase order created.')}
