@@ -10,6 +10,7 @@ from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, Polic
 from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn
 from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
 from app.audit import record_event, verify_event_chain
+from app.financial_controls import ensure_independent_decision
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
 from app.services.retrieval import retrieve_policy, retrieve_business_records
@@ -180,7 +181,8 @@ def approve(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
-    if inv.created_by_user_id is not None and inv.created_by_user_id == user.id: raise HTTPException(409,"Maker-checker policy: the invoice creator cannot approve their own invoice")
+    try: ensure_independent_decision(inv,user.id,"approve")
+    except ValueError as exc: raise HTTPException(409,str(exc))
     if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before approval")
     inv.status=InvoiceStatus.APPROVED
     inv.approved_by_user_id=user.id
@@ -192,7 +194,8 @@ def reject(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_r
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status in (InvoiceStatus.APPROVED,InvoiceStatus.REJECTED): raise HTTPException(409,"Invoice is already finalized")
-    if inv.created_by_user_id is not None and inv.created_by_user_id == user.id: raise HTTPException(409,"Maker-checker policy: the invoice creator cannot reject their own invoice")
+    try: ensure_independent_decision(inv,user.id,"reject")
+    except ValueError as exc: raise HTTPException(409,str(exc))
     inv.status=InvoiceStatus.REJECTED; inv.rejected_by_user_id=user.id; record_event(db,user,"invoice",inv.id,"human_rejected",{})
     db.commit(); return {"id":inv.id,"status":inv.status.value}
 
