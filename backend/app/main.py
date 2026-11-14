@@ -1,16 +1,17 @@
 import uuid, hashlib, os
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.database import Base, engine, get_db, set_tenant_context
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, Role, InvoiceStatus
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, IdempotencyRecord, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn
 from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
 from app.audit import record_event, verify_event_chain
 from app.financial_controls import ensure_independent_decision
+from app.idempotency import begin_idempotent_request, complete_idempotent_request
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
 from app.services.retrieval import retrieve_policy, retrieve_business_records
@@ -177,7 +178,9 @@ def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_cu
     return {"invoice_id":inv.id,"status":inv.status.value,"decision":decision,"findings":result.findings,"evidence":evidence,"requires_human_review":decision=="HUMAN_REVIEW"}
 
 @app.post("/api/v1/invoices/{invoice_id}/approve")
-def approve(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+def approve(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+    idem,replay=begin_idempotent_request(db,user,idempotency_key,"invoice.approve",{"invoice_id":invoice_id})
+    if replay is not None: return replay
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
@@ -187,17 +190,27 @@ def approve(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_
     inv.status=InvoiceStatus.APPROVED
     inv.approved_by_user_id=user.id
     record_event(db,user,"invoice",inv.id,"human_approved",{"warning":"Approval recorded; no payment is initiated."})
-    db.commit(); return {"id":inv.id,"status":inv.status.value,"message":"Human approval recorded. No payment was initiated."}
+    response={"id":inv.id,"status":inv.status.value,"message":"Human approval recorded. No payment was initiated."}
+    complete_idempotent_request(idem,response)
+    db.commit()
+    return response
 
 @app.post("/api/v1/invoices/{invoice_id}/reject")
-def reject(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+def reject(invoice_id:int,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+    idem,replay=begin_idempotent_request(db,user,idempotency_key,"invoice.reject",{"invoice_id":invoice_id})
+    if replay is not None: return replay
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status in (InvoiceStatus.APPROVED,InvoiceStatus.REJECTED): raise HTTPException(409,"Invoice is already finalized")
     try: ensure_independent_decision(inv,user.id,"reject")
     except ValueError as exc: raise HTTPException(409,str(exc))
-    inv.status=InvoiceStatus.REJECTED; inv.rejected_by_user_id=user.id; record_event(db,user,"invoice",inv.id,"human_rejected",{})
-    db.commit(); return {"id":inv.id,"status":inv.status.value}
+    inv.status=InvoiceStatus.REJECTED
+    inv.rejected_by_user_id=user.id
+    record_event(db,user,"invoice",inv.id,"human_rejected",{})
+    response={"id":inv.id,"status":inv.status.value}
+    complete_idempotent_request(idem,response)
+    db.commit()
+    return response
 
 @app.post("/api/v1/agent/memory")
 def add_agent_memory(content:str,memory_type:str="episodic",db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
