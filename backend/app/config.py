@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     upload_dir: str = "./uploads"
     max_upload_mb: int = 15
+    max_upload_pdf_pages: int = 100
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -26,6 +27,9 @@ if settings.access_token_expire_minutes < 5 or settings.access_token_expire_minu
 
 if settings.max_upload_mb < 1 or settings.max_upload_mb > 50:
     raise RuntimeError("MAX_UPLOAD_MB must be between 1 and 50")
+
+if settings.max_upload_pdf_pages < 1 or settings.max_upload_pdf_pages > 500:
+    raise RuntimeError("MAX_UPLOAD_PDF_PAGES must be between 1 and 500")
 
 if settings.jwt_algorithm != "HS256":
     raise RuntimeError("Only HS256 is supported by this deployment configuration")
