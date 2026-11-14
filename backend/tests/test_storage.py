@@ -186,3 +186,29 @@ def test_successful_document_cleanup_does_not_log(monkeypatch, caplog):
     assert result is True
     assert calls == [("tenant-a/object.pdf", "tenant-a")]
     assert caplog.text == ""
+
+
+@pytest.mark.skipif(
+    __import__("os").environ.get("LEDGERGATE_S3_INTEGRATION") != "1",
+    reason="Set LEDGERGATE_S3_INTEGRATION=1 to run against a real private S3 bucket",
+)
+def test_real_s3_upload_download_and_delete_round_trip():
+    import uuid
+
+    if storage.settings.storage_backend != "s3" or not storage.settings.s3_bucket:
+        pytest.skip("Configure STORAGE_BACKEND=s3 and S3_BUCKET for integration testing")
+
+    tenant_id = f"ci-{uuid.uuid4().hex[:16]}"
+    content = b"LedgerGate private S3 integration test"
+    key = storage.save_document(content, tenant_id, ".txt")
+    client = storage._s3_client()
+    try:
+        response = client.get_object(Bucket=storage.settings.s3_bucket, Key=key)
+        assert response["Body"].read() == content
+        assert response.get("ServerSideEncryption") == "AES256"
+        url = storage.create_download_url(key, tenant_id)
+        assert url.startswith("https://") or storage.settings.s3_endpoint_url
+    finally:
+        storage.delete_document(key, tenant_id)
+    with pytest.raises(Exception):
+        client.head_object(Bucket=storage.settings.s3_bucket, Key=key)

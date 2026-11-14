@@ -48,3 +48,15 @@ Malware scanning, content disarm/reconstruction, parser sandboxing, advanced fil
 ## Validation and release checks
 
 The test suite mocks S3 calls and verifies encryption parameters, tenant-prefix checks, short-lived download URL expiry, and object deletion behavior. These tests do not contact AWS or prove a real bucket's policy. Before release, run an isolated integration test against a private non-production bucket, verify cross-tenant download denial through the API, confirm deletion permissions, and inspect CloudTrail or equivalent object-access logs.
+
+
+## Optional real-bucket integration test
+
+The default CI suite mocks S3 and does not require cloud credentials. To exercise the real provider adapter against a dedicated **non-production test bucket**, configure the normal S3 environment variables and run:
+
+```bash
+cd backend
+LEDGERGATE_S3_INTEGRATION=1 pytest -q tests/test_storage.py -k real_s3
+```
+
+The test uploads a uniquely named tenant-scoped object, reads it back, checks server-side encryption metadata, creates a short-lived presigned URL, and deletes the object in a `finally` block. The test identity needs only the bucket permissions required for object upload, read/head, and delete. Do not point this test at a production bucket.
