@@ -182,7 +182,12 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
     return invoice_view(obj)
 
 @app.post("/api/v1/invoices/{invoice_id}/confirm-extraction")
-def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    idem,replay=begin_idempotent_request(
+        db,user,idempotency_key,"invoice.confirm_extraction",
+        {"invoice_id":invoice_id,**payload.model_dump()},
+    )
+    if replay is not None: return replay
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     try: ensure_extraction_editable(inv)
@@ -193,7 +198,9 @@ def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,db:Session=Dep
     inv.status=InvoiceStatus.received
     snapshot_approval_policy(db,inv,user.tenant_id,user.id,settings.dual_approval_threshold_inr)
     record_event(db,user,"invoice",inv.id,"extraction_confirmed",{"invoice_number":inv.invoice_number,"amount":payload.amount})
-    db.commit(); db.refresh(inv); return invoice_view(inv)
+    response=invoice_view(inv)
+    complete_idempotent_request(idem,response)
+    db.commit(); db.refresh(inv); return response
 
 @app.post("/api/v1/invoices/{invoice_id}/reconcile",response_model=ReconcileOut)
 def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
