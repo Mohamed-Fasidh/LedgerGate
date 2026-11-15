@@ -2,11 +2,14 @@
 
 | Threat | Example | Current mitigation | Remaining work |
 |---|---|---|---|
-| Cross-tenant access | User guesses invoice ID | Tenant filters on API queries | PostgreSQL RLS and integration tests |
-| Malicious upload | Crafted PDF | Extension, size, signature checks | AV scan, content sniffing, sandbox parsing |
-| Prompt injection | Invoice text says ignore policy | Document text not executed as instructions | Retrieval isolation, explicit prompt-injection tests |
+| Cross-tenant business-data access | User guesses an invoice ID or submits another tenant's ID | Tenant filters on API queries; PostgreSQL RLS with FORCE RLS on tenant-owned business tables and a non-owner runtime role; PostgreSQL integration tests | Extend automated coverage to every tenant-owned table and background worker |
+| Pre-authentication identity-table access | A compromised application DB credential queries users or password-reset records across tenants | Authentication must locate an account before tenant context is known; password-reset tokens are random, stored as SHA-256 hashes, expire, and are single-use; account queries after tenant discovery include tenant ID | These tables are intentionally outside tenant RLS today. Runtime role currently has broad DML grants; introduce a narrowly scoped authentication data-access boundary (e.g. carefully reviewed SECURITY DEFINER routines or a separate credential) and test it under the actual runtime role before restricting grants |
+| Login lockout denial of service | Attacker repeatedly submits failures for a victim's email to trigger the shared account lock | Persistent email-keyed throttle, serialized with PostgreSQL advisory locks; lockout response is generic | Add layered source/network throttling and abuse monitoring; design recovery that does not let attackers indefinitely lock out a legitimate user; trust forwarded client IP only behind explicitly trusted proxies |
+| Password-reset abuse | Attacker repeatedly requests reset messages for a known address | Uniform 202 response prevents direct account-existence disclosure; tokens are hashed, short-lived, and single-use | Add per-source and per-account request quotas, delivery-provider limits, monitoring, and tests for enumeration and mail flooding |
+| Malicious upload | Crafted PDF | Extension, size, signature checks; production requires private object storage and malware scanning | Content sniffing, parser sandboxing, CPU/memory/decompression limits |
+| Prompt injection | Invoice text says ignore policy | Document text is not executed as instructions | Retrieval isolation and explicit prompt-injection tests |
 | Tool abuse | Call arbitrary command | Allowlisted tool registry | Per-tool scopes, rate limits, security review |
-| Model hallucination | Fabricated explanation | Model only explains deterministic evidence | Output validation and reviewer feedback |
-| Credential theft | Leaked JWT | Short-lived JWT | Refresh rotation, revocation, MFA |
-| Audit tampering | Admin edits history | Audit events in DB | WORM storage and hash chain |
-| Duplicate action | Repeated approval request | Finalized status checks | Idempotency keys and concurrency locking |
+| Model hallucination | Fabricated explanation | Model only explains deterministic evidence; AI output cannot authorize payments | Output validation and reviewer feedback |
+| Credential theft | Leaked JWT or refresh token | Short-lived JWT, refresh-token rotation/revocation, optional TOTP MFA, session controls | SSO/OIDC, email verification, device metadata/notifications, key rotation |
+| Audit tampering | Administrator edits history | Tenant-scoped append-only database audit events with hash chain and PostgreSQL trigger | External WORM storage, independent checkpoints/signatures, privileged-user tamper monitoring |
+| Duplicate action | Repeated approval request | Finalized status checks, idempotency keys for approval/rejection, concurrency locking | Extend idempotency to other financial mutations |
