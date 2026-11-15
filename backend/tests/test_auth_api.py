@@ -540,3 +540,54 @@ def test_logout_all_revokes_every_access_and_refresh_session(auth_client):
             json={"refresh_token": token},
         )
         assert denied.status_code == 401
+
+def test_session_revocation_is_idempotent(auth_client):
+    registered = register_account(auth_client, "session-idempotency@example.com")
+    assert registered.status_code == 200
+    headers = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+    second_login = auth_client.post(
+        "/api/v1/auth/token",
+        data={
+            "username": "session-idempotency@example.com",
+            "password": "LedgerGate-api-test-2026",
+        },
+    )
+    assert second_login.status_code == 200
+    sessions = auth_client.get("/api/v1/auth/sessions", headers=headers).json()
+    target = next(item for item in sessions if not item["current"])
+    request_headers = {**headers, "Idempotency-Key": "revoke-session-0001"}
+
+    first = auth_client.delete(
+        f"/api/v1/auth/sessions/{target['id']}",
+        headers=request_headers,
+    )
+    replay = auth_client.delete(
+        f"/api/v1/auth/sessions/{target['id']}",
+        headers=request_headers,
+    )
+
+    assert first.status_code == replay.status_code == 200
+    assert first.json() == replay.json() == {"revoked": True}
+    different_request = auth_client.delete(
+        f"/api/v1/auth/sessions/{target['id']}",
+        headers={**headers, "Idempotency-Key": "revoke-session-0002"},
+    )
+    assert different_request.status_code == 404
+
+
+def test_logout_all_is_idempotent(auth_client):
+    registered = register_account(auth_client, "logout-all-idempotency@example.com")
+    assert registered.status_code == 200
+    headers = {
+        "Authorization": f"Bearer {registered.json()['access_token']}",
+        "Idempotency-Key": "logout-all-sessions-0001",
+    }
+
+    first = auth_client.post("/api/v1/auth/logout-all", headers=headers)
+    replay = auth_client.post("/api/v1/auth/logout-all", headers=headers)
+
+    expected = {
+        "message": "All active sessions have been revoked. Sign in again on each device."
+    }
+    assert first.status_code == replay.status_code == 200
+    assert first.json() == replay.json() == expected
