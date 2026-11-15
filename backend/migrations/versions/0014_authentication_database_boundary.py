@@ -93,7 +93,27 @@ def upgrade() -> None:
         SET search_path = pg_catalog, public
         AS $fn$
         BEGIN
-          UPDATE public.password_reset_tokens SET used_at = now() WHERE user_id = p_user_id AND used_at IS NULL;
+          -- Do not let a runtime caller mint a reset token for an arbitrary
+          -- user/tenant pair. A no-op keeps the public reset response generic.
+          IF p_user_id IS NULL OR p_tenant_id IS NULL OR p_token_hash IS NULL
+             OR p_expires_at IS NULL
+             OR p_expires_at <= now()
+             OR p_expires_at > now() + interval '15 minutes'
+             OR NOT EXISTS (
+               SELECT 1 FROM public.users AS u
+               WHERE u.id = p_user_id
+                 AND u.tenant_id = p_tenant_id
+                 AND u.is_active = TRUE
+             ) THEN
+            RETURN;
+          END IF;
+
+          UPDATE public.password_reset_tokens
+          SET used_at = now()
+          WHERE user_id = p_user_id
+            AND tenant_id = p_tenant_id
+            AND used_at IS NULL;
+
           INSERT INTO public.password_reset_tokens (user_id, tenant_id, token_hash, expires_at, created_at)
           VALUES (p_user_id, p_tenant_id, p_token_hash, p_expires_at, now());
         END
