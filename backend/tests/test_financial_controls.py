@@ -135,3 +135,11 @@ def test_first_invoice_creates_default_policy_and_snapshots_it():
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+def test_explicit_foreign_currency_policy_is_supported():
+    from app.schemas import ApprovalPolicyIn
+
+    policy = ApprovalPolicyIn(currency="usd", threshold_amount=50000, required_approvals=2)
+    assert policy.currency == "USD"
+    assert policy.threshold_amount == 50000
