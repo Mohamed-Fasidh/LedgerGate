@@ -9,7 +9,7 @@
 - Deterministic invoice-to-PO reconciliation for amount, currency, supplier, missing PO, and duplicate cases.
 - Maker-checker controls, append-only versioned approval policies scoped by tenant and currency, invoice policy snapshots, and configurable distinct-reviewer approvals for high-value invoices.
 - Approval-history and audit-event APIs, per-tenant SHA-256 audit hash chains, database protections against ordinary audit UPDATE/DELETE, and audit-chain verification.
-- Database-backed idempotency support for invoice approval/rejection.
+- Database-backed idempotency for tenant-user, supplier, purchase-order, invoice creation/upload, extraction confirmation, reconciliation, approval/rejection, agent-memory, approval-policy, policy-document creation, and active-session revocation. Logout-all intentionally remains non-replayable because it revokes the caller's access token.
 - Custom finite-state agent runtime, allowlisted tool executor, MCP stdio tools, tenant-scoped retrieval, and optional Ollama/vLLM advisory explanation adapters.
 - Private S3-compatible storage implementation with tenant-scoped object keys, SSE-S3 upload requests, short-lived presigned downloads, and storage reconciliation tooling.
 - Frontend invoice workflows, refresh-token retry, MFA enrollment/disable and TOTP login input, approval policy management, approval progress, audit event browsing and integrity status.
@@ -28,7 +28,7 @@
 3. Complete a live S3 integration and policy review: IAM/workload identity, bucket public-access block, encryption, lifecycle/retention, versioning, deletion, monitoring, and restore validation.
 4. Configure production SMTP and an HTTPS password-reset page; SSO/OIDC and email verification remain outstanding.
 5. Configure external WORM audit replication and independent integrity checkpoints.
-6. Add idempotency to other mutation routes where required, and review optimistic locking/concurrent updates across all workflows.
+6. Review remaining mutation routes for idempotency requirements and add concurrency/optimistic-locking coverage across all workflows.
 7. Run a full security review, dependency/SAST/DAST scans, penetration test, abuse/rate-limit review, and threat-model sign-off.
 8. Run load/performance tests, backup/PITR verification, disaster-recovery restore drills, alerting, and incident-response exercises.
 9. Execute a real deployment with managed secrets, TLS ingress/WAF, private networking, least-privilege credentials, and end-to-end smoke tests.
