@@ -109,7 +109,13 @@ def create_download_url(key: str, tenant_id: str) -> str:
         raise RuntimeError("Presigned URLs are available only with S3 storage")
     return _s3_client().generate_presigned_url(
         "get_object",
-        Params={"Bucket": settings.s3_bucket, "Key": key},
+        Params={
+            "Bucket": settings.s3_bucket,
+            "Key": key,
+            "ResponseContentDisposition": "attachment",
+            "ResponseContentType": "application/pdf" if key.endswith(".pdf") else "text/plain; charset=utf-8",
+            "ResponseCacheControl": "private, no-store",
+        },
         ExpiresIn=settings.s3_presigned_url_expiry_seconds,
     )
 
