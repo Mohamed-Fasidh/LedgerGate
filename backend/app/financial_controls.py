@@ -50,22 +50,28 @@ def snapshot_approval_policy(db, invoice, tenant_id: str, actor_user_id: int, de
             {"lock_key": "approval-policy:" + tenant_id},
         )
     currency = (invoice.currency or "INR").upper()
-    if currency != "INR":
-        invoice.required_approvals_snapshot = 1
-        invoice.approval_threshold_snapshot = None
-        return
     policy = db.query(ApprovalPolicy).filter(
         ApprovalPolicy.tenant_id == tenant_id,
         ApprovalPolicy.currency == currency,
     ).order_by(ApprovalPolicy.version.desc()).first()
-    if policy is None:
+
+    # Keep the legacy INR default for existing tenants. Other currencies use
+    # single approval until an administrator explicitly configures a threshold
+    # denominated in that currency; no implicit FX rate is guessed.
+    if policy is None and currency == "INR":
         policy = ApprovalPolicy(
-            tenant_id=tenant_id, version=1, currency="INR",
+            tenant_id=tenant_id, version=1, currency=currency,
             threshold_amount=default_threshold, required_approvals=2,
             created_by_user_id=actor_user_id,
         )
         db.add(policy)
         db.flush()
+
+    if policy is None:
+        invoice.required_approvals_snapshot = 1
+        invoice.approval_threshold_snapshot = None
+        return
+
     invoice.approval_policy_id = policy.id
     invoice.approval_policy_version = policy.version
     invoice.approval_threshold_snapshot = policy.threshold_amount
