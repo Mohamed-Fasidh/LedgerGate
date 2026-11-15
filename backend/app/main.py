@@ -279,10 +279,7 @@ def disable_mfa(password:str=Form(...),code:str=Form(...),db:Session=Depends(get
 
 
 @app.post("/api/v1/auth/logout-all")
-def logout_all_sessions(idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
-    idem,replay=begin_idempotent_request(db,user,idempotency_key,"auth.sessions.revoke_all",{})
-    if replay is not None:
-        return replay
+def logout_all_sessions(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     now=__import__("datetime").datetime.now(__import__("datetime").timezone.utc)
     db.query(AuthSession).filter(
         AuthSession.user_id==user.id,
@@ -293,10 +290,8 @@ def logout_all_sessions(idempotency_key:str|None=Header(None,alias="Idempotency-
         AuthSession.refresh_token_hash: None,
         AuthSession.refresh_expires_at: None,
     }, synchronize_session=False)
-    response={"message":"All active sessions have been revoked. Sign in again on each device."}
-    complete_idempotent_request(idem,response)
     db.commit()
-    return response
+    return {"message":"All active sessions have been revoked. Sign in again on each device."}
 
 @app.post("/api/v1/users")
 def create_tenant_user(email:str,password:str=Form(...),role:str=Form("analyst"),idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
