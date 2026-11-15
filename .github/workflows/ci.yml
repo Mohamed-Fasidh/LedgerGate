@@ -2,9 +2,9 @@ name: LedgerGate CI
 
 on:
   push:
-    branches: [main, production-readiness, complete-enterprise-readiness]
+    branches: [main, production-readiness, complete-enterprise-readiness, ledgergate-completion]
   pull_request:
-    branches: [main]
+    branches: [main, production-readiness]
   workflow_dispatch:
 
 permissions:
