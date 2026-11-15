@@ -13,7 +13,7 @@ from app.config import settings
 from app.database import Base, engine, get_db, set_tenant_context
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, IdempotencyRecord, InvoiceApproval, ApprovalPolicy, AuthSession, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, RefreshTokenIn, PasswordResetRequestIn, PasswordResetConfirmIn
-from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles, login_is_locked, record_login_failure, clear_login_failures, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, verify_totp, totp_provisioning_uri, issue_refresh_token, rotate_refresh_token, revoke_current_session, issue_password_reset_token, reset_password_with_token, oauth2_scheme
+from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles, login_is_locked, record_login_failure, clear_login_failures, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, verify_totp, totp_provisioning_uri, issue_refresh_token, rotate_refresh_token, revoke_current_session, issue_password_reset_token, reset_password_with_token, oauth2_scheme, find_user_for_authentication, email_exists
 from app.audit import record_event, verify_event_chain
 from app.financial_controls import ensure_independent_decision, required_invoice_approvals, ensure_reviewable_status, ensure_extraction_editable, snapshot_approval_policy, create_approval_policy_version
 from app.idempotency import begin_idempotent_request, complete_idempotent_request
@@ -97,7 +97,7 @@ def login(username:str=Form(...),password:str=Form(...),totp_code:str|None=Form(
     email=username.strip().lower()
     if login_is_locked(db,email):
         raise HTTPException(429,"Too many failed login attempts. Try again in 15 minutes.")
-    user=db.query(User).filter(User.email==email).first()
+    user=find_user_for_authentication(db,email)
     if not user or not user.is_active or not verify_password(password,user.hashed_password):
         record_login_failure(db,email)
         db.commit()
@@ -135,7 +135,7 @@ def refresh_auth_tokens(payload:RefreshTokenIn,db:Session=Depends(get_db)):
 @app.post("/api/v1/auth/password-reset/request", status_code=202)
 def request_password_reset(payload: PasswordResetRequestIn, db: Session = Depends(get_db)):
     # Always return the same response to avoid revealing registered accounts.
-    user = db.query(User).filter(User.email == payload.email.lower(), User.is_active.is_(True)).first()
+    user = find_user_for_authentication(db, payload.email.lower())
     if user:
         token = issue_password_reset_token(db, user)
         db.commit()
@@ -300,7 +300,7 @@ def create_tenant_user(email:str,password:str=Form(...),role:str=Form("analyst")
     if role not in ("analyst","reviewer"): raise HTTPException(400,"Only analyst or reviewer accounts can be created here")
     idem,replay=begin_idempotent_request(db,user,idempotency_key,"tenant_user.create",{"email":normalized_email,"password":password,"role":role})
     if replay is not None: return replay
-    if db.query(User).filter(User.email==normalized_email).first(): raise HTTPException(409,"Email already registered")
+    if email_exists(db, normalized_email): raise HTTPException(409,"Email already registered")
     member=User(tenant_id=user.tenant_id,tenant_name=user.tenant_name,email=normalized_email,hashed_password=hash_password(password),role=Role(role))
     db.add(member); db.flush(); record_event(db,user,"user",member.id,"tenant_user_created",{"email":member.email,"role":role})
     response={"id":member.id,"email":member.email,"role":member.role.value}
