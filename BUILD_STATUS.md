@@ -1,52 +1,38 @@
 # Build and verification status
 
-## Implemented in this branch
-- Existing FastAPI application and PostgreSQL/Docker configuration.
-- JWT authentication, workspace registration, admin-created tenant users, and role checks.
-- Tenant-scoped suppliers, purchase orders, invoices, policies, memories, and audit events at the application-query layer.
-- PDF/TXT upload, text extraction, regex-based candidate extraction, optional Tesseract OCR fallback.
-- Human confirmation gate before invoice reconciliation.
-- Deterministic invoice-vs-PO reconciliation for amount, currency, supplier, missing PO, and duplicate cases.
-- Human review/approval/rejection; no payment initiation.
-- Custom finite-state agent runtime and Pydantic allowlisted tool executor.
-- MCP stdio tools delegating through a tenant-authenticated API token.
-- Hybrid lexical/fuzzy retrieval baseline and tenant-scoped memory retrieval.
-- Optional Ollama and vLLM advisory explanation adapters.
-- Next.js dashboard, docs, Docker Compose, and Alembic migrations.
-- Production configuration now rejects SQLite, non-PostgreSQL URLs, weak JWT secrets, wildcard/non-HTTPS CORS origins, unsupported JWT algorithms, and invalid token/upload limits.
-- Password validation enforces bcrypt's 72-byte input limit; added focused password tests.
-- Docker API container runs as non-root; database migrations run as a one-shot Compose service before API startup instead of in every API replica.
-- Frontend public API and API-docs URLs are configurable at Next.js build time.
-- GitHub Actions workflow added for Python compile/pytest and Next.js production build.
-- PostgreSQL RLS migration added for suppliers, purchase orders, invoices, policy documents, agent memories, and audit events, using ENABLE + FORCE ROW LEVEL SECURITY and tenant-scoped USING/WITH CHECK policies.
-- Authenticated requests now set a transaction-local tenant context; SQLAlchemy reapplies it on each transaction, including transactions opened after commits. Workspace registration sets its new tenant context before inserting the first user.
-- Deployment documentation now requires separate migration-owner and non-owner, NOBYPASSRLS runtime database roles; the users table is explicitly documented as outside this RLS migration.
-- Docker Compose now provisions a separate non-owner `ledgergate_runtime` role for API traffic; migrations continue to use the database bootstrap/migration account.
-- Added a PostgreSQL RLS integration test covering no-context denial, tenant-only visibility, cross-tenant insert rejection, and tenant-context reapplication after commit.
-- Audit events now carry per-tenant SHA-256 hash links; PostgreSQL writers serialize through transaction-scoped advisory locks and UPDATE/DELETE are blocked by a database trigger. Existing audit rows are backfilled by migration.
-- Invoice approve/reject now support optional database-backed idempotency keys, request-hash conflict detection, same-response replay, tenant/user scoping, PostgreSQL advisory-lock serialization, and 24-hour expiry. The migration applies tenant RLS to the idempotency table.
-- Tenant approval policies are append-only and versioned. Invoice records snapshot the policy version, threshold, and required reviewer count; later versions do not alter existing invoices. INR only at this stage.\n- High-value INR invoices use a configurable two-reviewer approval threshold (`DUAL_APPROVAL_THRESHOLD_INR`, default INR 100,000); each approval is persisted in a tenant-RLS-protected table, and approval status remains pending until two distinct reviewers have approved.
-- Invoice list/detail API responses expose the required and recorded approval counts; the dashboard displays progress, and a tenant-scoped approval-history endpoint exposes reviewer IDs and timestamps.
-- GitHub Actions backend job now starts PostgreSQL 16, applies Alembic migrations, and runs tests as the restricted runtime role.
-- Production invoice uploads now stream to a private ClamAV `clamd` service before extraction or storage and fail closed when scanning is unavailable or malware is detected.
-- TOTP MFA, login throttling, session revocation, refresh-token rotation, and SMTP-backed one-time password recovery are implemented. Password resets expire after 15 minutes and revoke active sessions.
-- Storage reconciliation provides a dry-run inventory of orphaned/missing generated document objects and requires explicit double confirmation before deletion.
-- API responses include baseline security headers; HSTS is enabled when `APP_ENV=production`.
+## Implemented
+- FastAPI backend, PostgreSQL, SQLAlchemy/Alembic migrations, Docker Compose, and Next.js dashboard.
+- Workspace registration, JWT access tokens, bcrypt password hashing, role checks, TOTP MFA, login throttling, server-side session revocation, refresh-token rotation, and one-time password-reset tokens.
+- Tenant-scoped supplier, purchase-order, invoice, policy-document, agent-memory, audit-event, idempotency, invoice-approval, approval-policy, and auth-session data paths.
+- PostgreSQL FORCE ROW LEVEL SECURITY for tenant-owned business tables, approval policies, invoice approvals, idempotency records, and auth sessions, with transaction-local tenant context and a restricted non-owner runtime role in CI.
+- PDF/TXT invoice intake, upload validation, fail-closed ClamAV scanning, text extraction/OCR fallback, and a human confirmation gate before reconciliation.
+- Deterministic invoice-to-PO reconciliation for amount, currency, supplier, missing PO, and duplicate cases.
+- Maker-checker controls, append-only versioned approval policies scoped by tenant and currency, invoice policy snapshots, and configurable distinct-reviewer approvals for high-value invoices.
+- Approval-history and audit-event APIs, per-tenant SHA-256 audit hash chains, database protections against ordinary audit UPDATE/DELETE, and audit-chain verification.
+- Database-backed idempotency support for invoice approval/rejection.
+- Custom finite-state agent runtime, allowlisted tool executor, MCP stdio tools, tenant-scoped retrieval, and optional Ollama/vLLM advisory explanation adapters.
+- Private S3-compatible storage implementation with tenant-scoped object keys, SSE-S3 upload requests, short-lived presigned downloads, and storage reconciliation tooling.
+- Frontend invoice workflows, refresh-token retry, MFA enrollment/disable and TOTP login input, approval policy management, approval progress, audit event browsing and integrity status.
+- GitHub Actions for backend checks with PostgreSQL RLS integration, frontend production build, and Docker image builds; CodeQL workflow is also present.
 
-## Validation status
-- The GitHub branch and CI workflow have been created.
-- The GitHub Actions workflow is configured to run on pushes to `main` and `production-readiness`, pull requests to `main`, and manual dispatch.
-- Do not treat the branch as validated until the workflow completes successfully. The current editing environment cannot run the full Docker, PostgreSQL, npm, or integration-test stack locally.
-- Earlier baseline checks (before this branch) included Python source compilation, 5/5 deterministic reconciliation smoke cases, and a parser smoke test. These are not substitutes for the new CI run or production integration testing.
+## Verification
+- GitHub Actions run [#43708028042](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43708028042) completed successfully on 2026-11-15.
+- Backend checks passed, including PostgreSQL 16 migrations and PostgreSQL RLS integration tests using a restricted runtime role.
+- Backend and frontend Docker image builds passed.
+- Next.js production frontend build passed.
+- This is CI evidence only. It is not a penetration test, live cloud deployment, operational recovery drill, or financial-services certification.
 
-## Known blockers before real production data
-1. The PostgreSQL RLS migration and transaction-local tenant context now have a dedicated PostgreSQL 16 CI integration test. Wait for the latest CI run to pass before treating this change as validated. The users identity table is not covered by this RLS migration.
-2. The initial Alembic migration uses SQLAlchemy `metadata.create_all`; replace it with a reviewed explicit baseline before production schema management.
-3. Private S3-compatible storage, tenant-scoped keys, server-side encryption requests, access-controlled presigned downloads, fail-closed ClamAV scanning, and reconciliation tooling are implemented. Bucket lifecycle/retention configuration remains an external operational requirement.
-4. SSO/OIDC, email verification, device notifications, and account-recovery delivery credentials remain external or unimplemented requirements. Production password recovery requires SMTP credentials and a hosted HTTPS reset page.
-5. Audit events are hash-chained and protected from ordinary UPDATE/DELETE by a PostgreSQL trigger, but external WORM replication and independent checkpoints remain outstanding.
-6. Idempotency is implemented for invoice approve/reject only. Foreign-currency approval thresholds/FX conversion, idempotency for mutations beyond approve/reject, and broader optimistic locking remain outstanding. Maker-checker creator/decision-maker tracking is present.
-7. No completed penetration test, load test, disaster-recovery restore drill, or jurisdiction-specific privacy/compliance review.
-8. Render/Vercel deployment has not been executed or smoke-tested.
+## Remaining production gates
+1. Replace the initial Alembic metadata.create_all baseline with a reviewed explicit baseline using a safe migration strategy for any existing database.
+2. The users, login_throttles, and password_reset_tokens tables remain outside tenant RLS because pre-authentication flows need identity lookup. The runtime DB credential currently has broad application-table grants. Design and test a narrowly scoped authentication data-access boundary before production.
+3. Complete a live S3 integration and policy review: IAM/workload identity, bucket public-access block, encryption, lifecycle/retention, versioning, deletion, monitoring, and restore validation.
+4. Configure production SMTP and an HTTPS password-reset page; SSO/OIDC and email verification remain outstanding.
+5. Configure external WORM audit replication and independent integrity checkpoints.
+6. Add idempotency to other mutation routes where required, and review optimistic locking/concurrent updates across all workflows.
+7. Run a full security review, dependency/SAST/DAST scans, penetration test, abuse/rate-limit review, and threat-model sign-off.
+8. Run load/performance tests, backup/PITR verification, disaster-recovery restore drills, alerting, and incident-response exercises.
+9. Execute a real deployment with managed secrets, TLS ingress/WAF, private networking, least-privilege credentials, and end-to-end smoke tests.
+10. Complete jurisdiction-specific privacy, legal, and financial-control review before processing real financial records.
 
-LedgerGate remains a deployable foundation/reference implementation, not a certified financial system. Do not use it to initiate payments or as the sole control for approving financial transactions.
+## Scope and safety
+LedgerGate is an invoice verification and approval workflow. It does not initiate payments. Automated extraction and reconciliation are advisory and require human review. Passing CI does not make this a certified financial system or establish production readiness. Do not use it as the sole control for approving financial transactions.
