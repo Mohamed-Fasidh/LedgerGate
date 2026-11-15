@@ -78,7 +78,7 @@ def test_postgresql_schema_matches_explicit_baseline():
         revision = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-        assert revision == "0015_active_reset"
+        assert revision == "0016_runtime_grants"
 
         enum_values = connection.execute(text("""
             SELECT t.typname, e.enumlabel
