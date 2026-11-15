@@ -10,6 +10,12 @@ CREATE ROLE ledgergate_runtime
   LOGIN PASSWORD :'runtime_password'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
 
+-- Non-login owner for narrowly scoped SECURITY DEFINER authentication functions.
+-- Runtime connections must never be members of this role.
+CREATE ROLE ledgergate_auth_owner NOLOGIN BYPASSRLS;
+GRANT ledgergate_auth_owner TO ledgergate;
+GRANT CREATE ON SCHEMA public TO ledgergate_auth_owner;
+
 GRANT CONNECT ON DATABASE ledgergate TO ledgergate_runtime;
 GRANT USAGE ON SCHEMA public TO ledgergate_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ledgergate_runtime;

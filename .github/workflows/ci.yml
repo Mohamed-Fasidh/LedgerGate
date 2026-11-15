@@ -51,6 +51,9 @@ jobs:
           import psycopg
           with psycopg.connect("postgresql://postgres:postgres@localhost:5432/ledgergate", autocommit=True) as conn:
               conn.execute("CREATE ROLE ledgergate_runtime LOGIN PASSWORD 'runtime-ci-password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS")
+              conn.execute("CREATE ROLE ledgergate_auth_owner NOLOGIN BYPASSRLS")
+              conn.execute("GRANT ledgergate_auth_owner TO postgres")
+              conn.execute("GRANT CREATE ON SCHEMA public TO ledgergate_auth_owner")
               conn.execute("GRANT CONNECT ON DATABASE ledgergate TO ledgergate_runtime")
               conn.execute("GRANT USAGE ON SCHEMA public TO ledgergate_runtime")
               conn.execute("ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ledgergate_runtime")
