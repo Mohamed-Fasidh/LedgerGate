@@ -23,6 +23,36 @@ def test_postgres_rls_isolates_tenants_and_reapplies_context_after_commit():
     name_b = f"rls-b-{tenant_b}"
 
     try:
+        # Confirm the extended migration installed FORCE RLS and its tenant policy.
+        with admin_engine.connect() as conn:
+            protected_tables = {
+                row[0]: row[1]
+                for row in conn.execute(text("""
+                    SELECT c.relname, c.relforcerowsecurity
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    WHERE n.nspname = current_schema()
+                      AND c.relname IN (
+                        'idempotency_records', 'invoice_approvals',
+                        'approval_policies', 'auth_sessions'
+                      )
+                """)).all()
+            }
+            assert set(protected_tables) == {
+                "idempotency_records", "invoice_approvals",
+                "approval_policies", "auth_sessions",
+            }
+            assert all(protected_tables.values())
+            policies = set(conn.execute(text("""
+                SELECT tablename FROM pg_policies
+                WHERE schemaname = current_schema()
+                  AND policyname = 'tenant_isolation'
+            """)).scalars().all())
+            assert {
+                "idempotency_records", "invoice_approvals",
+                "approval_policies", "auth_sessions",
+            }.issubset(policies)
+
         # Seed both tenants through the privileged migration/admin connection.
         with admin_engine.begin() as conn:
             conn.execute(
