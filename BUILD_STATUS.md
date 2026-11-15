@@ -4,7 +4,7 @@
 - FastAPI backend, PostgreSQL, SQLAlchemy/Alembic migrations, Docker Compose, and Next.js dashboard.
 - Workspace registration, JWT access tokens, bcrypt password hashing, role checks, TOTP MFA, login throttling, server-side session revocation, refresh-token rotation, and one-time password-reset tokens.
 - Tenant-scoped supplier, purchase-order, invoice, policy-document, agent-memory, audit-event, idempotency, invoice-approval, approval-policy, and auth-session data paths.
-- PostgreSQL FORCE ROW LEVEL SECURITY for tenant-owned business tables, approval policies, invoice approvals, idempotency records, and auth sessions, with transaction-local tenant context and a restricted non-owner runtime role in CI.
+- PostgreSQL FORCE ROW LEVEL SECURITY for tenant-owned business tables, approval policies, invoice approvals, idempotency records, and auth sessions, with transaction-local tenant context. The runtime role is non-owner and has no BYPASSRLS, but its current table grants are still broad; do not treat this as least-privilege authentication isolation.
 - PDF/TXT invoice intake, upload validation, fail-closed ClamAV scanning, text extraction/OCR fallback, and a human confirmation gate before reconciliation.
 - Deterministic invoice-to-PO reconciliation for amount, currency, supplier, missing PO, and duplicate cases.
 - Maker-checker controls, append-only versioned approval policies scoped by tenant and currency, invoice policy snapshots, and configurable distinct-reviewer approvals for high-value invoices.
@@ -17,13 +17,13 @@
 - Explicit PostgreSQL Alembic baseline with a fail-closed guard against applying it to a non-empty unversioned schema; the previous metadata-driven create_all baseline has been removed.
 
 ## Verification
-- Latest LedgerGate CI run [#43743596983](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43743596983) passed on commit `a279e50cb8bf951ccaeb83af095e417e811cf5a0`.
-- Latest CodeQL run [#43743596810](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43743596810) passed on the same commit.
-- CI includes PostgreSQL 16 migrations and backend tests using a restricted runtime role, frontend production build, and backend/frontend Docker image builds.
+- Latest LedgerGate CI run [#43743891171](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43743891171) passed on the documentation-updated head `37de6a691597df92b85a447f696b3c21b42486bb`.
+- Latest CodeQL run [#43743891160](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43743891160) passed on that same head.
+- CI includes PostgreSQL 16 migrations and backend tests using a non-owner runtime role, frontend production build, and backend/frontend Docker image builds. However, `.github/workflows/ci.yml` and `docker/postgres/01-create-runtime-role.sh` both grant SELECT/INSERT/UPDATE/DELETE on all public tables and broad default privileges. The role is restricted by role attributes, not by table-level least privilege.
 - These are CI results only. They are not a penetration test, live cloud deployment, operational recovery drill, or financial-services certification.
 
 ## Remaining production gates
-1. The users, login_throttles, and password_reset_tokens tables remain outside tenant RLS because pre-authentication flows need identity lookup. The runtime DB credential currently has broad application-table grants. Design and test a narrowly scoped authentication data-access boundary before production.
+1. The users, login_throttles, and password_reset_tokens tables remain outside tenant RLS because pre-authentication flows need identity lookup. Both CI and Docker provisioning grant the runtime role broad CRUD on all public tables and broad default privileges. Design and test a narrowly scoped authentication data-access boundary, then replace these grants with explicit least-privilege grants before production.
 2. Complete a live S3 integration and policy review: IAM/workload identity, bucket public-access block, encryption, lifecycle/retention, versioning, deletion, monitoring, and restore validation.
 3. Configure production SMTP and an HTTPS password-reset page; SSO/OIDC and email verification remain outstanding.
 4. Configure external WORM audit replication and independent integrity checkpoints.
