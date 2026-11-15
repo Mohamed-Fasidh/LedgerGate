@@ -21,8 +21,10 @@ GRANT USAGE ON SCHEMA public TO ledgergate_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ledgergate_runtime;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ledgergate_runtime;
 
+-- New objects receive no runtime access by default. Each migration must
+-- explicitly grant the minimum privileges required by the application.
 ALTER DEFAULT PRIVILEGES FOR ROLE ledgergate IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ledgergate_runtime;
+  REVOKE ALL ON TABLES FROM ledgergate_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE ledgergate IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO ledgergate_runtime;
+  REVOKE ALL ON SEQUENCES FROM ledgergate_runtime;
 SQL
