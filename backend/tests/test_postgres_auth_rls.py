@@ -133,6 +133,7 @@ def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
     token_valid = f"valid-{uuid.uuid4().hex}"
     token_mismatch = f"mismatch-{uuid.uuid4().hex}"
     token_expired = f"expired-{uuid.uuid4().hex}"
+    token_inactive = f"inactive-{uuid.uuid4().hex}"
     now = datetime.now(timezone.utc)
 
     try:
@@ -161,10 +162,14 @@ def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
                 SELECT
                   has_table_privilege(current_user, 'public.login_throttles', 'SELECT'),
                   has_table_privilege(current_user, 'public.login_throttles', 'INSERT'),
+                  has_table_privilege(current_user, 'public.login_throttles', 'UPDATE'),
+                  has_table_privilege(current_user, 'public.login_throttles', 'DELETE'),
                   has_table_privilege(current_user, 'public.password_reset_tokens', 'SELECT'),
-                  has_table_privilege(current_user, 'public.password_reset_tokens', 'INSERT')
+                  has_table_privilege(current_user, 'public.password_reset_tokens', 'INSERT'),
+                  has_table_privilege(current_user, 'public.password_reset_tokens', 'UPDATE'),
+                  has_table_privilege(current_user, 'public.password_reset_tokens', 'DELETE')
             """)).one()
-            assert tuple(privileges) == (False, False, False, False)
+            assert tuple(privileges) == (False, False, False, False, False, False, False, False)
 
             # A valid function call with another tenant's ID must be a silent
             # no-op, avoiding an account-existence oracle.
@@ -207,15 +212,34 @@ def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
             })
             db.commit()
 
+            # Deactivated accounts cannot receive new reset credentials.
+            with admin_engine.begin() as admin:
+                admin.execute(
+                    text("UPDATE users SET is_active = FALSE WHERE id = :user_id"),
+                    {"user_id": user_ids[tenant_b]},
+                )
+            db.execute(text("""
+                SELECT public.auth_issue_password_reset(
+                    :user_id, :tenant_id, :token_hash, :expires_at
+                )
+            """), {
+                "user_id": user_ids[tenant_b],
+                "tenant_id": tenant_b,
+                "token_hash": token_inactive,
+                "expires_at": now + timedelta(minutes=10),
+            })
+            db.commit()
+
         with admin_engine.connect() as conn:
             rows = conn.execute(text("""
                 SELECT token_hash, user_id, tenant_id
                 FROM password_reset_tokens
-                WHERE token_hash IN (:valid, :mismatch, :expired)
+                WHERE token_hash IN (:valid, :mismatch, :expired, :inactive)
             """), {
                 "valid": token_valid,
                 "mismatch": token_mismatch,
                 "expired": token_expired,
+                "inactive": token_inactive,
             }).all()
             assert [(row.token_hash, row.user_id, row.tenant_id) for row in rows] == [
                 (token_valid, user_ids[tenant_a], tenant_a)
@@ -223,8 +247,8 @@ def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
     finally:
         with admin_engine.begin() as conn:
             conn.execute(
-                text("DELETE FROM password_reset_tokens WHERE token_hash IN (:valid, :mismatch, :expired)"),
-                {"valid": token_valid, "mismatch": token_mismatch, "expired": token_expired},
+                text("DELETE FROM password_reset_tokens WHERE token_hash IN (:valid, :mismatch, :expired, :inactive)"),
+                {"valid": token_valid, "mismatch": token_mismatch, "expired": token_expired, "inactive": token_inactive},
             )
             conn.execute(
                 text("DELETE FROM users WHERE tenant_id IN (:a, :b)"),
