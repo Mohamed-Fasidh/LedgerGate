@@ -61,15 +61,41 @@ def _lock_login_key(db: Session, key: str) -> None:
         db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:login_key))"), {"login_key": key})
 
 
+def find_user_for_authentication(db: Session, email: str):
+    """Look up a login identity using the restricted PostgreSQL function."""
+    normalized = email.strip().lower()
+    if db.get_bind().dialect.name == "postgresql":
+        row = db.execute(text("SELECT user_id, tenant_id FROM public.auth_lookup_user(:email)"),
+                         {"email": normalized}).mappings().first()
+        if row is None:
+            return None
+        set_tenant_context(db, row["tenant_id"])
+        return db.query(User).filter(User.id == row["user_id"], User.tenant_id == row["tenant_id"]).first()
+    return db.query(User).filter(User.email == normalized).first()
+
+
+def email_exists(db: Session, email: str) -> bool:
+    normalized = email.strip().lower()
+    if db.get_bind().dialect.name == "postgresql":
+        return bool(db.execute(text("SELECT public.auth_email_exists(:email)"), {"email": normalized}).scalar())
+    return db.query(User.id).filter(User.email == normalized).first() is not None
+
+
 def login_is_locked(db: Session, email: str) -> bool:
-    _lock_login_key(db, login_email_key(email))
-    row = db.query(LoginThrottle).filter(LoginThrottle.email_key == login_email_key(email)).with_for_update().first()
+    key = login_email_key(email)
+    if db.get_bind().dialect.name == "postgresql":
+        return bool(db.execute(text("SELECT public.auth_login_is_locked(:key)"), {"key": key}).scalar())
+    _lock_login_key(db, key)
+    row = db.query(LoginThrottle).filter(LoginThrottle.email_key == key).with_for_update().first()
     return bool(row and row.locked_until and _utc(row.locked_until) > datetime.now(timezone.utc))
 
 
 def record_login_failure(db: Session, email: str) -> None:
-    now = datetime.now(timezone.utc)
     key = login_email_key(email)
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT public.auth_record_login_failure(:key)"), {"key": key})
+        return
+    now = datetime.now(timezone.utc)
     _lock_login_key(db, key)
     row = db.query(LoginThrottle).filter(LoginThrottle.email_key == key).with_for_update().first()
     if row is None:
@@ -85,8 +111,12 @@ def record_login_failure(db: Session, email: str) -> None:
 
 
 def clear_login_failures(db: Session, email: str) -> None:
-    _lock_login_key(db, login_email_key(email))
-    row = db.query(LoginThrottle).filter(LoginThrottle.email_key == login_email_key(email)).with_for_update().first()
+    key = login_email_key(email)
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT public.auth_clear_login_failures(:key)"), {"key": key})
+        return
+    _lock_login_key(db, key)
+    row = db.query(LoginThrottle).filter(LoginThrottle.email_key == key).with_for_update().first()
     if row:
         now = datetime.now(timezone.utc)
         row.failed_attempts, row.window_started_at, row.locked_until, row.updated_at = 0, now, None, now
@@ -256,44 +286,45 @@ def revoke_current_session(db: Session, user: User, access_token: str) -> None:
 
 def issue_password_reset_token(db: Session, user: User) -> str:
     now = datetime.now(timezone.utc)
-    db.query(PasswordResetToken).filter(
-        PasswordResetToken.user_id == user.id, PasswordResetToken.used_at.is_(None)
-    ).update({PasswordResetToken.used_at: now}, synchronize_session=False)
     raw_token = secrets.token_urlsafe(32)
-    db.add(PasswordResetToken(
-        user_id=user.id, tenant_id=user.tenant_id,
-        token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
-        expires_at=now + timedelta(minutes=15),
-    ))
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    expires_at = now + timedelta(minutes=15)
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT public.auth_issue_password_reset(:user_id, :tenant_id, :token_hash, :expires_at)"),
+                   {"user_id": user.id, "tenant_id": user.tenant_id, "token_hash": token_hash, "expires_at": expires_at})
+    else:
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id, PasswordResetToken.used_at.is_(None)
+        ).update({PasswordResetToken.used_at: now}, synchronize_session=False)
+        db.add(PasswordResetToken(user_id=user.id, tenant_id=user.tenant_id, token_hash=token_hash, expires_at=expires_at))
     return raw_token
 
 
 def reset_password_with_token(db: Session, raw_token: str, password: str) -> User:
     token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
     now = datetime.now(timezone.utc)
-    reset = db.query(PasswordResetToken).filter(
-        PasswordResetToken.token_hash == token_hash, PasswordResetToken.used_at.is_(None)
-    ).with_for_update().first()
-    if reset is None or _utc(reset.expires_at) <= now:
-        raise ValueError("Invalid password reset token")
+    if db.get_bind().dialect.name == "postgresql":
+        reset = db.execute(text("SELECT user_id, tenant_id FROM public.auth_consume_password_reset(:token_hash)"),
+                           {"token_hash": token_hash}).mappings().first()
+        if reset is None:
+            raise ValueError("Invalid password reset token")
+        user_id, tenant_id = reset["user_id"], reset["tenant_id"]
+    else:
+        reset = db.query(PasswordResetToken).filter(
+            PasswordResetToken.token_hash == token_hash, PasswordResetToken.used_at.is_(None)
+        ).with_for_update().first()
+        if reset is None or _utc(reset.expires_at) <= now:
+            raise ValueError("Invalid password reset token")
+        user_id, tenant_id = reset.user_id, reset.tenant_id
+        reset.used_at = now
 
-    # PasswordResetToken lookup happens before tenant context is established.
-    # Apply the token's tenant before touching the FORCE-RLS-protected sessions.
-    set_tenant_context(db, reset.tenant_id)
-
-    user = db.query(User).filter(
-        User.id == reset.user_id, User.tenant_id == reset.tenant_id, User.is_active.is_(True)
-    ).first()
+    set_tenant_context(db, tenant_id)
+    user = db.query(User).filter(User.id == user_id, User.tenant_id == tenant_id, User.is_active.is_(True)).first()
     if user is None:
         raise ValueError("Invalid password reset token")
-    reset.used_at = now
     user.hashed_password = hash_password(password)
     db.query(AuthSession).filter(
-        AuthSession.user_id == user.id, AuthSession.tenant_id == user.tenant_id,
-        AuthSession.revoked_at.is_(None),
-    ).update({
-        AuthSession.revoked_at: now,
-        AuthSession.refresh_token_hash: None,
-        AuthSession.refresh_expires_at: None,
-    }, synchronize_session=False)
+        AuthSession.user_id == user.id, AuthSession.tenant_id == user.tenant_id, AuthSession.revoked_at.is_(None)
+    ).update({AuthSession.revoked_at: now, AuthSession.refresh_token_hash: None,
+              AuthSession.refresh_expires_at: None}, synchronize_session=False)
     return user
