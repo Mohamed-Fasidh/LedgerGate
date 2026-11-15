@@ -1,10 +1,8 @@
-"""Extend PostgreSQL row-level security to remaining tenant-owned tables.
+"""Enable PostgreSQL row-level security on remaining tenant-owned tables.
 
-Idempotency records are already protected by migration 0005. Auth sessions
-already have their original auth_session_tenant_isolation policy from migration
-0008; this migration adds the common policy name used by the RLS checks while
-preserving the original policy. Password-reset tokens are deliberately
-excluded because their lookup precedes tenant-context establishment.
+Idempotency records are already protected by migration 0005 and auth sessions
+by migration 0008. Password-reset tokens are deliberately excluded because
+their lookup precedes tenant-context establishment.
 """
 from alembic import op
 
@@ -16,7 +14,6 @@ depends_on = None
 TENANT_TABLES = (
     "invoice_approvals",
     "approval_policies",
-    "auth_sessions",
 )
 
 
