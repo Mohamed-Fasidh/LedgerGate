@@ -4,9 +4,9 @@ This checklist separates repository features from controls that must be configur
 
 ## 1. Database and tenant isolation
 - [x] Replace the metadata-driven initial migration with a reviewed explicit baseline and document upgrade/rollback procedures. The baseline now uses explicit DDL and rejects a non-empty unversioned schema; CI validates a fresh PostgreSQL 16 migration path.
-- [ ] Provision separate migration-owner and runtime roles. The API role must not own tables, be superuser, or have BYPASSRLS.
+- [ ] Provision separate migration-owner and runtime roles. The API role must not own tables, be superuser, or have BYPASSRLS. Current CI and Docker bootstrap scripts correctly create a non-owner/NOBYPASSRLS role but then grant CRUD on every public table and broad default privileges; replace those grants with reviewed per-table/function grants.
 - [ ] Design a dedicated pre-authentication data-access boundary for `users`, `login_throttles`, and `password_reset_tokens`; do not add a simplistic RLS policy that breaks login or reset flows.
-- [ ] Remove broad authentication-table privileges from the runtime role only after registration, login, refresh, reset request, and reset confirmation pass integration tests with the final restricted credentials.
+- [ ] Remove broad authentication-table privileges from the runtime role only after registration, login, MFA, refresh, reset request, reset confirmation, and tenant-user management pass integration tests with the final restricted credentials. Verify effective privileges from PostgreSQL catalogs, not only role attributes.
 - [ ] Run cross-tenant read/write tests against every tenant-owned table and endpoint.
 - [ ] Verify migrations against a copy of the actual target schema and data before release.
 
