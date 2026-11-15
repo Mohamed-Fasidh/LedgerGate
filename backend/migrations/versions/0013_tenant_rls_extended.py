@@ -28,6 +28,9 @@ def upgrade() -> None:
     for table in TENANT_TABLES:
         op.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
         op.execute(f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY')
+        # Earlier migrations may already have installed this policy on a table.
+        # Replace it transactionally so upgrades work on both fresh and existing DBs.
+        op.execute(f'DROP POLICY IF EXISTS "tenant_isolation" ON "{table}"')
         op.execute(
             f"""
             CREATE POLICY "tenant_isolation" ON "{table}"
