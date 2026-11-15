@@ -292,7 +292,7 @@ def create_tenant_user(email:str,password:str=Form(...),role:str=Form("analyst")
 
 @app.get("/api/v1/me")
 def me(user:User=Depends(get_current_user)):
-    return {"id":user.id,"email":user.email,"tenant_id":user.tenant_id,"tenant_name":user.tenant_name,"role":user.role.value}
+    return {"id":user.id,"email":user.email,"tenant_id":user.tenant_id,"tenant_name":user.tenant_name,"role":user.role.value,"mfa_enabled":user.mfa_enabled}
 
 @app.post("/api/v1/suppliers")
 def create_supplier(payload:SupplierIn,idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
