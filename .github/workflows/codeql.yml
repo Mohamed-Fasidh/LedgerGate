@@ -2,9 +2,9 @@ name: CodeQL Security Analysis
 
 on:
   push:
-    branches: [main, production-readiness, complete-enterprise-readiness]
+    branches: [main, production-readiness, complete-enterprise-readiness, ledgergate-completion]
   pull_request:
-    branches: [main]
+    branches: [main, production-readiness]
   schedule:
     - cron: "23 3 * * 1"
   workflow_dispatch:
