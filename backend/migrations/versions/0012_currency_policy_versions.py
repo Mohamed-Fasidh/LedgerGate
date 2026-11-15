@@ -3,7 +3,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0012_currency_policy_versions"
-down_revision = "0007_approval_policy_versions"
+down_revision = "0011_password_reset_tokens"
 branch_labels = None
 depends_on = None
 
