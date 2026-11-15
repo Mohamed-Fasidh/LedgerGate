@@ -5,8 +5,10 @@
 2. Replace the local database password and JWT secret. Never use the sample values outside local development.
 3. Run `docker compose up --build`.
 4. Compose waits for PostgreSQL, runs the one-shot Alembic migration service, then starts the API and web services.
-5. Confirm `/health`, `/docs`, and the dashboard.
+5. The API and frontend host ports bind to `127.0.0.1` by default (`API_PORT` and `WEB_PORT` can change the host port without changing the loopback bind). Confirm `http://localhost:8000/health`, `http://localhost:8000/docs`, and `http://localhost:3000`.
 6. Compose initializes a separate `ledgergate_runtime` role for the API; migrations use the database bootstrap account. The runtime role is non-owner and `NOBYPASSRLS`.
+
+For an internet-facing deployment, do not change the bind to `0.0.0.0` casually. Put a TLS-terminating reverse proxy or managed ingress in front of the services, configure its upstream to the loopback ports, restrict inbound firewall rules to the proxy, and set the frontend's public API build-time URL and backend CORS allowlist to the actual HTTPS origins. The Compose file is a local/single-host starting point, not a complete production ingress configuration.
 
 The PostgreSQL init script runs only when the data volume is first created. If you already have a `ledgergate_pgdata` volume, create the runtime role and grants manually using `docker/postgres/01-create-runtime-role.sh` logic, or back up your data and recreate the volume for a clean local development database. Do not delete a volume containing data you need.
 
