@@ -143,3 +143,40 @@ def test_explicit_foreign_currency_policy_is_supported():
     policy = ApprovalPolicyIn(currency="usd", threshold_amount=50000, required_approvals=2)
     assert policy.currency == "USD"
     assert policy.threshold_amount == 50000
+
+
+def test_approval_policy_versions_are_independent_per_currency():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.database import Base
+    from app.models import ApprovalPolicy, Role, User
+    from app.financial_controls import create_approval_policy_version
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(bind=engine)
+    db = sessionmaker(bind=engine)()
+    try:
+        user = User(
+            tenant_id="multi-currency-tenant",
+            tenant_name="Multi Currency",
+            email="multi-currency@example.com",
+            hashed_password="test-hash",
+            role=Role.admin,
+        )
+        db.add(user)
+        db.flush()
+        inr = create_approval_policy_version(db, user.tenant_id, user.id, "INR", 100000, 2)
+        usd = create_approval_policy_version(db, user.tenant_id, user.id, "USD", 50000, 2)
+        db.flush()
+        assert (inr.version, inr.currency) == (1, "INR")
+        assert (usd.version, usd.currency) == (1, "USD")
+        next_usd = create_approval_policy_version(db, user.tenant_id, user.id, "USD", 75000, 2)
+        db.flush()
+        assert next_usd.version == 2
+        policies = db.query(ApprovalPolicy).filter_by(tenant_id=user.tenant_id).all()
+        assert {(p.currency, p.version) for p in policies} == {("INR", 1), ("USD", 1), ("USD", 2)}
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
