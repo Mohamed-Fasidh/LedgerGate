@@ -178,7 +178,10 @@ def list_auth_sessions(token:str=Depends(oauth2_scheme),db:Session=Depends(get_d
 
 
 @app.delete("/api/v1/auth/sessions/{session_id}")
-def revoke_auth_session(session_id:int,token:str=Depends(oauth2_scheme),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+def revoke_auth_session(session_id:int,token:str=Depends(oauth2_scheme),idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    idem,replay=begin_idempotent_request(db,user,idempotency_key,"auth.session.revoke",{"session_id":session_id})
+    if replay is not None:
+        return replay
     claims=jwt.decode(token,settings.jwt_secret_key,algorithms=["HS256"])
     if not isinstance(claims.get("jti"),str):
         raise HTTPException(401,"Invalid or expired credentials")
@@ -196,8 +199,10 @@ def revoke_auth_session(session_id:int,token:str=Depends(oauth2_scheme),db:Sessi
     session.revoked_at=datetime.now(timezone.utc)
     session.refresh_token_hash=None
     session.refresh_expires_at=None
+    response={"revoked":True}
+    complete_idempotent_request(idem,response)
     db.commit()
-    return {"revoked":True}
+    return response
 
 
 @app.post("/api/v1/auth/logout")
@@ -274,7 +279,10 @@ def disable_mfa(password:str=Form(...),code:str=Form(...),db:Session=Depends(get
 
 
 @app.post("/api/v1/auth/logout-all")
-def logout_all_sessions(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+def logout_all_sessions(idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    idem,replay=begin_idempotent_request(db,user,idempotency_key,"auth.sessions.revoke_all",{})
+    if replay is not None:
+        return replay
     now=__import__("datetime").datetime.now(__import__("datetime").timezone.utc)
     db.query(AuthSession).filter(
         AuthSession.user_id==user.id,
@@ -285,8 +293,10 @@ def logout_all_sessions(db:Session=Depends(get_db),user:User=Depends(get_current
         AuthSession.refresh_token_hash: None,
         AuthSession.refresh_expires_at: None,
     }, synchronize_session=False)
+    response={"message":"All active sessions have been revoked. Sign in again on each device."}
+    complete_idempotent_request(idem,response)
     db.commit()
-    return {"message":"All active sessions have been revoked. Sign in again on each device."}
+    return response
 
 @app.post("/api/v1/users")
 def create_tenant_user(email:str,password:str=Form(...),role:str=Form("analyst"),idempotency_key:str|None=Header(None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
