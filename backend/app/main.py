@@ -445,7 +445,16 @@ def download_invoice_document(invoice_id:int,db:Session=Depends(get_db),user:Use
         path=local_document_path(inv.file_path,user.tenant_id)
     except (FileNotFoundError,ValueError):
         raise HTTPException(404,"Document not found")
-    return FileResponse(path,filename=inv.file_name or "invoice-document",media_type="application/pdf" if path.suffix==".pdf" else "text/plain")
+    return FileResponse(
+        path,
+        filename="invoice-document.pdf" if path.suffix == ".pdf" else "invoice-document.txt",
+        media_type="application/pdf" if path.suffix == ".pdf" else "text/plain",
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+        },
+    )
 
 
 @app.post("/api/v1/invoices/{invoice_id}/confirm-extraction")
