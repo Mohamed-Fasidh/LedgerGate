@@ -1,9 +1,10 @@
 """Extend PostgreSQL row-level security to remaining tenant-owned tables.
 
-These tables carry tenant_id and are accessed after authenticated tenant context
-has been established. Password-reset tokens are deliberately excluded because
-the reset flow must resolve a one-time token before it can establish tenant
-context; the token is high-entropy, hashed at rest, and tenant-checked in code.
+Idempotency records are already protected by migration 0005. Auth sessions
+already have their original auth_session_tenant_isolation policy from migration
+0008; this migration adds the common policy name used by the RLS checks while
+preserving the original policy. Password-reset tokens are deliberately
+excluded because their lookup precedes tenant-context establishment.
 """
 from alembic import op
 
@@ -13,7 +14,6 @@ branch_labels = None
 depends_on = None
 
 TENANT_TABLES = (
-    "idempotency_records",
     "invoice_approvals",
     "approval_policies",
     "auth_sessions",
@@ -28,9 +28,6 @@ def upgrade() -> None:
     for table in TENANT_TABLES:
         op.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
         op.execute(f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY')
-        # Earlier migrations may already have installed this policy on a table.
-        # Replace it transactionally so upgrades work on both fresh and existing DBs.
-        op.execute(f'DROP POLICY IF EXISTS "tenant_isolation" ON "{table}"')
         op.execute(
             f"""
             CREATE POLICY "tenant_isolation" ON "{table}"
