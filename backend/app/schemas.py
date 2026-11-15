@@ -65,10 +65,10 @@ class ApprovalPolicyIn(BaseModel):
 
     @field_validator("currency")
     @classmethod
-    def only_supported_policy_currency(cls, value: str) -> str:
+    def normalize_policy_currency(cls, value: str) -> str:
         normalized = value.upper()
-        if normalized != "INR":
-            raise ValueError("Only INR approval policies are supported until FX policy support is implemented")
+        if not normalized.isalpha():
+            raise ValueError("Currency must be a three-letter ISO-style code")
         return normalized
 
 
