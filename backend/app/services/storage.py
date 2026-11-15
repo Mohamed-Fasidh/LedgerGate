@@ -18,9 +18,17 @@ _DOCUMENT_KEY = re.compile(r"^[A-Za-z0-9_-]{1,64}/[0-9a-f]{32}\.(?:pdf|txt)$")
 
 
 def _tenant_prefix(tenant_id: str) -> str:
-    if not _TENANT_ID.fullmatch(tenant_id):
+    if not isinstance(tenant_id, str) or not _TENANT_ID.fullmatch(tenant_id):
         raise ValueError("Invalid tenant identifier")
     return tenant_id
+
+
+def _validate_document_key(key: str, tenant_id: str) -> str:
+    """Accept only canonical generated keys owned by the requested tenant."""
+    prefix = _tenant_prefix(tenant_id) + "/"
+    if not isinstance(key, str) or not _DOCUMENT_KEY.fullmatch(key) or not key.startswith(prefix):
+        raise FileNotFoundError("Document not found")
+    return key
 
 
 def _s3_client():
