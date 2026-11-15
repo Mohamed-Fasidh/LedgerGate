@@ -271,7 +271,7 @@ def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
 
         with admin_engine.connect() as conn:
             rows = conn.execute(text("""
-                SELECT token_hash, user_id, tenant_id
+                SELECT token_hash, user_id, tenant_id, used_at
                 FROM password_reset_tokens
                 WHERE token_hash IN (:valid, :mismatch, :expired, :inactive, :deactivated)
             """), {
@@ -281,9 +281,18 @@ def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
                 "inactive": token_inactive,
                 "deactivated": token_deactivated,
             }).all()
-            assert [(row.token_hash, row.user_id, row.tenant_id) for row in rows] == [
-                (token_valid, user_ids[tenant_a], tenant_a)
-            ]
+            assert {
+                (row.token_hash, row.user_id, row.tenant_id)
+                for row in rows
+            } == {
+                (token_valid, user_ids[tenant_a], tenant_a),
+                (token_deactivated, user_ids[tenant_b], tenant_b),
+            }
+            by_hash = {row.token_hash: row for row in rows}
+            assert by_hash[token_valid].used_at is not None
+            # Deactivation blocks consumption but deliberately preserves the
+            # token row for expiry/audit cleanup rather than deleting it.
+            assert by_hash[token_deactivated].used_at is None
     finally:
         with admin_engine.begin() as conn:
             conn.execute(
