@@ -73,6 +73,9 @@ jobs:
           with psycopg.connect("postgresql://postgres:postgres@localhost:5432/ledgergate", autocommit=True) as conn:
               conn.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ledgergate_runtime")
               conn.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ledgergate_runtime")
+              # Re-apply the authentication boundary after the schema-wide grant.
+              # Runtime code must use the narrowly scoped SECURITY DEFINER functions.
+              conn.execute("REVOKE ALL ON TABLE public.login_throttles, public.password_reset_tokens FROM ledgergate_runtime")
           PY
       - name: Run backend tests including PostgreSQL RLS integration
         working-directory: backend
