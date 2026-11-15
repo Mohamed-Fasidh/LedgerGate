@@ -43,14 +43,18 @@ def test_postgres_rls_isolates_tenants_and_reapplies_context_after_commit():
                 "approval_policies", "auth_sessions",
             }
             assert all(protected_tables.values())
-            policies = set(conn.execute(text("""
-                SELECT tablename FROM pg_policies
-                WHERE schemaname = current_schema()
-                  AND policyname = 'tenant_isolation'
-            """)).scalars().all())
+            policies = {
+                (row[0], row[1])
+                for row in conn.execute(text("""
+                    SELECT tablename, policyname FROM pg_policies
+                    WHERE schemaname = current_schema()
+                """)).all()
+            }
             assert {
-                "idempotency_records", "invoice_approvals",
-                "approval_policies", "auth_sessions",
+                ("idempotency_records", "tenant_isolation"),
+                ("invoice_approvals", "tenant_isolation"),
+                ("approval_policies", "tenant_isolation"),
+                ("auth_sessions", "auth_session_tenant_isolation"),
             }.issubset(policies)
 
         # Seed both tenants through the privileged migration/admin connection.
