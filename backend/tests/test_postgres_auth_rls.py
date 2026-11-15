@@ -117,3 +117,117 @@ def test_postgres_auth_sessions_reject_cross_tenant_reads_and_writes():
                 {"a": tenant_a, "b": tenant_b},
             )
         admin_engine.dispose()
+
+
+
+@pytest.mark.skipif(
+    not os.getenv("RLS_TEST_ADMIN_DATABASE_URL"),
+    reason="PostgreSQL auth boundary test requires RLS_TEST_ADMIN_DATABASE_URL",
+)
+def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
+    """The runtime role can invoke reset functions, but cannot mint cross-tenant tokens."""
+    admin_engine = create_engine(os.environ["RLS_TEST_ADMIN_DATABASE_URL"])
+    tenant_a, tenant_b = str(uuid.uuid4()), str(uuid.uuid4())
+    email_a = f"auth-reset-a-{tenant_a}@example.test"
+    email_b = f"auth-reset-b-{tenant_b}@example.test"
+    token_valid = f"valid-{uuid.uuid4().hex}"
+    token_mismatch = f"mismatch-{uuid.uuid4().hex}"
+    token_expired = f"expired-{uuid.uuid4().hex}"
+    now = datetime.now(timezone.utc)
+
+    try:
+        with admin_engine.begin() as conn:
+            users = conn.execute(text("""
+                INSERT INTO users (
+                    tenant_id, tenant_name, email, hashed_password, role,
+                    is_active, mfa_enabled, created_at
+                )
+                VALUES
+                    (:tenant_a, 'Reset A', :email_a, 'test-hash', 'analyst',
+                     TRUE, FALSE, :now),
+                    (:tenant_b, 'Reset B', :email_b, 'test-hash', 'analyst',
+                     TRUE, FALSE, :now)
+                RETURNING id, tenant_id
+            """), {
+                "tenant_a": tenant_a, "tenant_b": tenant_b,
+                "email_a": email_a, "email_b": email_b, "now": now,
+            }).all()
+            user_ids = {row.tenant_id: row.id for row in users}
+
+        # The CI role is deliberately not allowed direct access to either
+        # sensitive table; all such access must pass through SECURITY DEFINER.
+        with SessionLocal() as db:
+            privileges = db.execute(text("""
+                SELECT
+                  has_table_privilege(current_user, 'public.login_throttles', 'SELECT'),
+                  has_table_privilege(current_user, 'public.login_throttles', 'INSERT'),
+                  has_table_privilege(current_user, 'public.password_reset_tokens', 'SELECT'),
+                  has_table_privilege(current_user, 'public.password_reset_tokens', 'INSERT')
+            """)).one()
+            assert tuple(privileges) == (False, False, False, False)
+
+            # A valid function call with another tenant's ID must be a silent
+            # no-op, avoiding an account-existence oracle.
+            db.execute(text("""
+                SELECT public.auth_issue_password_reset(
+                    :user_id, :wrong_tenant, :token_hash, :expires_at
+                )
+            """), {
+                "user_id": user_ids[tenant_a],
+                "wrong_tenant": tenant_b,
+                "token_hash": token_mismatch,
+                "expires_at": now + timedelta(minutes=10),
+            })
+            db.commit()
+
+            # A valid user/tenant pair and short-lived expiry is accepted.
+            db.execute(text("""
+                SELECT public.auth_issue_password_reset(
+                    :user_id, :tenant_id, :token_hash, :expires_at
+                )
+            """), {
+                "user_id": user_ids[tenant_a],
+                "tenant_id": tenant_a,
+                "token_hash": token_valid,
+                "expires_at": now + timedelta(minutes=10),
+            })
+            db.commit()
+
+            # Even a valid user/tenant pair cannot request an excessively
+            # long-lived reset credential.
+            db.execute(text("""
+                SELECT public.auth_issue_password_reset(
+                    :user_id, :tenant_id, :token_hash, :expires_at
+                )
+            """), {
+                "user_id": user_ids[tenant_a],
+                "tenant_id": tenant_a,
+                "token_hash": token_expired,
+                "expires_at": now + timedelta(minutes=16),
+            })
+            db.commit()
+
+        with admin_engine.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT token_hash, user_id, tenant_id
+                FROM password_reset_tokens
+                WHERE token_hash IN (:valid, :mismatch, :expired)
+            """), {
+                "valid": token_valid,
+                "mismatch": token_mismatch,
+                "expired": token_expired,
+            }).all()
+            assert [(row.token_hash, row.user_id, row.tenant_id) for row in rows] == [
+                (token_valid, user_ids[tenant_a], tenant_a)
+            ]
+    finally:
+        with admin_engine.begin() as conn:
+            conn.execute(
+                text("DELETE FROM password_reset_tokens WHERE token_hash IN (:valid, :mismatch, :expired)"),
+                {"valid": token_valid, "mismatch": token_mismatch, "expired": token_expired},
+            )
+            conn.execute(
+                text("DELETE FROM users WHERE tenant_id IN (:a, :b)"),
+                {"a": tenant_a, "b": tenant_b},
+            )
+        admin_engine.dispose()
