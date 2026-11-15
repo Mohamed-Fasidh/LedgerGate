@@ -42,7 +42,7 @@ Create/own the application schema objects with `ledgergate_migrator`, run migrat
 The `users` table is intentionally not covered by these tenant-data policies because login must locate a user before a tenant can be established. User lookup is constrained by the authenticated token's user ID and tenant ID; this table still needs a separate identity-store hardening review.
 - Deploy the frontend from `frontend/`. Configure `NEXT_PUBLIC_API_URL` to the public API base URL ending in `/api/v1` and `NEXT_PUBLIC_API_DOCS_URL` to the public API docs URL. These are Next.js public build-time variables; set them before the frontend build.
 - Configure the backend CORS allowlist to include the exact Vercel production domain and any required preview domains. Avoid broad wildcard preview origins.
-- Configure health check path `/health` for the API service. Keep the database private and restrict network access to the API service.
+- Configure the platform liveness check at `/health` and readiness check at `/ready` where both are supported. `/health` confirms the API process is alive; `/ready` returns HTTP 503 when PostgreSQL is unavailable. Keep the database private and restrict network access to the API service.
 
 ## Production topology recommendation
 Internet → managed WAF/load balancer/TLS → frontend and API services → private PostgreSQL and private object storage. Keep database and model servers on private networks. Run background extraction/evaluation workers separately when introduced.
