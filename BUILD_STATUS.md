@@ -16,14 +16,14 @@
 - GitHub Actions for backend checks with PostgreSQL RLS integration, frontend production build, and Docker image builds; CodeQL workflow is also present.
 
 ## Verification
-- GitHub Actions run [#43708028042](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43708028042) completed successfully on 2026-11-15.
-- Backend checks passed, including PostgreSQL 16 migrations and PostgreSQL RLS integration tests using a restricted runtime role.
+- GitHub Actions run [#43731480044](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43731480044) completed successfully on the completion branch before the explicit-baseline change. The baseline change is awaiting its own CI run.
+- Previous backend checks passed, including PostgreSQL 16 migrations and PostgreSQL RLS integration tests using a restricted runtime role. The new explicit baseline must pass CI before this verification claim is refreshed.
 - Backend and frontend Docker image builds passed.
 - Next.js production frontend build passed.
 - This is CI evidence only. It is not a penetration test, live cloud deployment, operational recovery drill, or financial-services certification.
 
 ## Remaining production gates
-1. Replace the initial Alembic metadata.create_all baseline with a reviewed explicit baseline using a safe migration strategy for any existing database.
+1. Validate the new explicit Alembic initial baseline against a fresh PostgreSQL 16 database and verify the fail-closed guard for non-empty unversioned schemas. Existing databases that already recorded 0001_initial retain their migration history and are not rerun.
 2. The users, login_throttles, and password_reset_tokens tables remain outside tenant RLS because pre-authentication flows need identity lookup. The runtime DB credential currently has broad application-table grants. Design and test a narrowly scoped authentication data-access boundary before production.
 3. Complete a live S3 integration and policy review: IAM/workload identity, bucket public-access block, encryption, lifecycle/retention, versioning, deletion, monitoring, and restore validation.
 4. Configure production SMTP and an HTTPS password-reset page; SSO/OIDC and email verification remain outstanding.
