@@ -134,6 +134,7 @@ def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
     token_mismatch = f"mismatch-{uuid.uuid4().hex}"
     token_expired = f"expired-{uuid.uuid4().hex}"
     token_inactive = f"inactive-{uuid.uuid4().hex}"
+    token_deactivated = f"deactivated-{uuid.uuid4().hex}"
     now = datetime.now(timezone.utc)
 
     try:
@@ -229,6 +230,20 @@ def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
             assert consumed_again is None
             db.commit()
 
+            # A token issued while an account is active must not be
+            # consumable after that account has been deactivated.
+            db.execute(text("""
+                SELECT public.auth_issue_password_reset(
+                    :user_id, :tenant_id, :token_hash, :expires_at
+                )
+            """), {
+                "user_id": user_ids[tenant_b],
+                "tenant_id": tenant_b,
+                "token_hash": token_deactivated,
+                "expires_at": now + timedelta(minutes=10),
+            })
+            db.commit()
+
             # Deactivated accounts cannot receive new reset credentials.
             with admin_engine.begin() as admin:
                 admin.execute(
@@ -247,16 +262,24 @@ def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
             })
             db.commit()
 
+            deactivated_consumption = db.execute(text("""
+                SELECT user_id, tenant_id
+                FROM public.auth_consume_password_reset(:token_hash)
+            """), {"token_hash": token_deactivated}).mappings().first()
+            assert deactivated_consumption is None
+            db.commit()
+
         with admin_engine.connect() as conn:
             rows = conn.execute(text("""
                 SELECT token_hash, user_id, tenant_id
                 FROM password_reset_tokens
-                WHERE token_hash IN (:valid, :mismatch, :expired, :inactive)
+                WHERE token_hash IN (:valid, :mismatch, :expired, :inactive, :deactivated)
             """), {
                 "valid": token_valid,
                 "mismatch": token_mismatch,
                 "expired": token_expired,
                 "inactive": token_inactive,
+                "deactivated": token_deactivated,
             }).all()
             assert [(row.token_hash, row.user_id, row.tenant_id) for row in rows] == [
                 (token_valid, user_ids[tenant_a], tenant_a)
@@ -264,8 +287,8 @@ def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
     finally:
         with admin_engine.begin() as conn:
             conn.execute(
-                text("DELETE FROM password_reset_tokens WHERE token_hash IN (:valid, :mismatch, :expired, :inactive)"),
-                {"valid": token_valid, "mismatch": token_mismatch, "expired": token_expired, "inactive": token_inactive},
+                text("DELETE FROM password_reset_tokens WHERE token_hash IN (:valid, :mismatch, :expired, :inactive, :deactivated)"),
+                {"valid": token_valid, "mismatch": token_mismatch, "expired": token_expired, "inactive": token_inactive, "deactivated": token_deactivated},
             )
             conn.execute(
                 text("DELETE FROM users WHERE tenant_id IN (:a, :b)"),
