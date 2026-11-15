@@ -157,6 +157,44 @@ def test_password_reset_is_one_time_and_revokes_existing_sessions(auth_client, m
     assert login.status_code == 200
 
 
+def test_password_reset_establishes_tenant_context_before_session_revocation(auth_client, monkeypatch):
+    from app import main, security
+
+    registered = register_account(auth_client, "rls-recovery@example.com")
+    assert registered.status_code == 200
+    delivered = []
+    monkeypatch.setattr(
+        main,
+        "send_password_reset_email",
+        lambda email, token: delivered.append(token),
+    )
+    requested = auth_client.post(
+        "/api/v1/auth/password-reset/request",
+        json={"email": "rls-recovery@example.com"},
+    )
+    assert requested.status_code == 202
+    assert len(delivered) == 1
+
+    tenant_contexts = []
+    original_set_tenant_context = security.set_tenant_context
+
+    def track_tenant_context(db, tenant_id):
+        tenant_contexts.append(tenant_id)
+        return original_set_tenant_context(db, tenant_id)
+
+    monkeypatch.setattr(security, "set_tenant_context", track_tenant_context)
+    confirmed = auth_client.post(
+        "/api/v1/auth/password-reset/confirm",
+        json={
+            "token": delivered[0],
+            "password": "New-rls-recovery-password-2026",
+        },
+    )
+
+    assert confirmed.status_code == 200
+    assert len(tenant_contexts) == 1
+    assert tenant_contexts[0]
+
 
 def test_mfa_enrollment_login_and_disable_flow(auth_client, monkeypatch):
     from app import security
@@ -254,7 +292,6 @@ def test_mfa_enrollment_rejects_invalid_code(auth_client, monkeypatch):
     assert invalid.status_code == 400
 
 
-
 def test_mfa_enrollment_verification_is_throttled_after_repeated_invalid_codes(auth_client, monkeypatch):
     from app import security
 
@@ -319,10 +356,12 @@ def test_mfa_disable_invalid_password_is_throttled(auth_client, monkeypatch):
     locked = auth_client.post(
         "/api/v1/auth/mfa/disable",
         headers=headers,
-        data={"password": "LedgerGate-api-test-2026", "code": security.totp_code(secret)},
+        data={
+            "password": "LedgerGate-api-test-2026",
+            "code": security.totp_code(secret),
+        },
     )
     assert locked.status_code == 429
-
 
 
 def test_user_can_list_sessions_and_revoke_another_session(auth_client):
@@ -388,7 +427,6 @@ def test_session_revocation_cannot_target_another_users_session(auth_client):
 
     still_valid = auth_client.get("/api/v1/me", headers=second_headers)
     assert still_valid.status_code == 200
-
 
 
 def test_session_delete_rejects_current_session_and_requires_logout(auth_client):
@@ -468,7 +506,6 @@ def test_session_delete_rejects_expired_other_session_without_invalidating_calle
     }
     expired_access = auth_client.get("/api/v1/me", headers=expired_headers)
     assert expired_access.status_code == 401
-
 
 
 def test_logout_all_revokes_every_access_and_refresh_session(auth_client):
