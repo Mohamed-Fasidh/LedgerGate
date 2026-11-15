@@ -89,5 +89,7 @@ def test_audit_events_are_scoped_to_authenticated_tenant(audit_client):
     second_response = client.get("/api/v1/audit-events", headers=second_headers)
 
     assert first_response.status_code == second_response.status_code == 200
-    assert first_response.json() == []
-    assert second_response.json() == []
+    assert first_response.json()["items"] == []
+    assert second_response.json()["items"] == []
+    assert first_response.json()["total"] == 0
+    assert second_response.json()["total"] == 0
