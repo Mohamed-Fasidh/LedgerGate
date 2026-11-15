@@ -155,8 +155,8 @@ class ApprovalPolicy(Base):
     created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     __table_args__ = (
-        UniqueConstraint("tenant_id", "version", name="uq_approval_policy_tenant_version"),
-        Index("ix_approval_policy_tenant_version", "tenant_id", "version"),
+        UniqueConstraint("tenant_id", "currency", "version", name="uq_approval_policy_tenant_currency_version"),
+        Index("ix_approval_policy_tenant_version", "tenant_id", "currency", "version"),
     )
 
 
