@@ -14,25 +14,24 @@
 - Private S3-compatible storage implementation with tenant-scoped object keys, SSE-S3 upload requests, short-lived presigned downloads, and storage reconciliation tooling.
 - Frontend invoice workflows, refresh-token retry, MFA enrollment/disable and TOTP login input, approval policy management, approval progress, audit event browsing and integrity status.
 - GitHub Actions for backend checks with PostgreSQL RLS integration, frontend production build, and Docker image builds; CodeQL workflow is also present.
+- Explicit PostgreSQL Alembic baseline with a fail-closed guard against applying it to a non-empty unversioned schema; the previous metadata-driven create_all baseline has been removed.
 
 ## Verification
-- GitHub Actions run [#43731480044](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43731480044) completed successfully on the completion branch before the explicit-baseline change. The baseline change is awaiting its own CI run.
-- Previous backend checks passed, including PostgreSQL 16 migrations and PostgreSQL RLS integration tests using a restricted runtime role. The new explicit baseline must pass CI before this verification claim is refreshed.
-- Backend and frontend Docker image builds passed.
-- Next.js production frontend build passed.
-- This is CI evidence only. It is not a penetration test, live cloud deployment, operational recovery drill, or financial-services certification.
+- Latest LedgerGate CI run [#43743596983](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43743596983) passed on commit `a279e50cb8bf951ccaeb83af095e417e811cf5a0`.
+- Latest CodeQL run [#43743596810](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43743596810) passed on the same commit.
+- CI includes PostgreSQL 16 migrations and backend tests using a restricted runtime role, frontend production build, and backend/frontend Docker image builds.
+- These are CI results only. They are not a penetration test, live cloud deployment, operational recovery drill, or financial-services certification.
 
 ## Remaining production gates
-1. Validate the new explicit Alembic initial baseline against a fresh PostgreSQL 16 database and verify the fail-closed guard for non-empty unversioned schemas. Existing databases that already recorded 0001_initial retain their migration history and are not rerun.
-2. The users, login_throttles, and password_reset_tokens tables remain outside tenant RLS because pre-authentication flows need identity lookup. The runtime DB credential currently has broad application-table grants. Design and test a narrowly scoped authentication data-access boundary before production.
-3. Complete a live S3 integration and policy review: IAM/workload identity, bucket public-access block, encryption, lifecycle/retention, versioning, deletion, monitoring, and restore validation.
-4. Configure production SMTP and an HTTPS password-reset page; SSO/OIDC and email verification remain outstanding.
-5. Configure external WORM audit replication and independent integrity checkpoints.
-6. Review remaining mutation routes for idempotency requirements and add concurrency/optimistic-locking coverage across all workflows.
-7. Run a full security review, dependency/SAST/DAST scans, penetration test, abuse/rate-limit review, and threat-model sign-off.
-8. Run load/performance tests, backup/PITR verification, disaster-recovery restore drills, alerting, and incident-response exercises.
-9. Execute a real deployment with managed secrets, TLS ingress/WAF, private networking, least-privilege credentials, and end-to-end smoke tests.
-10. Complete jurisdiction-specific privacy, legal, and financial-control review before processing real financial records.
+1. The users, login_throttles, and password_reset_tokens tables remain outside tenant RLS because pre-authentication flows need identity lookup. The runtime DB credential currently has broad application-table grants. Design and test a narrowly scoped authentication data-access boundary before production.
+2. Complete a live S3 integration and policy review: IAM/workload identity, bucket public-access block, encryption, lifecycle/retention, versioning, deletion, monitoring, and restore validation.
+3. Configure production SMTP and an HTTPS password-reset page; SSO/OIDC and email verification remain outstanding.
+4. Configure external WORM audit replication and independent integrity checkpoints.
+5. Review remaining mutation routes for idempotency requirements and add concurrency/optimistic-locking coverage across all workflows.
+6. Run a full security review, dependency/SAST/DAST scans, penetration test, abuse/rate-limit review, and threat-model sign-off.
+7. Run load/performance tests, backup/PITR verification, disaster-recovery restore drills, alerting, and incident-response exercises.
+8. Execute a real deployment with managed secrets, TLS ingress/WAF, private networking, least-privilege credentials, and end-to-end smoke tests.
+9. Complete jurisdiction-specific privacy, legal, and financial-control review before processing real financial records.
 
 ## Scope and safety
 LedgerGate is an invoice verification and approval workflow. It does not initiate payments. Automated extraction and reconciliation are advisory and require human review. Passing CI does not make this a certified financial system or establish production readiness. Do not use it as the sole control for approving financial transactions.
