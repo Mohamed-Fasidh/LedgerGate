@@ -102,7 +102,6 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             raise ValueError("Invalid token claims")
     except (JWTError, KeyError, ValueError, TypeError):
         raise error
-    # Establish tenant context before querying the RLS-protected session registry.
     set_tenant_context(db, tenant)
     session = db.query(AuthSession).filter(
         AuthSession.jti == jti, AuthSession.user_id == user_id, AuthSession.tenant_id == tenant,
@@ -122,14 +121,11 @@ def require_roles(*roles: str):
         if user.role.value not in roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
-
     return checker
 
 
-# TOTP MFA helpers (RFC 6238, SHA-1, 30-second steps).
 import base64
 import hmac
-import secrets
 import struct
 import time
 from urllib.parse import quote
@@ -182,13 +178,7 @@ def totp_provisioning_uri(secret: str, email: str, issuer: str = "LedgerGate") -
     return f"otpauth://totp/{label}?secret={secret}&issuer={quote(issuer)}&algorithm=SHA1&digits=6&period=30"
 
 
-# Opaque, one-time refresh tokens are stored only as SHA-256 hashes.
-import secrets
-
-
 def issue_refresh_token(db: Session, user: User) -> str:
-    # The tenant prefix lets the refresh endpoint establish transaction-local
-    # RLS context before looking up the hash. The random suffix remains secret.
     if not user.tenant_id or "." in user.tenant_id:
         raise RuntimeError("Invalid tenant identifier for refresh token")
     token = f"{user.tenant_id}.{secrets.token_urlsafe(48)}"
@@ -213,22 +203,17 @@ def rotate_refresh_token(db: Session, raw_token: str) -> tuple[User, str, str]:
     if not isinstance(raw_token, str) or len(raw_token) < 32 or len(raw_token) > 256:
         raise ValueError("Invalid refresh token")
     tenant_id, separator, secret = raw_token.partition(".")
-    if (not separator or not tenant_id or len(tenant_id) > 64
-            or not secret or "." in secret):
+    if (not separator or not tenant_id or len(tenant_id) > 64 or not secret or "." in secret):
         raise ValueError("Invalid refresh token")
     try:
         raw_token.encode("ascii")
     except UnicodeEncodeError as exc:
         raise ValueError("Invalid refresh token") from exc
-    # AuthSession is protected by FORCE ROW LEVEL SECURITY. Set context
-    # from the untrusted tenant prefix before querying; the unguessable token
-    # hash is still required to match a stored session within that tenant.
     set_tenant_context(db, tenant_id)
     token_hash = hashlib.sha256(raw_token.encode("ascii")).hexdigest()
     session = (
         db.query(AuthSession)
-        .filter(AuthSession.refresh_token_hash == token_hash,
-                AuthSession.tenant_id == tenant_id)
+        .filter(AuthSession.refresh_token_hash == token_hash, AuthSession.tenant_id == tenant_id)
         .with_for_update()
         .first()
     )
@@ -236,7 +221,6 @@ def rotate_refresh_token(db: Session, raw_token: str) -> tuple[User, str, str]:
     if (session is None or session.revoked_at is not None or session.refresh_expires_at is None
             or _utc(session.refresh_expires_at) <= now):
         raise ValueError("Invalid refresh token")
-    # One-time use: invalidate the old refresh and its associated access token.
     session.revoked_at = now
     session.refresh_token_hash = None
     user = db.query(User).filter(
@@ -249,22 +233,19 @@ def rotate_refresh_token(db: Session, raw_token: str) -> tuple[User, str, str]:
     return user, access, refresh
 
 
-
 def revoke_current_session(db: Session, user: User, access_token: str) -> None:
-    """Revoke the authenticated access session and its paired refresh token."""
     try:
         payload = jwt.decode(access_token, settings.jwt_secret_key, algorithms=["HS256"])
-        if (int(payload.get("sub", -1)) != user.id
-                or payload.get("tenant") != user.tenant_id
+        if (int(payload.get("sub", -1)) != user.id or payload.get("tenant") != user.tenant_id
                 or not isinstance(payload.get("jti"), str)):
             raise ValueError("Invalid session")
     except (JWTError, KeyError, TypeError, ValueError) as exc:
         raise ValueError("Invalid session") from exc
     set_tenant_context(db, user.tenant_id)
-    session = (db.query(AuthSession).filter(
+    session = db.query(AuthSession).filter(
         AuthSession.jti == payload["jti"], AuthSession.user_id == user.id,
         AuthSession.tenant_id == user.tenant_id
-    ).with_for_update().first())
+    ).with_for_update().first()
     if session is None or session.revoked_at is not None:
         raise ValueError("Invalid session")
     session.revoked_at = datetime.now(timezone.utc)
@@ -274,16 +255,13 @@ def revoke_current_session(db: Session, user: User, access_token: str) -> None:
 
 
 def issue_password_reset_token(db: Session, user: User) -> str:
-    """Create a one-time 15-minute reset token and invalidate earlier tokens."""
     now = datetime.now(timezone.utc)
     db.query(PasswordResetToken).filter(
-        PasswordResetToken.user_id == user.id,
-        PasswordResetToken.used_at.is_(None),
+        PasswordResetToken.user_id == user.id, PasswordResetToken.used_at.is_(None)
     ).update({PasswordResetToken.used_at: now}, synchronize_session=False)
     raw_token = secrets.token_urlsafe(32)
     db.add(PasswordResetToken(
-        user_id=user.id,
-        tenant_id=user.tenant_id,
+        user_id=user.id, tenant_id=user.tenant_id,
         token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
         expires_at=now + timedelta(minutes=15),
     ))
@@ -294,23 +272,24 @@ def reset_password_with_token(db: Session, raw_token: str, password: str) -> Use
     token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
     now = datetime.now(timezone.utc)
     reset = db.query(PasswordResetToken).filter(
-        PasswordResetToken.token_hash == token_hash,
-        PasswordResetToken.used_at.is_(None),
+        PasswordResetToken.token_hash == token_hash, PasswordResetToken.used_at.is_(None)
     ).with_for_update().first()
     if reset is None or _utc(reset.expires_at) <= now:
         raise ValueError("Invalid password reset token")
+
+    # PasswordResetToken lookup happens before tenant context is established.
+    # Apply the token's tenant before touching the FORCE-RLS-protected sessions.
+    set_tenant_context(db, reset.tenant_id)
+
     user = db.query(User).filter(
-        User.id == reset.user_id,
-        User.tenant_id == reset.tenant_id,
-        User.is_active.is_(True),
+        User.id == reset.user_id, User.tenant_id == reset.tenant_id, User.is_active.is_(True)
     ).first()
     if user is None:
         raise ValueError("Invalid password reset token")
     reset.used_at = now
     user.hashed_password = hash_password(password)
     db.query(AuthSession).filter(
-        AuthSession.user_id == user.id,
-        AuthSession.tenant_id == user.tenant_id,
+        AuthSession.user_id == user.id, AuthSession.tenant_id == user.tenant_id,
         AuthSession.revoked_at.is_(None),
     ).update({
         AuthSession.revoked_at: now,
