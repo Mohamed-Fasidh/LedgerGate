@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from jose import jwt
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from app.config import settings
 from app.database import Base, engine, get_db, set_tenant_context
@@ -63,7 +63,20 @@ async def add_security_headers(request, call_next):
     return response
 
 @app.get("/health")
-def health(): return {"status":"ok","service":"ledgergate-api"}
+def health():
+    """Liveness probe: the API process can serve requests."""
+    return {"status": "ok", "service": "ledgergate-api"}
+
+
+@app.get("/ready")
+def readiness():
+    """Readiness probe: the API can reach its primary database."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception:
+        raise HTTPException(503, "Service dependencies are unavailable")
+    return {"status": "ready", "service": "ledgergate-api"}
 
 @app.post("/api/v1/auth/register",response_model=TokenOut)
 def register(payload:RegisterIn,db:Session=Depends(get_db)):
