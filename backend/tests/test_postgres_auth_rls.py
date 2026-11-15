@@ -212,6 +212,23 @@ def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
             })
             db.commit()
 
+            # Reset credentials are atomically consumed at most once.
+            consumed = db.execute(text("""
+                SELECT user_id, tenant_id
+                FROM public.auth_consume_password_reset(:token_hash)
+            """), {"token_hash": token_valid}).mappings().first()
+            assert consumed is not None
+            assert consumed["user_id"] == user_ids[tenant_a]
+            assert consumed["tenant_id"] == tenant_a
+            db.commit()
+
+            consumed_again = db.execute(text("""
+                SELECT user_id, tenant_id
+                FROM public.auth_consume_password_reset(:token_hash)
+            """), {"token_hash": token_valid}).mappings().first()
+            assert consumed_again is None
+            db.commit()
+
             # Deactivated accounts cannot receive new reset credentials.
             with admin_engine.begin() as admin:
                 admin.execute(
