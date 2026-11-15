@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-: "${LEDGERGATE_RUNTIME_PASSWORD:=runtime_local_only_change_me}"
+: "${LEDGERGATE_RUNTIME_PASSWORD:?Set LEDGERGATE_RUNTIME_PASSWORD before initializing PostgreSQL}"
 
 psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
   --set=ON_ERROR_STOP=1 \
