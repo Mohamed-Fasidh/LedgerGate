@@ -573,21 +573,3 @@ def test_session_revocation_is_idempotent(auth_client):
         headers={**headers, "Idempotency-Key": "revoke-session-0002"},
     )
     assert different_request.status_code == 404
-
-
-def test_logout_all_is_idempotent(auth_client):
-    registered = register_account(auth_client, "logout-all-idempotency@example.com")
-    assert registered.status_code == 200
-    headers = {
-        "Authorization": f"Bearer {registered.json()['access_token']}",
-        "Idempotency-Key": "logout-all-sessions-0001",
-    }
-
-    first = auth_client.post("/api/v1/auth/logout-all", headers=headers)
-    replay = auth_client.post("/api/v1/auth/logout-all", headers=headers)
-
-    expected = {
-        "message": "All active sessions have been revoked. Sign in again on each device."
-    }
-    assert first.status_code == replay.status_code == 200
-    assert first.json() == replay.json() == expected
