@@ -76,16 +76,16 @@ def test_s3_presigned_download_is_tenant_scoped_and_short_lived(monkeypatch):
     monkeypatch.setattr(storage.settings, "s3_presigned_url_expiry_seconds", 180)
     monkeypatch.setattr(storage, "_s3_client", lambda: FakeS3())
 
-    url = storage.create_download_url("tenant-a/document.pdf", "tenant-a")
+    url = storage.create_download_url("tenant-a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf", "tenant-a")
 
     assert url == "https://private.example/signed"
     assert calls == {
         "operation": "get_object",
-        "params": {"Bucket": "ledgergate-private", "Key": "tenant-a/document.pdf"},
+        "params": {"Bucket": "ledgergate-private", "Key": "tenant-a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf"},
         "expires": 180,
     }
     with pytest.raises(FileNotFoundError):
-        storage.create_download_url("tenant-a/document.pdf", "tenant-b")
+        storage.create_download_url("tenant-a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf", "tenant-b")
 
 
 def test_s3_storage_requires_bucket(monkeypatch):
@@ -110,7 +110,7 @@ def test_delete_document_removes_local_tenant_owned_file(tmp_path, monkeypatch):
 
 def test_delete_document_rejects_cross_tenant_key():
     with pytest.raises(FileNotFoundError):
-        storage.delete_document("tenant-a/document.txt", "tenant-b")
+        storage.delete_document("tenant-a/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.txt", "tenant-b")
 
 
 def test_delete_document_removes_s3_object(monkeypatch):
@@ -123,9 +123,9 @@ def test_delete_document_removes_s3_object(monkeypatch):
     monkeypatch.setattr(storage.settings, "s3_bucket", "ledgergate-private")
     monkeypatch.setattr(storage, "_s3_client", lambda: FakeS3())
 
-    storage.delete_document("tenant-a/document.txt", "tenant-a")
+    storage.delete_document("tenant-a/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.txt", "tenant-a")
 
-    assert calls == {"Bucket": "ledgergate-private", "Key": "tenant-a/document.txt"}
+    assert calls == {"Bucket": "ledgergate-private", "Key": "tenant-a/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.txt"}
 
 
 def test_list_document_keys_ignores_non_generated_and_symlinked_local_files(tmp_path, monkeypatch):
@@ -171,7 +171,7 @@ def test_local_storage_rejects_tenant_directory_symlink(tmp_path, monkeypatch):
     (tmp_path / "tenant-a").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(FileNotFoundError):
-        storage.local_document_path("tenant-a/document.txt", "tenant-a")
+        storage.local_document_path("tenant-a/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.txt", "tenant-a")
 
 
 def test_local_storage_rejects_object_symlink(tmp_path, monkeypatch):
@@ -184,7 +184,7 @@ def test_local_storage_rejects_object_symlink(tmp_path, monkeypatch):
     (tenant_dir / "document.txt").symlink_to(outside)
 
     with pytest.raises(FileNotFoundError):
-        storage.local_document_path("tenant-a/document.txt", "tenant-a")
+        storage.local_document_path("tenant-a/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.txt", "tenant-a")
 
 
 
