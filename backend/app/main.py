@@ -2,7 +2,7 @@ import uuid, hashlib, os, tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 import logging
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -654,6 +654,14 @@ def verify_audit_events(db:Session=Depends(get_db),user:User=Depends(require_rol
 
 
 @app.get("/api/v1/audit-events")
-def audit_events(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
-    rows=db.query(AuditEvent).filter(AuditEvent.tenant_id==user.tenant_id).order_by(AuditEvent.created_at.desc()).limit(500).all()
-    return [{"id":x.id,"actor_user_id":x.actor_user_id,"entity_type":x.entity_type,"entity_id":x.entity_id,"action":x.action,"details":x.details,"created_at":x.created_at.isoformat()} for x in rows]
+def audit_events(
+    limit:int=Query(100,ge=1,le=500),
+    offset:int=Query(0,ge=0),
+    db:Session=Depends(get_db),
+    user:User=Depends(get_current_user),
+):
+    query=db.query(AuditEvent).filter(AuditEvent.tenant_id==user.tenant_id)
+    total=query.count()
+    rows=query.order_by(AuditEvent.created_at.desc(),AuditEvent.id.desc()).offset(offset).limit(limit).all()
+    items=[{"id":x.id,"actor_user_id":x.actor_user_id,"entity_type":x.entity_type,"entity_id":x.entity_id,"action":x.action,"details":x.details,"created_at":x.created_at.isoformat()} for x in rows]
+    return {"items":items,"total":total,"limit":limit,"offset":offset}
