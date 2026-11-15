@@ -56,8 +56,9 @@ jobs:
               conn.execute("GRANT CREATE ON SCHEMA public TO ledgergate_auth_owner")
               conn.execute("GRANT CONNECT ON DATABASE ledgergate TO ledgergate_runtime")
               conn.execute("GRANT USAGE ON SCHEMA public TO ledgergate_runtime")
-              conn.execute("ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ledgergate_runtime")
-              conn.execute("ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ledgergate_runtime")
+              # Migration-created objects must not inherit broad runtime access.
+              conn.execute("ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES FROM ledgergate_runtime")
+              conn.execute("ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM ledgergate_runtime")
           PY
       - name: Apply database migrations as administrator
         working-directory: backend
@@ -66,17 +67,6 @@ jobs:
           DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/ledgergate
           JWT_SECRET_KEY: ci-only-secret-key-not-for-production-000000
         run: alembic upgrade head
-      - name: Grant runtime access to migrated schema
-        run: |
-          python - <<'PY'
-          import psycopg
-          with psycopg.connect("postgresql://postgres:postgres@localhost:5432/ledgergate", autocommit=True) as conn:
-              conn.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ledgergate_runtime")
-              conn.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ledgergate_runtime")
-              # Re-apply the authentication boundary after the schema-wide grant.
-              # Runtime code must use the narrowly scoped SECURITY DEFINER functions.
-              conn.execute("REVOKE ALL ON TABLE public.login_throttles, public.password_reset_tokens FROM ledgergate_runtime")
-          PY
       - name: Run backend tests including PostgreSQL RLS integration
         working-directory: backend
         env:
