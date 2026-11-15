@@ -87,7 +87,7 @@ def test_upload_rejects_binary_text_file(upload_client):
     response = client.post(
         "/api/v1/invoices/upload",
         headers=headers,
-        files={"file": ("binary.txt", b"invoice\\x00data", "text/plain")},
+        files={"file": ("binary.txt", b"invoice\x00data", "text/plain")},
     )
 
     assert response.status_code == 415
