@@ -304,3 +304,39 @@ def test_password_reset_function_enforces_user_tenant_and_expiry_boundary():
                 {"a": tenant_a, "b": tenant_b},
             )
         admin_engine.dispose()
+
+
+@pytest.mark.skipif(
+    not os.getenv("RLS_TEST_ADMIN_DATABASE_URL"),
+    reason="PostgreSQL default-privilege test requires RLS_TEST_ADMIN_DATABASE_URL",
+)
+def test_runtime_role_has_no_default_table_or_sequence_grants():
+    """Future migration objects must not silently inherit runtime privileges."""
+    admin_engine = create_engine(os.environ["RLS_TEST_ADMIN_DATABASE_URL"])
+    try:
+        with admin_engine.connect() as conn:
+            defaults = conn.execute(text("""
+                SELECT owner.rolname AS owner_name,
+                       d.defaclobjtype AS object_type,
+                       privilege.privilege_type
+                FROM pg_default_acl AS d
+                CROSS JOIN LATERAL aclexplode(d.defaclacl) AS privilege
+                JOIN pg_roles AS owner ON owner.oid = d.defaclrole
+                JOIN pg_roles AS grantee ON grantee.oid = privilege.grantee
+                WHERE grantee.rolname = 'ledgergate_runtime'
+                  AND d.defaclobjtype IN ('r', 'S')
+            """)).all()
+            assert defaults == []
+
+            # Existing application tables are granted by migration 0016,
+            # while authentication throttle/reset tables remain function-only.
+            access = conn.execute(text("""
+                SELECT
+                  has_table_privilege('ledgergate_runtime', 'public.users', 'SELECT'),
+                  has_table_privilege('ledgergate_runtime', 'public.invoices', 'INSERT'),
+                  has_table_privilege('ledgergate_runtime', 'public.login_throttles', 'SELECT'),
+                  has_table_privilege('ledgergate_runtime', 'public.password_reset_tokens', 'INSERT')
+            """)).one()
+            assert tuple(access) == (True, True, False, False)
+    finally:
+        admin_engine.dispose()
