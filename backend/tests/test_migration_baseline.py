@@ -2,9 +2,6 @@
 from pathlib import Path
 
 import pytest
-from alembic.config import Config
-from alembic.runtime.migration import MigrationContext
-from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 
 from app.database import engine
@@ -21,7 +18,10 @@ def test_initial_migration_is_explicit_and_fails_closed_for_unversioned_data():
     assert "Base.metadata.create_all" not in source
     assert "Base.metadata.drop_all" not in source
     assert "op.create_table(" in source
-    assert "Refusing to apply LedgerGate baseline to a non-empty unversioned schema" in source
+    # The message is deliberately assembled across adjacent Python strings.
+    assert "Refusing to apply LedgerGate baseline" in source
+    assert "schema (found:" in source
+    assert "_assert_empty_unversioned_schema()" in source
 
 
 @pytest.mark.skipif(
