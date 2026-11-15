@@ -86,9 +86,7 @@ def save_document(content: bytes, tenant_id: str, suffix: str) -> str:
 
 
 def local_document_path(key: str, tenant_id: str) -> Path:
-    prefix = _tenant_prefix(tenant_id) + "/"
-    if not key.startswith(prefix):
-        raise FileNotFoundError("Document not found")
+    _validate_document_key(key, tenant_id)
     root = Path(settings.upload_dir).resolve()
     candidate = root / key
     tenant_dir = root / tenant_id
@@ -106,9 +104,7 @@ def local_document_path(key: str, tenant_id: str) -> Path:
 
 def create_download_url(key: str, tenant_id: str) -> str:
     """Create a short-lived URL only after the caller tenant-checks the invoice."""
-    prefix = _tenant_prefix(tenant_id) + "/"
-    if not key.startswith(prefix):
-        raise FileNotFoundError("Document not found")
+    _validate_document_key(key, tenant_id)
     if settings.storage_backend != "s3" or not settings.s3_bucket:
         raise RuntimeError("Presigned URLs are available only with S3 storage")
     return _s3_client().generate_presigned_url(
@@ -120,9 +116,7 @@ def create_download_url(key: str, tenant_id: str) -> str:
 
 def delete_document(key: str, tenant_id: str) -> None:
     """Delete a tenant-owned document when its database transaction fails."""
-    prefix = _tenant_prefix(tenant_id) + "/"
-    if not key.startswith(prefix):
-        raise FileNotFoundError("Document not found")
+    _validate_document_key(key, tenant_id)
     if settings.storage_backend == "s3":
         if not settings.s3_bucket:
             raise RuntimeError("S3_BUCKET is required for S3 storage")
