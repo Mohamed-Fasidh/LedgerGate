@@ -28,6 +28,9 @@ def upgrade() -> None:
             public.auth_sessions
         TO ledgergate_runtime
     """)
+    # Alembic metadata is read-only for the runtime role; this supports safe
+    # schema-version diagnostics without granting migration write privileges.
+    op.execute("GRANT SELECT ON TABLE public.alembic_version TO ledgergate_runtime")
     # Sequence access is required for application-generated integer IDs.
     # No future sequence inherits these grants because default privileges are revoked.
     op.execute(
@@ -61,6 +64,7 @@ def downgrade() -> None:
             public.auth_sessions
         FROM ledgergate_runtime
     """)
+    op.execute("REVOKE ALL ON TABLE public.alembic_version FROM ledgergate_runtime")
     op.execute(
         "REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM ledgergate_runtime"
     )
