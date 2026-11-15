@@ -3,7 +3,7 @@
 This checklist separates repository features from controls that must be configured and independently verified in the target environment. A green CI run is not a production approval.
 
 ## 1. Database and tenant isolation
-- [ ] Replace the metadata-driven initial migration with a reviewed explicit baseline and document upgrade/rollback procedures.
+- [x] Replace the metadata-driven initial migration with a reviewed explicit baseline and document upgrade/rollback procedures. The baseline now uses explicit DDL and rejects a non-empty unversioned schema; CI validates a fresh PostgreSQL 16 migration path.
 - [ ] Provision separate migration-owner and runtime roles. The API role must not own tables, be superuser, or have BYPASSRLS.
 - [ ] Design a dedicated pre-authentication data-access boundary for `users`, `login_throttles`, and `password_reset_tokens`; do not add a simplistic RLS policy that breaks login or reset flows.
 - [ ] Remove broad authentication-table privileges from the runtime role only after registration, login, refresh, reset request, and reset confirmation pass integration tests with the final restricted credentials.
