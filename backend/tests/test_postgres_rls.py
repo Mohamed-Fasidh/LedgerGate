@@ -153,13 +153,13 @@ def test_postgres_rls_isolates_invoice_approvals_and_approval_policies():
             invoices = conn.execute(
                 text("""
                     INSERT INTO invoices (
-                        tenant_id, invoice_number, status, extraction_fields,
+                        tenant_id, invoice_number, currency, status, extraction_fields,
                         reconciliation, created_by_user_id, created_at
                     )
                     VALUES
-                        (:tenant_a, :invoice_a, 'received', '{}'::json,
+                        (:tenant_a, :invoice_a, 'INR', 'received', '{}'::json,
                          '{}'::json, :user_a, CURRENT_TIMESTAMP),
-                        (:tenant_b, :invoice_b, 'received', '{}'::json,
+                        (:tenant_b, :invoice_b, 'INR', 'received', '{}'::json,
                          '{}'::json, :user_b, CURRENT_TIMESTAMP)
                     RETURNING id, tenant_id
                 """),
