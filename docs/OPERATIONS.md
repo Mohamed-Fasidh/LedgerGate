@@ -1,10 +1,18 @@
 # Operations runbook
 
 ## Health checks
-- API: `GET /health`
-- API schema: `/docs`
-- Database: Docker health check `pg_isready`
-- Frontend: `http://localhost:3000`
+- API liveness: `GET /health` (confirms the API process is responding).
+- API readiness: `GET /ready` (returns HTTP 503 when PostgreSQL cannot be reached).
+- Database container: Docker health check `pg_isready`.
+- API schema: `/docs` (keep this endpoint private or access-controlled in production).
+- Frontend: `http://localhost:3000`.
+
+For production, configure the platform's liveness probe to use `/health` and its readiness probe to use `/ready` when separate probes are supported. Alert on sustained readiness failures and database health-check failures; do not restart healthy API processes solely because a dependency is temporarily unavailable.
+
+## Audit integrity checks
+- An administrator or reviewer can verify the current tenant's hash chain with `GET /api/v1/audit-events/verify`. A valid response reports `valid: true`; an invalid response identifies the first invalid event ID.
+- Run verification after a suspected incident and after restoring a backup. Record the result, timestamp, operator, and tenant in the incident or restore record.
+- The hash chain is tamper-evident, not immutable against a privileged database operator who can rewrite the entire chain. Production deployments still need independently controlled append-only/WORM replication, restricted administrative access, and alerting for gaps or verification failures.
 
 ## Common commands
 ```bash
