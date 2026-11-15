@@ -254,3 +254,23 @@ def test_real_s3_upload_download_and_delete_round_trip():
     with pytest.raises(ClientError) as missing:
         client.head_object(Bucket=storage.settings.s3_bucket, Key=key)
     assert missing.value.response["Error"]["Code"] in {"404", "NoSuchKey", "NotFound"}
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "tenant-a/../outside.txt",
+        "tenant-a/not-a-generated-name.txt",
+        "tenant-a/" + "g" * 32 + ".pdf",
+        "tenant-a/" + "a" * 32 + ".exe",
+        "tenant-a//" + "a" * 32 + ".pdf",
+    ],
+)
+def test_storage_rejects_noncanonical_document_keys(key, monkeypatch):
+    monkeypatch.setattr(storage.settings, "storage_backend", "s3")
+    monkeypatch.setattr(storage.settings, "s3_bucket", "ledgergate-private")
+
+    with pytest.raises(FileNotFoundError):
+        storage.create_download_url(key, "tenant-a")
+    with pytest.raises(FileNotFoundError):
+        storage.delete_document(key, "tenant-a")
