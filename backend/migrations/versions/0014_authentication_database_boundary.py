@@ -1,7 +1,7 @@
 """Restrict pre-authentication data access to narrowly scoped database functions."""
 from alembic import op
 
-revision = "0014_authentication_database_boundary"
+revision = "0014_auth_auth_db"
 down_revision = "0013_tenant_rls_extended"
 branch_labels = None
 depends_on = None
