@@ -81,7 +81,13 @@ def test_s3_presigned_download_is_tenant_scoped_and_short_lived(monkeypatch):
     assert url == "https://private.example/signed"
     assert calls == {
         "operation": "get_object",
-        "params": {"Bucket": "ledgergate-private", "Key": "tenant-a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf"},
+        "params": {
+            "Bucket": "ledgergate-private",
+            "Key": "tenant-a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf",
+            "ResponseContentDisposition": "attachment",
+            "ResponseContentType": "application/pdf",
+            "ResponseCacheControl": "private, no-store",
+        },
         "expires": 180,
     }
     with pytest.raises(FileNotFoundError):
