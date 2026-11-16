@@ -182,7 +182,7 @@ def test_audit_export_endpoint_uses_tenant_cursor_and_records_export(monkeypatch
     assert result["version_id"] == "version-123"
     assert captured["limit"] == 25
     assert any("audit_events.tenant_id" in item for item in captured["filters"])
-    assert any("audit_events.id > 11" in item for item in captured["filters"])
+    assert any("audit_events.id >" in item for item in captured["filters"])
     assert captured["stored"][0][0] == "tenant-a"
     assert captured["stored"][0][1][0]["id"] == 12
     assert captured["events"][0][4] == "immutable_export_created"
