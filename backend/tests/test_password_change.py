@@ -151,6 +151,7 @@ def test_password_change_updates_hash_revokes_sessions_audits_and_clears_cookies
     assert len(db.attempts) == 1 and db.attempts[0].succeeded is True
     assert account.hashed_password == "new-hash"
     assert account.mfa_last_used_step == 12345
+    assert account.auth_token_version == 1
     assert revoked and revoked[0][:2] == ("tenant-a", 12)
     assert events and events[0][4] == "password_changed"
     assert events[0][5] == {"revoked_refresh_sessions": 3, "mfa_verified": True}
