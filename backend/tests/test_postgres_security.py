@@ -228,3 +228,78 @@ def test_runtime_role_uses_explicit_grants_without_future_default_access():
             connection.execute(text(f'DROP TABLE public."{future_table}"'))
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_runtime_role_cannot_create_purchase_order_with_another_tenants_supplier():
+    """A valid global FK must not permit a cross-tenant business reference."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    Session = sessionmaker(bind=engine)
+    suffix = uuid.uuid4().hex
+    tenant_a = "reference-a-" + suffix
+    tenant_b = "reference-b-" + suffix
+    supplier_a = "reference-supplier-a-" + suffix
+    supplier_b = "reference-supplier-b-" + suffix
+
+    try:
+        with engine.begin() as admin:
+            supplier_a_id = admin.execute(text("""
+                INSERT INTO public.suppliers (tenant_id, name, tax_id, created_at)
+                VALUES (:tenant, :name, NULL, now())
+                RETURNING id
+            """), {"tenant": tenant_a, "name": supplier_a}).scalar_one()
+            supplier_b_id = admin.execute(text("""
+                INSERT INTO public.suppliers (tenant_id, name, tax_id, created_at)
+                VALUES (:tenant, :name, NULL, now())
+                RETURNING id
+            """), {"tenant": tenant_b, "name": supplier_b}).scalar_one()
+
+        # A same-tenant reference remains valid for the application role.
+        with Session() as runtime:
+            runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            runtime.execute(text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": tenant_a})
+            runtime.execute(text("""
+                INSERT INTO public.purchase_orders
+                    (tenant_id, po_number, supplier_id, currency, total_amount, description, created_at)
+                VALUES
+                    (:tenant, :po_number, :supplier_id, 'INR', 100.00, NULL, now())
+            """), {"tenant": tenant_a, "po_number": "valid-" + suffix, "supplier_id": supplier_a_id})
+            runtime.commit()
+
+        # The referenced supplier exists globally, but belongs to tenant B.
+        # The database trigger must reject this even if an API route forgets
+        # its tenant-scoped supplier lookup.
+        with Session() as runtime:
+            runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            runtime.execute(text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": tenant_a})
+            with pytest.raises(Exception, match="cross-tenant or missing supplier reference"):
+                runtime.execute(text("""
+                    INSERT INTO public.purchase_orders
+                        (tenant_id, po_number, supplier_id, currency, total_amount, description, created_at)
+                    VALUES
+                        (:tenant, :po_number, :supplier_id, 'INR', 100.00, NULL, now())
+                """), {"tenant": tenant_a, "po_number": "invalid-" + suffix, "supplier_id": supplier_b_id})
+            runtime.rollback()
+    finally:
+        with engine.begin() as admin:
+            admin.execute(text("DELETE FROM public.purchase_orders WHERE po_number = :po_number"),
+                          {"po_number": "valid-" + suffix})
+            admin.execute(text("DELETE FROM public.suppliers WHERE id IN (:a, :b)"),
+                          {"a": supplier_a_id, "b": supplier_b_id})
+        engine.dispose()
+
+
+def test_tenant_reference_migration_covers_all_business_relationship_tables():
+    from pathlib import Path
+
+    migration = (
+        Path(__file__).resolve().parents[1]
+        / "migrations"
+        / "versions"
+        / "0027_tenant_owned_references.py"
+    ).read_text(encoding="utf-8")
+    assert "ledgergate_enforce_same_tenant_reference" in migration
+    for table in ("purchase_orders", "invoices", "approval_policies", "invoice_approvals"):
+        assert f'"{table}"' in migration
+    assert "BEFORE INSERT OR UPDATE" in migration
+    assert "USING ERRCODE = '23503'" in migration
