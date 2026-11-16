@@ -52,3 +52,8 @@ A successful response either advances the invoice to the next stage or marks it 
 curl http://localhost:8000/api/v1/invoices/1/approvals \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+
+## Refresh-token lifecycle
+
+Authentication responses now include a short-lived access token and a 30-day refresh token. Clients should keep refresh tokens in protected storage, send them only to `POST /api/v1/auth/refresh`, and replace the stored refresh token on every successful rotation. Reuse of a previously rotated refresh token revokes the entire token family. `POST /api/v1/auth/logout` revokes the submitted refresh token. Access tokens remain valid until their short expiry; logout does not provide immediate access-token revocation. Use HTTPS and secure client-side storage in deployed environments.
