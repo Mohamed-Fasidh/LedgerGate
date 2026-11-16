@@ -109,6 +109,8 @@ class AuditEvent(Base):
     action: Mapped[str] = mapped_column(String(100))
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    previous_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
 
 class LoginAttempt(Base):
     __tablename__ = "login_attempts"
