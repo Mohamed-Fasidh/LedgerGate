@@ -66,3 +66,10 @@ class ApprovalDecisionIn(BaseModel):
 
 class TenantUserRoleUpdateIn(BaseModel):
     role: str = Field(pattern="^(analyst|reviewer)$")
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=72)
+    new_password: str = Field(min_length=12, max_length=72)
+    totp_code: Optional[str] = Field(default=None, min_length=6, max_length=6)
+    recovery_code: Optional[str] = Field(default=None, min_length=24, max_length=32)
