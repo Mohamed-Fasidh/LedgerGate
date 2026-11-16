@@ -72,6 +72,31 @@ def test_audit_export_is_signed_and_written_in_compliance_mode(monkeypatch):
     assert not audit_export.verify_audit_export_signature(document, "different-signing-key-which-is-long-enough")
 
 
+def test_repeated_export_range_gets_distinct_immutable_object_keys(monkeypatch):
+    _settings(monkeypatch)
+
+    class RecordingS3(FakeS3):
+        def __init__(self):
+            super().__init__()
+            self.keys = []
+
+        def put_object(self, **kwargs):
+            self.keys.append(kwargs["Key"])
+            return {"VersionId": f"version-{len(self.keys)}"}
+
+    client = RecordingS3()
+    monkeypatch.setattr(audit_export, "_s3_client", lambda: client)
+
+    first = audit_export.store_immutable_audit_export("tenant-a", _events())
+    second = audit_export.store_immutable_audit_export("tenant-a", _events())
+
+    assert first["first_event_id"] == second["first_event_id"] == 1
+    assert first["last_event_id"] == second["last_event_id"] == 1
+    assert first["key"] != second["key"]
+    assert first["export_id"] != second["export_id"]
+    assert len(set(client.keys)) == 2
+
+
 def test_audit_export_fails_closed_without_bucket_object_lock(monkeypatch):
     _settings(monkeypatch)
     client = FakeS3(lock={"ObjectLockConfiguration": {"ObjectLockEnabled": "Disabled"}})
