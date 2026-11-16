@@ -64,6 +64,10 @@ def upgrade() -> None:
     # Create functions as the dedicated non-login role. It has BYPASSRLS but
     # no application connection can assume it; only these fixed functions are
     # executable by the runtime role.
+    # Temporarily allow the function owner to create only these reviewed functions.
+    # The grant is revoked immediately after creation so BYPASSRLS does not imply
+    # a lasting ability to add arbitrary objects to the application schema.
+    op.execute("GRANT CREATE ON SCHEMA public TO ledgergate_auth_owner")
     op.execute("SET LOCAL ROLE ledgergate_auth_owner")
     op.execute("""
         CREATE OR REPLACE FUNCTION public.auth_lookup_user(p_email text)
@@ -124,6 +128,7 @@ def upgrade() -> None:
         $fn$
     """)
     op.execute("RESET ROLE")
+    op.execute("REVOKE CREATE ON SCHEMA public FROM ledgergate_auth_owner")
 
     functions = (
         ("auth_lookup_user", "text"),
