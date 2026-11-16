@@ -21,8 +21,14 @@ class ReconciliationAgent:
         while ctx.state in transitions:
             ctx.trace.append(ctx.state.value)
             try: transitions[ctx.state](ctx)
-            except Exception as exc:
-                ctx.findings.append({"code":"RUNTIME_ERROR","severity":"high","message":str(exc)})
+            except Exception:
+                # Do not return exception text to callers: it can contain SQL,
+                # infrastructure details, or sensitive values from dependencies.
+                ctx.findings.append({
+                    "code":"RUNTIME_ERROR",
+                    "severity":"high",
+                    "message":"Reconciliation could not be completed; manual review is required.",
+                })
                 ctx.state=AgentState.FAILED
         ctx.trace.append(ctx.state.value)
         return ctx
