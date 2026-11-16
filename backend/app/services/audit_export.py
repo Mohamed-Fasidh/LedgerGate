@@ -22,17 +22,21 @@ MAX_AUDIT_EXPORT_BYTES = 10 * 1024 * 1024
 
 
 def canonical_json(value: dict) -> bytes:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        default=str,
-    ).encode("utf-8")
+    """Serialize only strict JSON values; reject NaN/Infinity and implicit coercion."""
+    try:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise AuditExportUnavailable("Audit export contains values that are not strict JSON") from exc
 
 
 def sign_audit_payload(payload: dict, signing_key: str) -> tuple[str, str]:
-    if len(signing_key) < 32:
+    if not isinstance(signing_key, str) or len(signing_key) < 32:
         raise AuditExportUnavailable("AUDIT_EXPORT_SIGNING_KEY must contain at least 32 characters")
     encoded = canonical_json(payload)
     digest = hashlib.sha256(encoded).hexdigest()
@@ -46,7 +50,10 @@ def verify_audit_export_signature(document: dict, signing_key: str) -> bool:
     signature = document.get("signature")
     digest = document.get("payload_sha256")
     payload = {key: value for key, value in document.items() if key not in ("signature", "payload_sha256", "signature_algorithm")}
-    expected_digest, expected_signature = sign_audit_payload(payload, signing_key)
+    try:
+        expected_digest, expected_signature = sign_audit_payload(payload, signing_key)
+    except (AuditExportUnavailable, TypeError, ValueError, AttributeError):
+        return False
     return (
         document.get("signature_algorithm") == "HMAC-SHA256"
         and isinstance(signature, str)
