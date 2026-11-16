@@ -78,7 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate operational scripts
-        run: bash -n scripts/backup_postgres.sh scripts/restore_drill_postgres.sh
+        run: bash -n scripts/backup_postgres.sh scripts/restore_drill_postgres.sh scripts/cleanup_workflow_runs.sh
       - name: Guard production API startup and one-shot migrations
         run: python3 scripts/test_production_container_startup.py
       - name: Test PostgreSQL backup publication and failure cleanup
