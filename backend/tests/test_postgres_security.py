@@ -303,7 +303,7 @@ def test_tenant_reference_migration_covers_all_business_relationship_tables():
     ).read_text(encoding="utf-8")
     assert "ledgergate_enforce_same_tenant_reference" in migration
     assert "DO $$" in migration
-    assert "\\n        $$;" in migration
+    assert "\n        $;" in migration
     guarded_tables = (
         "purchase_orders",
         "invoices",
