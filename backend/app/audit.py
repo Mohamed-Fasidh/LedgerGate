@@ -68,9 +68,9 @@ def verify_tenant_chain(db, tenant_id: str) -> dict:
         .all()
     )
     expected_previous = GENESIS_HASH
-    for event in rows:
+    for verified_count, event in enumerate(rows):
         if event.previous_hash != expected_previous:
-            return {"valid": False, "verified_events": 0, "failed_event_id": event.id, "reason": "previous_hash_mismatch"}
+            return {"valid": False, "verified_events": verified_count, "failed_event_id": event.id, "reason": "previous_hash_mismatch"}
         payload = event_payload(
             tenant_id=event.tenant_id, actor_user_id=event.actor_user_id,
             entity_type=event.entity_type, entity_id=event.entity_id,
@@ -78,6 +78,6 @@ def verify_tenant_chain(db, tenant_id: str) -> dict:
         )
         expected_hash = calculate_event_hash(expected_previous, payload)
         if event.event_hash != expected_hash:
-            return {"valid": False, "verified_events": 0, "failed_event_id": event.id, "reason": "event_hash_mismatch"}
+            return {"valid": False, "verified_events": verified_count, "failed_event_id": event.id, "reason": "event_hash_mismatch"}
         expected_previous = event.event_hash
     return {"valid": True, "verified_events": len(rows), "head_hash": expected_previous}
