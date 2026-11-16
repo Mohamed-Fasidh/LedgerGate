@@ -28,7 +28,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(user: User):
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
-    return jwt.encode({"sub": str(user.id), "tenant": user.tenant_id, "role": user.role.value, "token_type": "access", "exp": expire}, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return jwt.encode({"sub": str(user.id), "tenant": user.tenant_id, "role": user.role.value, "token_type": "access", "ver": getattr(user, "auth_token_version", 0), "exp": expire}, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 def create_refresh_token(user: User, token_id: str, family_id: str):
     expire = datetime.now(timezone.utc) + timedelta(days=30)
@@ -64,7 +64,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     except (JWTError, KeyError, ValueError, TypeError):
         raise error
     user = db.query(User).filter(User.id == user_id, User.tenant_id == tenant, User.is_active.is_(True)).first()
-    if not user:
+    if not user or payload.get("ver", 0) != getattr(user, "auth_token_version", 0):
         raise error
     set_database_tenant(db, user.tenant_id)
     return user
