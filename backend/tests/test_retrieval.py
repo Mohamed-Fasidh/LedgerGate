@@ -52,7 +52,7 @@ def test_policy_retrieval_is_tenant_scoped_and_result_bounded(retrieval_db):
 
     assert len(results) == MAX_RETRIEVAL_RESULTS
     assert all(item["title"].startswith("Invoice approval ") for item in results)
-    assert all(item["id"] != 0 for item in results)
+    assert all("confidential" not in item["title"] for item in results)
     assert retrieve_policy(db, "tenant-a", "   ") == []
     assert retrieve_policy(db, "tenant-a", "invoice approval", limit=-10)
     assert len(retrieve_policy(db, "tenant-a", "invoice approval", limit=-10)) == 1
