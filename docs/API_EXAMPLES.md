@@ -48,7 +48,7 @@ curl 'http://localhost:8000/api/v1/audit-events?limit=100&offset=100' \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Invalid limits (outside 1–200) or negative offsets return HTTP 400. Responses remain JSON arrays for compatibility with existing clients.
+Invalid limits (outside 1–200) or negative offsets return HTTP 400. Responses remain JSON arrays for compatibility with existing clients. Migration `0018_tenant_pagination_indexes` adds composite tenant/order indexes for these collection queries so page scans can use tenant-scoped index paths as data grows.
 
 Upload an invoice with an idempotency key (retry with the same key, filename, and file bytes if the response is lost):
 ```bash
