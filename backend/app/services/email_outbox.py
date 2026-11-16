@@ -39,7 +39,10 @@ def _decrypt_payload(encrypted_payload: str) -> dict:
     keys = [settings.email_outbox_encryption_key]
     keys.extend(key.strip() for key in settings.email_outbox_decryption_keys.split(",") if key.strip())
     if not keys[0] and settings.app_env.lower() != "production":
-        keys[0] = _cipher()._signing_key and settings.jwt_secret_key
+        try:
+            return json.loads(_cipher().decrypt(encrypted_payload.encode("ascii")))
+        except Exception:
+            pass
     last_error = None
     for key in keys:
         if not key:
