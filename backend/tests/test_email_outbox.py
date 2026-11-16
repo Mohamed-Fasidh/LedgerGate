@@ -49,6 +49,7 @@ def test_worker_sends_and_marks_message_sent(db_factory):
         row = db.get(OutboundEmail, row_id)
         assert (row.status, row.attempts, row.sent_at is not None) == ("sent", 1, True)
         assert row.locked_at is None
+        assert row.encrypted_payload == ""
     assert delivered == [("person@example.com", "email_verification")]
 
 
@@ -87,6 +88,7 @@ def test_worker_moves_exhausted_message_to_dead_letter(db_factory):
     with db_factory() as db:
         row = db.get(OutboundEmail, row_id)
         assert row.status == "dead"
+        assert row.encrypted_payload == ""
         assert row.attempts == 1
         assert row.last_error == "ConnectionError"
 
@@ -142,5 +144,38 @@ def test_worker_cancels_message_when_verification_token_was_invalidated(db_facto
     with db_factory() as db:
         row = db.get(OutboundEmail, row_id)
         assert row.status == "cancelled"
+        assert row.encrypted_payload == ""
         assert row.locked_at is None
     assert delivered == []
+
+
+def test_terminal_outbox_retention_removes_old_records(db_factory):
+    from app.services.email_outbox import purge_terminal_messages
+
+    with db_factory() as db:
+        old_sent = OutboundEmail(
+            recipient="old@example.com", message_type="password_reset", encrypted_payload="",
+            status="sent", attempts=1, max_attempts=12,
+            next_attempt_at=datetime.now(timezone.utc) - timedelta(days=40),
+            created_at=datetime.now(timezone.utc) - timedelta(days=40),
+        )
+        recent_sent = OutboundEmail(
+            recipient="recent@example.com", message_type="password_reset", encrypted_payload="",
+            status="sent", attempts=1, max_attempts=12,
+            next_attempt_at=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
+        )
+        old_dead = OutboundEmail(
+            recipient="dead@example.com", message_type="email_verification", encrypted_payload="",
+            status="dead", attempts=12, max_attempts=12,
+            next_attempt_at=datetime.now(timezone.utc) - timedelta(days=100),
+            created_at=datetime.now(timezone.utc) - timedelta(days=100),
+        )
+        db.add_all([old_sent, recent_sent, old_dead])
+        db.commit()
+
+    deleted = purge_terminal_messages(db_factory, now=datetime.now(timezone.utc))
+    assert deleted == 2
+    with db_factory() as db:
+        rows = db.query(OutboundEmail).all()
+        assert len(rows) == 1 and rows[0].recipient == "recent@example.com"
