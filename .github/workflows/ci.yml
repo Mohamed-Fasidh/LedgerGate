@@ -79,6 +79,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate operational scripts
         run: bash -n scripts/backup_postgres.sh scripts/restore_drill_postgres.sh
+      - name: Test PostgreSQL backup publication and failure cleanup
+        run: python3 scripts/test_backup_postgres.py
       - name: Validate Compose configuration
         run: |
           cp .env.example .env
