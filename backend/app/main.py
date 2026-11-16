@@ -588,6 +588,7 @@ def request_password_reset(
     db: Session = Depends(get_db),
 ):
     """Always return the same response to avoid disclosing registered accounts."""
+    _require_allowed_origin(request)
     remote_ip = request.client.host if request.client else "unknown"
     retry_after = _record_registration_attempt(db, payload.email, remote_ip)
     if retry_after is not None:
@@ -629,6 +630,7 @@ def confirm_password_reset(
     db: Session = Depends(get_db),
 ):
     """Consume a one-time reset token, update credentials, and revoke all sessions."""
+    _require_allowed_origin(request)
     token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
     reset = db.query(PasswordResetToken).filter(
         PasswordResetToken.token_hash == token_hash
