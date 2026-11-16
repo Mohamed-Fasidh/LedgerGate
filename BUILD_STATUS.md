@@ -35,7 +35,7 @@ The last fully successful run is **43818537960** on commit `14608bfe4a5c0aed8881
 - Frontend: dependency advisory report, high-severity npm audit gate, and production build — passed.
 - Docker: Compose configuration validation and backend/frontend image builds — passed.
 
-The current PR head is `41c510b797148a5673b47f6dcbc82ce32d9685b8`. Its CI run [43819401259](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43819401259) is pending and must pass before these newest MFA session-revocation changes can be considered CI-verified. PR #5 remains unmerged pending independent review and explicit merge approval.
+The MFA session-revocation changes and their regression tests passed in run [43819463852](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43819463852) on commit `1142aa231008c330384b6f2c60b77118dc59cc93`. Tenant-member deactivation and its regression tests were added afterward; the newest branch head is awaiting its own CI run. PR #5 remains unmerged pending independent review and explicit merge approval.
 
 CI validates automated repository checks. It does not provision cloud resources, validate production secrets/IAM policies, prove disaster recovery, or replace an independent security assessment.
 
