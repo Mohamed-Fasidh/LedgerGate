@@ -45,3 +45,8 @@ The repository contains implementation and automated checks, but the following r
 ## Product boundary
 
 LedgerGate is an invoice verification and human-approval workflow platform. It does not initiate payments, hold funds, or autonomously approve financial transactions.
+
+
+## Immediate access-token invalidation
+
+Access tokens include an account-scoped auth_token_version claim. The API checks this claim against the active user row on every authenticated request. Password changes, MFA disablement, logout-all, tenant-member role changes, and tenant-member deactivation increment the version in the same database transaction as their account/session changes. Previously issued access tokens are therefore rejected immediately after those operations commit, rather than remaining usable until their JWT expiry. Existing tokens without the version claim are treated as version zero during the compatibility window; the migration initializes existing accounts to zero.
