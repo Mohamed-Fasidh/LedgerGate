@@ -66,31 +66,51 @@ def record_event(db, user, entity_type, entity_id, action, details=None):
     db.add(event)
     return event
 
-def verify_tenant_chain(db, tenant_id: str) -> dict:
-    rows = (
-        db.query(AuditEvent)
-        .filter(AuditEvent.tenant_id == tenant_id)
-        .order_by(AuditEvent.id.asc())
-        .all()
-    )
+def verify_tenant_chain(db, tenant_id: str, batch_size: int = 1000) -> dict:
+    """Verify a tenant chain in bounded pages instead of loading its full history.
+
+    Callers that need a stable view while writers are active must first acquire
+    lock_tenant_audit_chain and keep the transaction open until verification
+    completes. Export and the admin verification endpoint do this.
+    """
+    if not isinstance(batch_size, int) or isinstance(batch_size, bool) or not 1 <= batch_size <= 10000:
+        raise ValueError("batch_size must be an integer between 1 and 10000")
+
     expected_previous = GENESIS_HASH
-    for verified_count, event in enumerate(rows):
-        if event.previous_hash != expected_previous:
-            return {"valid": False, "verified_events": verified_count, "failed_event_id": event.id, "reason": "previous_hash_mismatch"}
-        payload = event_payload(
-            tenant_id=event.tenant_id, actor_user_id=event.actor_user_id,
-            entity_type=event.entity_type, entity_id=event.entity_id,
-            action=event.action, details=event.details, created_at=event.created_at,
-        )
-        expected_hash = calculate_event_hash(expected_previous, payload)
-        if event.event_hash != expected_hash:
-            return {"valid": False, "verified_events": verified_count, "failed_event_id": event.id, "reason": "event_hash_mismatch"}
-        expected_previous = event.event_hash
+    verified_count = 0
+    last_event_id = None
+
+    while True:
+        query = db.query(AuditEvent).filter(AuditEvent.tenant_id == tenant_id)
+        if last_event_id is not None:
+            query = query.filter(AuditEvent.id > last_event_id)
+        rows = query.order_by(AuditEvent.id.asc()).limit(batch_size).all()
+        if not rows:
+            break
+
+        for event in rows:
+            if event.previous_hash != expected_previous:
+                return {"valid": False, "verified_events": verified_count, "failed_event_id": event.id, "reason": "previous_hash_mismatch"}
+            payload = event_payload(
+                tenant_id=event.tenant_id, actor_user_id=event.actor_user_id,
+                entity_type=event.entity_type, entity_id=event.entity_id,
+                action=event.action, details=event.details, created_at=event.created_at,
+            )
+            expected_hash = calculate_event_hash(expected_previous, payload)
+            if event.event_hash != expected_hash:
+                return {"valid": False, "verified_events": verified_count, "failed_event_id": event.id, "reason": "event_hash_mismatch"}
+            expected_previous = event.event_hash
+            verified_count += 1
+            last_event_id = event.id
+
+        if len(rows) < batch_size:
+            break
+
     return {
         "valid": True,
-        "verified_events": len(rows),
+        "verified_events": verified_count,
         "head_hash": expected_previous,
         # Freeze the verified export boundary. Later concurrent appends have
         # larger IDs and must not leak into a batch verified against this head.
-        "last_event_id": rows[-1].id if rows else None,
+        "last_event_id": last_event_id,
     }
