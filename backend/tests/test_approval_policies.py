@@ -98,3 +98,26 @@ def test_approval_policy_deactivation_is_idempotent_for_inactive_policy(monkeypa
 
     assert result == {"id": 18, "is_active": False}
     assert captured["events"] == []
+
+
+def test_invoice_reconciliation_is_limited_to_admin_and_analyst_roles():
+    from types import SimpleNamespace
+    from app.main import app
+    from app.models import Role
+
+    route = next(
+        route for route in app.routes
+        if getattr(route, "path", None) == "/api/v1/invoices/{invoice_id}/reconcile"
+    )
+    user_dependency = next(
+        dependency for dependency in route.dependant.dependencies
+        if dependency.name == "user"
+    )
+    authorize = user_dependency.call
+
+    for role in (Role.admin, Role.analyst):
+        assert authorize(user=SimpleNamespace(role=role)) is not None
+
+    with pytest.raises(HTTPException) as exc:
+        authorize(user=SimpleNamespace(role=Role.reviewer))
+    assert exc.value.status_code == 403
