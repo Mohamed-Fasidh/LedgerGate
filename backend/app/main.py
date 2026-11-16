@@ -627,6 +627,7 @@ def request_password_reset(
 def confirm_password_reset(
     payload: PasswordResetConfirmIn,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
 ):
     """Consume a one-time reset token, update credentials, and revoke all sessions."""
@@ -692,6 +693,7 @@ def confirm_password_reset(
         "mfa_verified": user.mfa_enabled,
     })
     db.commit()
+    _clear_auth_cookies(response)
     return {"status": "password_reset", "revoked_sessions": revoked_count}
 
 
