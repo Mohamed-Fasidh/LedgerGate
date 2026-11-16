@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 class Settings(BaseSettings):
@@ -128,6 +128,11 @@ def validate_production_settings(config: Settings) -> None:
     parsed_database_url = urlparse(database_url)
     if parsed_database_url.scheme not in ("postgres", "postgresql") or parsed_database_url.username != "ledgergate_runtime":
         raise RuntimeError("Production DATABASE_URL must use the restricted ledgergate_runtime PostgreSQL role")
+    database_options = parse_qs(parsed_database_url.query)
+    if database_options.get("sslmode", [""])[-1].lower() != "verify-full":
+        raise RuntimeError("Production DATABASE_URL must require PostgreSQL TLS with sslmode=verify-full")
+    if not database_options.get("sslrootcert", [""])[-1].strip():
+        raise RuntimeError("Production DATABASE_URL must specify sslrootcert for PostgreSQL certificate verification")
 
 
 settings = Settings()
