@@ -422,7 +422,7 @@ def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_ke
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if payload.supplier_id and not db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Supplier not found")
-    if payload.purchase_order_id and not db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Purchase order not found")
+    if payload.purchase_order_id and not db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Purchase order not found")
     for k,v in payload_data.items(): setattr(inv,k,v)
     inv.status=InvoiceStatus.RECEIVED
     db.flush()
@@ -626,8 +626,15 @@ def add_agent_memory(content:str,memory_type:str="episodic",idempotency_key:str|
     if idempotency_key:
         _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
     record_event(db,user,"agent_memory",obj.id,"created",{"memory_type":memory_type,"idempotent":bool(idempotency_key)})
-    db.commit()
-    return response
+    try:
+        db.commit()
+        return response
+    except IntegrityError:
+        db.rollback()
+        if idempotency_key:
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+            if cached is not None: return cached
+        raise HTTPException(409,"Agent memory creation conflicted with another request")
 
 @app.get("/api/v1/agent/memory/search")
 def search_agent_memory(q:str,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
@@ -660,8 +667,15 @@ def add_policy(payload:PolicyIn,idempotency_key:str|None=Header(default=None,ali
     if idempotency_key:
         _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
     record_event(db,user,"policy",doc.id,"created",{"title":doc.title,"idempotent":bool(idempotency_key)})
-    db.commit()
-    return response
+    try:
+        db.commit()
+        return response
+    except IntegrityError:
+        db.rollback()
+        if idempotency_key:
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+            if cached is not None: return cached
+        raise HTTPException(409,"Policy creation conflicted with another request")
 
 @app.get("/api/v1/policies/search")
 def search_policies(q:str,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
