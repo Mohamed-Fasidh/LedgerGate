@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional, Any
+from decimal import Decimal
 
 class RegisterIn(BaseModel):
     email: EmailStr
@@ -51,8 +52,8 @@ class ReconcileOut(BaseModel):
 
 class ApprovalPolicyIn(BaseModel):
     name: str = Field(min_length=2, max_length=120)
-    min_amount: float = Field(default=0, ge=0)
-    max_amount: Optional[float] = Field(default=None, gt=0)
+    min_amount: Decimal = Field(default=Decimal('0.00'), ge=0)
+    max_amount: Optional[Decimal] = Field(default=None, gt=0)
     approval_steps: list[list[str]] = Field(min_length=1, max_length=5)
 
 class ApprovalDecisionIn(BaseModel):
