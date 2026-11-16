@@ -128,3 +128,15 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - S3 invoice download reads are bounded to the configured upload limit plus one byte; oversized stored objects are rejected and response streams are closed. Regression tests cover both oversized and valid bounded downloads.
 - Invoice reconciliation is restricted to administrator and analyst roles. Reviewers cannot invoke this processing action; a regression test checks the role boundary.
 - PR #5 remains open and unmerged pending independent review and production acceptance. Passing CI is not production certification.
+
+
+## Tenant pagination and approval-policy concurrency hardening — 2026-11-16
+
+- Tenant collection APIs for invoices, suppliers, purchase orders, and approval policies now use bounded pagination (default 100, maximum 200) with deterministic ordering and tenant filters. Active-session listing is also bounded to 100.
+- Frontend invoice queue now requests pages of 100 and provides Previous/Next navigation.
+- Approval-policy create/deactivate operations serialize range mutations using a tenant-scoped PostgreSQL transaction advisory lock. Creation checks only for overlapping active amount ranges using half-open interval semantics, rather than loading all tenant policies.
+- Added regression tests for pagination, tenant scoping, invalid pagination values, PostgreSQL advisory-lock behavior, and overlap-query predicates.
+- CI run [43844747286](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43844747286) passed all three jobs before the latest approval-policy concurrency changes.
+- CI run [43845374167](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43845374167) on frontend pagination commit `23da5bc0a58b0cdda7ab2a9f54b8b65a915376e5`: backend and frontend jobs passed; Docker image build was still running at last check.
+- Subsequent approval-policy changes are on PR #5 and require a fresh successful full CI run. PR #5 remains open and unmerged.
+- Passing CI does not validate a live cloud deployment. Staging, cloud IAM/Object Lock/KMS validation, real restore drills, identity lifecycle completion, independent security/load testing, and operational sign-off remain release gates.
