@@ -171,3 +171,14 @@ def test_invoice_idempotency_response_is_stored_in_shared_namespace():
     assert db.added[0].key == "invoice-key-0001"
     assert db.added[0].operation == "invoice.create"
     assert db.added[0].response_json == response
+
+
+def test_tenant_user_fingerprint_hashes_password_without_exposing_it():
+    from app.main import _tenant_user_request_hash
+
+    password = "very-secret-password-123"
+    first = _tenant_user_request_hash("ADMIN@example.com", password, "analyst")
+    assert first == _tenant_user_request_hash("admin@example.com", password, "analyst")
+    assert first != _tenant_user_request_hash("admin@example.com", "different-password-123", "analyst")
+    assert password not in first
+    assert len(first) == 64
