@@ -60,3 +60,65 @@ def test_cli_rejects_invalid_keyring_shape(tmp_path, capsys):
 
     assert result == 2
     assert "keyring must map" in capsys.readouterr().err
+
+
+
+def test_cli_rejects_duplicate_json_keys_in_export(tmp_path, capsys):
+    _, keyring = _signed_valid_chain_document()
+    document_path = tmp_path / "duplicate-export.json"
+    document_path.write_text('{"format":"first","format":"second"}', encoding="utf-8")
+    keyring_path = tmp_path / "keyring.json"
+    keyring_path.write_text(json.dumps(keyring), encoding="utf-8")
+    if os.name == "posix":
+        keyring_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    result = main(["--document", str(document_path), "--keyring-file", str(keyring_path)])
+
+    assert result == 2
+    assert "duplicate JSON object key" in capsys.readouterr().err
+
+
+def test_cli_rejects_nonstandard_json_constants_in_keyring(tmp_path, capsys):
+    document, _ = _signed_valid_chain_document()
+    document_path, keyring_path = _write_inputs(tmp_path, document, {})
+    keyring_path.write_text('{"key": NaN}', encoding="utf-8")
+    if os.name == "posix":
+        keyring_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    result = main(["--document", str(document_path), "--keyring-file", str(keyring_path)])
+
+    assert result == 2
+    assert "non-standard JSON numeric constant" in capsys.readouterr().err
+
+
+def test_cli_rejects_export_file_over_size_limit(tmp_path, capsys):
+    from scripts.verify_audit_export import MAX_EXPORT_FILE_BYTES
+
+    document_path = tmp_path / "oversized-export.json"
+    document_path.write_bytes(b" " * (MAX_EXPORT_FILE_BYTES + 1))
+    keyring_path = tmp_path / "keyring.json"
+    keyring_path.write_text("{}", encoding="utf-8")
+    if os.name == "posix":
+        keyring_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    result = main(["--document", str(document_path), "--keyring-file", str(keyring_path)])
+
+    assert result == 2
+    assert "file limit" in capsys.readouterr().err
+
+
+def test_cli_rejects_symbolic_link_input(tmp_path, capsys):
+    if not hasattr(os, "symlink"):
+        pytest.skip("symbolic links unavailable")
+    document, keyring = _signed_valid_chain_document()
+    real_document, keyring_path = _write_inputs(tmp_path, document, keyring)
+    linked_document = tmp_path / "linked-export.json"
+    try:
+        linked_document.symlink_to(real_document)
+    except OSError:
+        pytest.skip("symbolic link creation is not permitted")
+
+    result = main(["--document", str(linked_document), "--keyring-file", str(keyring_path)])
+
+    assert result == 2
+    assert "symbolic link" in capsys.readouterr().err
