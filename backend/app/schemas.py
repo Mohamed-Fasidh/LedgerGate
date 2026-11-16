@@ -105,3 +105,11 @@ class PasswordResetConfirmIn(BaseModel):
         if len(value.encode("utf-8")) > 72:
             raise ValueError("Password must not exceed 72 UTF-8 bytes")
         return value
+
+
+class EmailVerificationRequestIn(BaseModel):
+    email: EmailStr
+
+
+class EmailVerificationConfirmIn(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
