@@ -493,6 +493,51 @@ def _revoke_refresh_sessions(db: Session, tenant_id: str, user_id: int, now: dat
     ).update({AuthSession.revoked_at: now}, synchronize_session=False)
 
 
+@app.get("/api/v1/auth/sessions")
+def list_auth_sessions(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    sessions = db.query(AuthSession).filter(
+        AuthSession.tenant_id == user.tenant_id,
+        AuthSession.user_id == user.id,
+        AuthSession.revoked_at.is_(None),
+        AuthSession.expires_at > datetime.now(timezone.utc),
+    ).order_by(AuthSession.created_at.desc(), AuthSession.id.desc()).all()
+    return [
+        {
+            "id": session.id,
+            "created_at": session.created_at.isoformat() if session.created_at else None,
+            "expires_at": session.expires_at.isoformat(),
+        }
+        for session in sessions
+    ]
+
+
+@app.delete("/api/v1/auth/sessions/{session_id}")
+def revoke_auth_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    session = db.query(AuthSession).filter(
+        AuthSession.id == session_id,
+        AuthSession.tenant_id == user.tenant_id,
+        AuthSession.user_id == user.id,
+    ).with_for_update().first()
+    if session is None:
+        raise HTTPException(404, "Session not found")
+    if session.revoked_at is not None:
+        return {"status": "already_revoked", "session_id": session.id}
+    session.revoked_at = datetime.now(timezone.utc)
+    record_event(
+        db, user, "auth_session", session.id, "auth_session_revoked",
+        {"reason": "user_initiated"},
+    )
+    db.commit()
+    return {"status": "revoked", "session_id": session.id}
+
+
 @app.post("/api/v1/auth/logout-all")
 def logout_all_sessions(response: Response, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     now = datetime.now(timezone.utc)
