@@ -426,15 +426,15 @@ def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_ke
     if payload.purchase_order_id and not db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Purchase order not found")
     for k,v in payload_data.items(): setattr(inv,k,v)
     inv.status=InvoiceStatus.RECEIVED
-    db.flush()
-    response=invoice_view(inv)
-    if idempotency_key:
-        _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
-    record_event(db,user,"invoice",inv.id,"extraction_confirmed",{"invoice_number":inv.invoice_number,"amount":payload.amount,"idempotent":bool(idempotency_key)})
     try:
+        db.flush()
+        response=invoice_view(inv)
+        if idempotency_key:
+            _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
+        record_event(db,user,"invoice",inv.id,"extraction_confirmed",{"invoice_number":inv.invoice_number,"amount":payload.amount,"idempotent":bool(idempotency_key)})
         db.commit()
         return response
-    except IntegrityError:
+    except (IntegrityError,StaleDataError):
         db.rollback()
         if idempotency_key:
             cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
@@ -476,7 +476,7 @@ def reconcile(invoice_id:int,idempotency_key:str|None=Header(default=None,alias=
     try:
         db.commit()
         return response
-    except IntegrityError:
+    except (IntegrityError,StaleDataError):
         db.rollback()
         if idempotency_key:
             cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
@@ -605,7 +605,11 @@ def approve(invoice_id:int,payload:ApprovalDecisionIn|None=None,idempotency_key:
         db.commit()
         return response
     except StaleDataError:
-        db.rollback(); raise HTTPException(409,"Invoice changed concurrently; reload it before approving")
+        db.rollback()
+        if idempotency_key:
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+            if cached is not None: return cached
+        raise HTTPException(409,"Invoice changed concurrently; reload it before approving")
     except IntegrityError:
         db.rollback()
         if idempotency_key:
@@ -640,7 +644,11 @@ def reject(invoice_id:int,payload:ApprovalDecisionIn|None=None,idempotency_key:s
         db.commit()
         return response
     except StaleDataError:
-        db.rollback(); raise HTTPException(409,"Invoice changed concurrently; reload it before rejecting")
+        db.rollback()
+        if idempotency_key:
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+            if cached is not None: return cached
+        raise HTTPException(409,"Invoice changed concurrently; reload it before rejecting")
     except IntegrityError:
         db.rollback()
         if idempotency_key:
