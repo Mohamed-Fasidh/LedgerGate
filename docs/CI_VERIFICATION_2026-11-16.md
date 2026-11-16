@@ -16,7 +16,7 @@
 - Alembic migrations through `0024_email_outbox`, including password-reset tokens, email verification, and the durable outbox
 - Restricted PostgreSQL runtime-role bootstrap
 - Python compileall
-- Full pytest suite (**235 passed**), including duplicate-registration anti-enumeration, email-verification lifecycle, consistent user-then-token lock ordering, password-reset token, SMTP STARTTLS, production configuration, and public-route origin-guard tests
+- Full pytest suite (**235 passed**), including duplicate-registration anti-enumeration, email-verification lifecycle, consistent user-then-token lock ordering, password-reset token, encrypted outbox, bounded retries, dead-letter handling, abandoned-lease recovery, stale-token cancellation, key rotation, retention, SMTP STARTTLS, production configuration, and public-route origin-guard tests
 
 ### Frontend
 - Dependency advisory report
@@ -40,7 +40,7 @@
 - Confirmation requires a strong password and, when MFA is enabled, a fresh TOTP or unused recovery code. Confirmations and concurrent resends lock the account row before token rows, avoiding lock-order deadlocks.
 - Completion increments the account access-token version, revokes refresh sessions, clears browser auth cookies, and records an audit event.
 - SMTP delivery uses authenticated STARTTLS on port 587. Production startup requires SMTP host/credentials/from-address and an HTTPS public-app URL.
-- CI validates the implementation and SMTP client behavior; it does not prove delivery through a real provider or mailbox receipt. A durable outbox/retry worker and external delivery monitoring remain production follow-ups.
+- CI validates the implementation and worker behavior; it does not prove delivery through a real provider or mailbox receipt. Real SMTP provider verification, external delivery monitoring, and alerting on queue age/dead-letter records remain production follow-ups.
 
 ## Durable account email delivery
 
