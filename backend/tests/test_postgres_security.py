@@ -8,9 +8,13 @@ from sqlalchemy.orm import sessionmaker
 def test_rls_blocks_cross_tenant_and_audit_is_append_only():
     engine = create_engine(os.environ["TEST_POSTGRES_URL"])
     Session = sessionmaker(bind=engine)
+    event_id = str(uuid.uuid4())
+
+    # The CI connection is a migration/admin account. Execute application queries
+    # as a non-owner role so PostgreSQL RLS is actually exercised.
     with Session() as db:
+        db.execute(text("SET LOCAL ROLE ledgergate_runtime"))
         db.execute(text("SELECT set_config('app.tenant_id', 'tenant-a', false)"))
-        event_id = str(uuid.uuid4())
         db.execute(text("""
             INSERT INTO audit_events
               (tenant_id, actor_user_id, entity_type, entity_id, action, details, created_at)
@@ -19,6 +23,8 @@ def test_rls_blocks_cross_tenant_and_audit_is_append_only():
         """), {"event_id": event_id})
         db.commit()
 
+    with Session() as db:
+        db.execute(text("SET LOCAL ROLE ledgergate_runtime"))
         db.execute(text("SELECT set_config('app.tenant_id', 'tenant-b', false)"))
         visible = db.execute(
             text("SELECT count(*) FROM audit_events WHERE entity_id=:event_id"),
@@ -27,6 +33,8 @@ def test_rls_blocks_cross_tenant_and_audit_is_append_only():
         assert visible == 0
         db.rollback()
 
+    with Session() as db:
+        db.execute(text("SET LOCAL ROLE ledgergate_runtime"))
         db.execute(text("SELECT set_config('app.tenant_id', 'tenant-a', false)"))
         with pytest.raises(Exception, match="append-only"):
             db.execute(
