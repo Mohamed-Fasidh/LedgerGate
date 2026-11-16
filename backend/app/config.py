@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "unsafe-development-secret-change-this"
     jwt_algorithm: str = "HS256"
     mfa_encryption_key: str = ""
+    audit_worm_bucket: str = ""
+    audit_worm_retention_days: int = 2555
+    audit_export_signing_key: str = ""
     access_token_expire_minutes: int = 30
     cors_origins: str = "http://localhost:3000"
     upload_dir: str = "./uploads"
@@ -38,6 +41,12 @@ if settings.app_env.lower()=="production":
             raise RuntimeError("MFA_ENCRYPTION_KEY must be a valid Fernet key") from exc
     else:
         raise RuntimeError("Production requires MFA_ENCRYPTION_KEY for encrypted authenticator secrets")
+    if not settings.audit_worm_bucket:
+        raise RuntimeError("Production requires AUDIT_WORM_BUCKET with S3 Object Lock enabled")
+    if len(settings.audit_export_signing_key) < 32:
+        raise RuntimeError("Production requires AUDIT_EXPORT_SIGNING_KEY with at least 32 characters")
+    if settings.audit_worm_retention_days < 1 or settings.audit_worm_retention_days > 3650:
+        raise RuntimeError("AUDIT_WORM_RETENTION_DAYS must be between 1 and 3650")
     if settings.jwt_secret_key=="unsafe-development-secret-change-this" or len(settings.jwt_secret_key)<32:
         raise RuntimeError("Production requires a unique JWT_SECRET_KEY of at least 32 characters")
     if "*" in settings.cors_origin_list:
