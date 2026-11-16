@@ -294,3 +294,105 @@ def test_admin_role_change_rejects_admin_and_inactive_members():
                 user=actor,
             )
         assert error.value.status_code == expected
+
+
+def test_user_session_listing_is_tenant_scoped_and_minimal():
+    import app.main as main
+    from app.models import AuthSession
+
+    session = SimpleNamespace(
+        id=8, tenant_id="tenant-a", user_id=7,
+        created_at=datetime(2026, 11, 15, tzinfo=timezone.utc),
+        expires_at=datetime(2026, 12, 15, tzinfo=timezone.utc),
+        token_hash="never-return-this", family_id="never-return-this",
+    )
+    captured = {}
+
+    class Query:
+        def filter(self, *conditions):
+            captured["conditions"] = conditions
+            return self
+        def order_by(self, *columns):
+            return self
+        def all(self):
+            return [session]
+
+    class DB:
+        def query(self, model):
+            assert model is AuthSession
+            return Query()
+
+    actor = SimpleNamespace(id=7, tenant_id="tenant-a")
+    result = main.list_auth_sessions(db=DB(), user=actor)
+    assert result == [{
+        "id": 8,
+        "created_at": "2026-11-15T00:00:00+00:00",
+        "expires_at": "2026-12-15T00:00:00",
+    }]
+    rendered = [str(condition) for condition in captured["conditions"]]
+    assert any("auth_sessions.tenant_id" in item for item in rendered)
+    assert any("auth_sessions.user_id" in item for item in rendered)
+    assert "token_hash" not in result[0]
+    assert "family_id" not in result[0]
+
+
+def test_user_can_revoke_only_their_own_session_and_action_is_audited(monkeypatch):
+    import app.main as main
+    from app.models import AuthSession
+
+    session = SimpleNamespace(
+        id=19, tenant_id="tenant-a", user_id=7, revoked_at=None,
+    )
+    captured = {}
+
+    class Query:
+        def filter(self, *conditions):
+            captured["conditions"] = conditions
+            return self
+        def with_for_update(self):
+            captured["locked"] = True
+            return self
+        def first(self):
+            return session
+
+    class DB:
+        def query(self, model):
+            assert model is AuthSession
+            return Query()
+        def commit(self):
+            captured["committed"] = True
+
+    monkeypatch.setattr(main, "record_event", lambda *args: captured.setdefault("audit", args))
+    actor = SimpleNamespace(id=7, tenant_id="tenant-a")
+    result = main.revoke_auth_session(session_id=19, db=DB(), user=actor)
+    assert result == {"status": "revoked", "session_id": 19}
+    assert session.revoked_at is not None
+    assert captured["locked"] and captured["committed"]
+    rendered = [str(condition) for condition in captured["conditions"]]
+    assert any("auth_sessions.tenant_id" in item for item in rendered)
+    assert any("auth_sessions.user_id" in item for item in rendered)
+    assert captured["audit"][4] == "auth_session_revoked"
+
+
+def test_revoke_session_is_idempotent_when_already_revoked():
+    import app.main as main
+    from app.models import AuthSession
+
+    session = SimpleNamespace(
+        id=19, tenant_id="tenant-a", user_id=7,
+        revoked_at=datetime(2026, 11, 15, tzinfo=timezone.utc),
+    )
+
+    class Query:
+        def filter(self, *conditions): return self
+        def with_for_update(self): return self
+        def first(self): return session
+
+    class DB:
+        def query(self, model): return Query()
+        def commit(self): raise AssertionError("Already-revoked session must not commit")
+
+    result = main.revoke_auth_session(
+        session_id=19, db=DB(), user=SimpleNamespace(id=7, tenant_id="tenant-a")
+    )
+    assert result == {"status": "already_revoked", "session_id": 19}
