@@ -58,4 +58,4 @@ For local development without Docker:
 - `GET /api/v1/audit-events`
 - `GET /health`
 
-See `docs/ARCHITECTURE.md`, `docs/SECURITY.md`, and `docs/RESEARCH_PLAN.md`.
+See `docs/ARCHITECTURE.md`, `docs/SECURITY.md`, `docs/EMAIL_OUTBOX.md`, and `docs/RESEARCH_PLAN.md`.
