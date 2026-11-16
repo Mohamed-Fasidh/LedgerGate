@@ -71,6 +71,11 @@ def test_disabling_mfa_revokes_sessions_and_clears_auth_cookies(monkeypatch):
         def commit(self):
             pass
 
+    monkeypatch.setattr(
+        main, "_begin_sensitive_auth_attempt",
+        lambda db, user, request: ("email-hash", "ip-hash", datetime.now(timezone.utc)),
+    )
+    monkeypatch.setattr(main, "_record_sensitive_auth_attempt", lambda *args, **kwargs: None)
     monkeypatch.setattr(main, "verify_password", lambda password, hashed: True)
     monkeypatch.setattr(main, "decrypt_totp_secret", lambda encrypted: "totp-secret")
     monkeypatch.setattr(main, "matching_totp_step", lambda *args, **kwargs: 11)
@@ -82,7 +87,8 @@ def test_disabling_mfa_revokes_sessions_and_clears_auth_cookies(monkeypatch):
     response = Response()
 
     result = main.disable_mfa(
-        response,
+        request=SimpleNamespace(),
+        response=response,
         current_password="current-password",
         totp_code="123456",
         recovery_code=None,
