@@ -38,7 +38,7 @@ def _read_json(path: Path, *, secret: bool = False):
     # Open without following symlinks where the platform supports it, then
     # validate the opened descriptor. Checking the path before opening alone
     # permits a symlink-swap race between the check and the read.
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)\n             | getattr(os, "O_NONBLOCK", 0))
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
