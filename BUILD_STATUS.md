@@ -4,14 +4,17 @@ Last checked: 2026-11-16
 
 ## Latest verification — 2026-11-16
 
-- PR #11 (bounded tenant agent-memory search) merged as `b1f822520f78fb05de3e8a5829425e233f35d232`. Its PR CI run [43886140222](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43886140222) passed backend, frontend, and Docker; post-merge main run [43886734493](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43886734493) also passed all three jobs.
-- PR #12 (email outbox lease fencing) merged as `90a1ac1f2c6b357974f1ca90cdea93f794307d58`. Its PR CI run [43886893597](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43886893597) passed backend, frontend, and Docker.
-- Post-merge main CI run [43887974188](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43887974188) is running; do not treat the merged commit as fully main-branch verified until all three jobs pass.
-- Agent-memory search now rejects queries over 500 characters, caps results at 20, and keeps candidate reads bounded to 500 tenant records.
+- PR #11 (bounded tenant agent-memory search) merged as `b1f822520f78fb05de3e8a5829425e233f35d232`. PR CI [43886140222](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43886140222) and post-merge main CI [43886734493](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43886734493) passed backend, frontend, and Docker.
+- PR #12 (email outbox lease fencing) merged as `90a1ac1f2c6b357974f1ca90cdea93f794307d58`. PR CI [43886893597](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43886893597) and post-merge main CI [43887974188](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43887974188) passed all three jobs.
+- PR #13 (threat model and security posture refresh) merged as `feafad7aff1729ea530aa9b71d7042707677cb2a`. PR CI [43888223647](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43888223647) and post-merge main CI [43888510353](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43888510353) passed all three jobs.
+- PR #14 (scheduled CodeQL for Python and JavaScript/TypeScript) merged as `46fb318a1398851efa26324c41b195180c0397f1`. PR CI [43888590232](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43888590232), PR CodeQL [43888590277](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43888590277), post-merge main CI [43889057017](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43889057017), and main CodeQL [43889057222](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43889057222) passed.
+- PR #15 (MCP remote TLS enforcement, redirect blocking, SDK compatibility) merged as `e35e323b5c8c53fa98f9006237d8c7817f3b80a6`. PR CI [43889541455](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43889541455) passed backend, frontend, and Docker; PR CodeQL [43889541334](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43889541334) passed both languages.
+- Latest main-branch verification for PR #15 is pending: CI [43889805119](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43889805119) and CodeQL [43889804706](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43889804706) must complete successfully before this commit is marked main-verified.
+- Agent-memory search rejects queries over 500 characters, caps results at 20, and bounds candidate reads to 500 tenant records.
 - Email outbox delivery, retry, and cancellation updates are fenced to the active worker lease. Delivery remains at-least-once; SMTP acceptance followed by worker crash can still cause duplicate email.
-- The threat model and security posture documentation were refreshed to reflect implemented controls and current external release gates.
+- Remote MCP API origins require HTTPS; plain HTTP is permitted only for loopback development. Authenticated MCP API requests do not follow redirects. MCP SDK is pinned to v1.30.0 to avoid the Pydantic compatibility failure found by CI.
 - Production PostgreSQL connections require `sslmode=verify-full` and an explicit `sslrootcert` CA bundle path. Staging must verify the mounted CA and actual managed-database certificate chain/hostname.
-- Passing repository CI is not production certification. Staging deployment, cloud integration, external SMTP receipt, Object Lock/IAM verification, restore drills, independent security testing, and operational acceptance remain outstanding.
+- Passing repository CI and CodeQL does not certify production. Staging deployment, cloud integration, external SMTP receipt, Object Lock/IAM verification, restore drills, independent security testing, and operational acceptance remain outstanding.
 
 ## Current verified state — main branch
 
