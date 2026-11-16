@@ -194,3 +194,10 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 
 
 - Frontend account-security settings now expose the password-change workflow with current/new password fields and conditional TOTP/recovery-code inputs when MFA is enabled. Successful changes return the user to sign-in with a clear confirmation message.
+
+
+## Latest verification refresh — 2026-11-16
+
+- GitHub Actions run [43850651897](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43850651897) passed all three jobs on commit `e9f381b4b2792fe806ad8a7506b63b42229210b6`: backend migrations through the current Alembic head, restricted runtime-role bootstrap, Python compilation and pytest; frontend dependency audit and production build; Docker operational-script regression checks, Compose validation, and backend/frontend image builds.
+- This passing run includes migration `0020_auth_session_query_indexes`, the password-change backend endpoint and regression tests, and the frontend account-security password-change form.
+- PR #5 remains open and unmerged. This CI result verifies repository automation only; it does not establish production readiness or replace staging, cloud integration, recovery drills, independent security testing, and operational sign-off.
