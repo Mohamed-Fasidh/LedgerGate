@@ -269,7 +269,7 @@ EMAIL_VERIFICATION_GENERIC_MESSAGE = (
 )
 
 
-def _create_email_verification_link(db: Session, user: User, now: datetime) -> str:
+def _create_email_verification_link(db: Session, user: User, now: datetime) -> tuple[str, str]:
     """Replace any previous verification link while holding the user's row lock."""
     db.query(EmailVerificationToken).filter(
         EmailVerificationToken.user_id == user.id
@@ -281,7 +281,7 @@ def _create_email_verification_link(db: Session, user: User, now: datetime) -> s
         expires_at=now + EMAIL_VERIFICATION_TTL,
         created_at=now,
     ))
-    return f"{settings.public_app_url.rstrip('/')}/#verify_email_token={quote(raw_token, safe='')}"
+    return f"{settings.public_app_url.rstrip('/')}/#verify_email_token={quote(raw_token, safe='')}", hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
 
 @app.post("/api/v1/auth/register", status_code=202)
@@ -316,15 +316,15 @@ def register(
             User.email == normalized_email
         ).with_for_update().first()
         if existing is not None and existing.is_active and not existing.email_verified:
-            verification_url = _create_email_verification_link(db, existing, datetime.now(timezone.utc))
-            enqueue_email(db, existing.email, "email_verification", verification_url)
+            verification_url, verification_hash = _create_email_verification_link(db, existing, datetime.now(timezone.utc))
+            enqueue_email(db, existing.email, "email_verification", verification_url, verification_hash)
             db.commit()
         elif existing is None:
             raise
         return {"status": "accepted", "message": EMAIL_VERIFICATION_GENERIC_MESSAGE}
 
-    verification_url = _create_email_verification_link(db, user, datetime.now(timezone.utc))
-    enqueue_email(db, user.email, "email_verification", verification_url)
+    verification_url, verification_hash = _create_email_verification_link(db, user, datetime.now(timezone.utc))
+    enqueue_email(db, user.email, "email_verification", verification_url, verification_hash)
     db.commit()
     return {"status": "accepted", "message": EMAIL_VERIFICATION_GENERIC_MESSAGE}
 
@@ -346,8 +346,8 @@ def request_email_verification(
             User.email_verified.is_(False),
         ).with_for_update().first()
         if user is not None:
-            verification_url = _create_email_verification_link(db, user, datetime.now(timezone.utc))
-            enqueue_email(db, user.email, "email_verification", verification_url)
+            verification_url, verification_hash = _create_email_verification_link(db, user, datetime.now(timezone.utc))
+            enqueue_email(db, user.email, "email_verification", verification_url, verification_hash)
             db.commit()
     return {"status": "accepted", "message": EMAIL_VERIFICATION_GENERIC_MESSAGE}
 
@@ -737,7 +737,7 @@ def request_password_reset(
         ))
         reset_url = f"{settings.public_app_url.rstrip('/')}/#reset_token={quote(raw_token, safe='')}"
         # Persist the encrypted delivery payload atomically with the one-time token.
-        enqueue_email(db, user.email, "password_reset", reset_url)
+        enqueue_email(db, user.email, "password_reset", reset_url, token_hash)
         db.commit()
     return {"status": "accepted", "message": "If the account exists, a reset link will be sent."}
 
