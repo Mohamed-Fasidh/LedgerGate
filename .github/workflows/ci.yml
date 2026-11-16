@@ -49,6 +49,8 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
+      - name: Validate database role bootstrap scripts
+        run: sh -n ./scripts/bootstrap_auth_owner_role.sh ./scripts/bootstrap_runtime_role.sh
       - name: Bootstrap non-login authentication function owner
         run: sh ./scripts/bootstrap_auth_owner_role.sh
       - run: alembic upgrade head
