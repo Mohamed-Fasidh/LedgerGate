@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     email_smtp_password: str = ""
     email_from_address: str = ""
     email_outbox_encryption_key: str = ""
+    email_outbox_decryption_keys: str = ""
     public_app_url: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -109,8 +110,11 @@ def validate_production_settings(config: Settings) -> None:
     from cryptography.fernet import Fernet
     try:
         Fernet(config.email_outbox_encryption_key.encode("ascii"))
+        for previous_key in config.email_outbox_decryption_keys.split(","):
+            if previous_key.strip():
+                Fernet(previous_key.strip().encode("ascii"))
     except (ValueError, UnicodeEncodeError) as exc:
-        raise RuntimeError("EMAIL_OUTBOX_ENCRYPTION_KEY must be a valid Fernet key") from exc
+        raise RuntimeError("EMAIL_OUTBOX_ENCRYPTION_KEY and EMAIL_OUTBOX_DECRYPTION_KEYS must contain valid Fernet keys") from exc
     if not config.email_smtp_host.strip() or not config.email_smtp_username.strip() or not config.email_smtp_password:
         raise RuntimeError("Production requires authenticated SMTP configuration for account recovery")
     if config.email_smtp_port != 587:
