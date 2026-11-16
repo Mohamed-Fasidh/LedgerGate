@@ -1,4 +1,4 @@
-import uuid, hashlib, tempfile, json, secrets, hmac, socket
+import uuid, hashlib, tempfile, json, secrets, hmac, socket, logging
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -15,8 +15,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, Role, InvoiceStatus
-from app.schemas import RegisterIn, TokenOut, RefreshIn, ChangePasswordIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, PasswordResetToken, Role, InvoiceStatus
+from app.schemas import RegisterIn, TokenOut, RefreshIn, ChangePasswordIn, PasswordResetRequestIn, PasswordResetConfirmIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn
 from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code
 from app.audit import record_event, verify_tenant_chain, event_payload, lock_tenant_audit_chain
 from app.services.audit_export import store_immutable_audit_export, AuditExportUnavailable
@@ -27,8 +27,9 @@ from app.services.evaluation import run_evaluation
 from app.services.model_router import explain_findings, ModelUnavailable
 from app.services.memory import remember, recall
 from app.services.storage import store_invoice, read_invoice, delete_invoice, scan_with_clamav, MalwareDetected, StorageUnavailable
+from app.services.email import send_password_reset_email
 
-app=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
+logger = logging.getLogger(__name__)\n\napp=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
 app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type","Idempotency-Key","X-CSRF-Token"])
 
 
@@ -573,6 +574,123 @@ def change_password(
     db.commit()
     _clear_auth_cookies(response)
     return {"status": "password_changed", "revoked_sessions": revoked_count}
+
+
+
+
+PASSWORD_RESET_TTL = timedelta(minutes=30)
+
+
+@app.post("/api/v1/auth/password-reset/request", status_code=202)
+def request_password_reset(
+    payload: PasswordResetRequestIn,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Always return the same response to avoid disclosing registered accounts."""
+    remote_ip = request.client.host if request.client else "unknown"
+    retry_after = _record_registration_attempt(db, payload.email, remote_ip)
+    if retry_after is not None:
+        # Do not reveal whether the address exists when throttled.
+        return {"status": "accepted", "message": "If the account exists, a reset link will be sent."}
+
+    normalized_email = payload.email.strip().lower()
+    user = db.query(User).filter(User.email == normalized_email, User.is_active.is_(True)).first()
+    if user is not None:
+        now = datetime.now(timezone.utc)
+        raw_token = secrets.token_urlsafe(48)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        # Invalidate previous outstanding links before issuing a fresh one.
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        ).update({PasswordResetToken.used_at: now}, synchronize_session=False)
+        db.add(PasswordResetToken(
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=now + PASSWORD_RESET_TTL,
+            created_at=now,
+        ))
+        db.commit()
+        reset_url = f"{settings.public_app_url.rstrip('/')}/?reset_token={quote(raw_token, safe='')}"
+        try:
+            send_password_reset_email(user.email, reset_url)
+        except Exception:
+            # Keep the response indistinguishable for unknown accounts. The
+            # exception is logged server-side without including the token or URL.
+            logger.exception("Password reset email delivery failed")
+    return {"status": "accepted", "message": "If the account exists, a reset link will be sent."}
+
+
+@app.post("/api/v1/auth/password-reset/confirm")
+def confirm_password_reset(
+    payload: PasswordResetConfirmIn,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Consume a one-time reset token, update credentials, and revoke all sessions."""
+    token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    reset = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash
+    ).with_for_update().first()
+    now = datetime.now(timezone.utc)
+    if reset is None or reset.used_at is not None:
+        raise HTTPException(400, "Reset link is invalid or expired")
+    expires_at = reset.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= now:
+        reset.used_at = now
+        db.commit()
+        raise HTTPException(400, "Reset link is invalid or expired")
+
+    user = db.query(User).filter(User.id == reset.user_id).with_for_update().first()
+    if user is None or not user.is_active:
+        db.rollback()
+        raise HTTPException(400, "Reset link is invalid or expired")
+    if verify_password(payload.new_password, user.hashed_password):
+        db.rollback()
+        raise HTTPException(400, "New password must be different from the current password")
+
+    if user.mfa_enabled:
+        if not user.mfa_secret_encrypted:
+            db.rollback()
+            raise HTTPException(503, "MFA configuration is incomplete")
+        try:
+            secret = decrypt_totp_secret(user.mfa_secret_encrypted)
+        except RuntimeError as exc:
+            db.rollback()
+            raise HTTPException(503, str(exc))
+        matched_step = matching_totp_step(
+            secret, payload.totp_code, last_used_step=user.mfa_last_used_step
+        )
+        if matched_step is not None:
+            user.mfa_last_used_step = matched_step
+        else:
+            remaining_hashes = consume_mfa_recovery_code(
+                user.mfa_recovery_code_hashes, payload.recovery_code
+            )
+            if remaining_hashes is None:
+                db.rollback()
+                raise HTTPException(400, "A valid authenticator or unused recovery code is required")
+            user.mfa_recovery_code_hashes = remaining_hashes
+
+    reset.used_at = now
+    # Invalidate every outstanding reset link for this account in this transaction.
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used_at.is_(None),
+    ).update({PasswordResetToken.used_at: now}, synchronize_session=False)
+    user.hashed_password = hash_password(payload.new_password)
+    _invalidate_access_tokens(user)
+    revoked_count = _revoke_refresh_sessions(db, user.tenant_id, user.id, now)
+    set_database_tenant(db, user.tenant_id)
+    record_event(db, user, "user", user.id, "password_reset_completed", {
+        "revoked_refresh_sessions": revoked_count,
+        "mfa_verified": user.mfa_enabled,
+    })
+    db.commit()
+    return {"status": "password_reset", "revoked_sessions": revoked_count}
 
 
 @app.post("/api/v1/auth/refresh", response_model=TokenOut)
