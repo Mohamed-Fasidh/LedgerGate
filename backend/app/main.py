@@ -333,7 +333,6 @@ def register(
 def request_email_verification(
     payload: EmailVerificationRequestIn,
     request: Request,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Resend verification without revealing whether an address has an account."""
@@ -709,7 +708,6 @@ PASSWORD_RESET_TTL = timedelta(minutes=30)
 def request_password_reset(
     payload: PasswordResetRequestIn,
     request: Request,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Always return the same response to avoid disclosing registered accounts."""
