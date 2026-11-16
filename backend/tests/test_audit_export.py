@@ -441,3 +441,29 @@ def test_export_document_verifier_rejects_noncanonical_signed_metadata(mutation)
     digest, signature = audit_export.sign_audit_payload(payload, keyring["verify-key-v1"])
     tampered.update(payload_sha256=digest, signature=signature)
     assert not audit_export.verify_audit_export_document(tampered, keyring)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("actor_user_id", True),
+        ("actor_user_id", 0),
+        ("entity_type", ""),
+        ("entity_type", "x" * 81),
+        ("entity_id", 99),
+        ("action", ""),
+        ("action", "x" * 101),
+        ("details", []),
+    ],
+)
+def test_export_verifier_rejects_invalid_event_field_types_even_when_resigned(field, value):
+    document, keyring = _signed_valid_chain_document()
+    tampered = json.loads(json.dumps(document))
+    tampered["events"][0][field] = value
+    payload = {
+        key: item for key, item in tampered.items()
+        if key not in ("signature", "payload_sha256", "signature_algorithm")
+    }
+    digest, signature = audit_export.sign_audit_payload(payload, keyring["verify-key-v1"])
+    tampered.update(payload_sha256=digest, signature=signature)
+    assert not audit_export.verify_audit_export_document(tampered, keyring)
