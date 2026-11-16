@@ -1,6 +1,5 @@
 """Allowlisted tool dispatcher with strict input validation and bounded execution surface."""
 from pydantic import BaseModel, Field, ValidationError
-from typing import Callable
 
 class InvoiceLookup(BaseModel):
     invoice_id: int = Field(gt=0)
@@ -23,8 +22,13 @@ class ToolExecutor:
     def execute(self,name:str,payload:dict):
         if name not in self.registry: raise ToolError("Tool is not allowlisted")
         schema,fn=self.registry[name]
-        try: args=schema.model_validate(payload)
-        except ValidationError as exc: raise ToolError(f"Invalid tool arguments: {exc.errors(include_url=False)}")
+        try:
+            args=schema.model_validate(payload)
+        except ValidationError:
+            # Pydantic's default error rendering includes rejected input values.
+            # Tool arguments can contain invoice identifiers or business text;
+            # return a stable error without reflecting submitted values.
+            raise ToolError("Invalid tool arguments") from None
         return fn(args)
     def _invoice(self,args):
         from app.models import Invoice
