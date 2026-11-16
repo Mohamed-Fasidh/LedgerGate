@@ -20,7 +20,21 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(user: User):
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
-    return jwt.encode({"sub": str(user.id), "tenant": user.tenant_id, "role": user.role.value, "exp": expire}, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return jwt.encode({"sub": str(user.id), "tenant": user.tenant_id, "role": user.role.value, "token_type": "access", "exp": expire}, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+def create_refresh_token(user: User, token_id: str, family_id: str):
+    expire = datetime.now(timezone.utc) + timedelta(days=30)
+    token = jwt.encode({
+        "sub": str(user.id), "tenant": user.tenant_id, "role": user.role.value,
+        "token_type": "refresh", "jti": token_id, "family": family_id, "exp": expire,
+    }, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return token, expire
+
+def decode_refresh_token(token: str):
+    payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    if payload.get("token_type") != "refresh" or not payload.get("jti") or not payload.get("family"):
+        raise JWTError("Invalid refresh token")
+    return payload
 
 def set_database_tenant(db: Session, tenant_id: str) -> None:
     """Set transaction-connection tenant context consumed by PostgreSQL RLS policies.
