@@ -124,3 +124,19 @@ totp_code=<six-digit-code>
 3. Include `totp_code` with the password at `POST /api/v1/auth/token` whenever MFA is enabled. A one-time `recovery_code` can be used instead if the authenticator is unavailable. To disable MFA, send `current_password` and either a fresh `totp_code` or an unused `recovery_code` to `POST /api/v1/auth/mfa/disable`. The authenticated status endpoint is `GET /api/v1/auth/mfa/status`.
 
 TOTP uses 30-second SHA-1 time steps, accepts a one-step clock-skew window, and prevents reuse of a consumed time step. Failed MFA attempts count toward the existing login throttling. Store `MFA_ENCRYPTION_KEY` as a secret; generate it with `Fernet.generate_key()`. Losing or rotating this key without decrypt-and-reencrypt migration makes existing MFA secrets unreadable.
+
+
+## Immutable signed audit export
+
+Production must configure a dedicated `AUDIT_WORM_BUCKET` with S3 versioning enabled and S3 Object Lock enabled at bucket creation. Configure `AUDIT_EXPORT_SIGNING_KEY` with at least 32 random characters and set `AUDIT_WORM_RETENTION_DAYS` (1–3,650; default 2,555 days). The application verifies bucket versioning and Object Lock configuration before each export and fails closed if either is unavailable.
+
+An administrator exports a verified batch using:
+
+```http
+POST /api/v1/audit-events/export?after_id=0&batch_size=1000
+Authorization: Bearer <admin-access-token>
+```
+
+The export contains the event IDs, canonical audit payloads, previous/event hashes, batch boundaries, SHA-256 digest, and HMAC-SHA256 signature. Objects are written with server-side encryption and S3 Object Lock `COMPLIANCE` retention. The response includes `next_after_id`; pass it as `after_id` to export the next batch. An export is refused if the tenant's full database hash chain does not verify. Each successful export is itself recorded in the database audit chain after the object write.
+
+The bucket must be created and its IAM policy configured outside the application. Grant the API role only the required bucket configuration read and object write permissions; do not grant object deletion or retention-bypass permissions. Keep the signing key in a secrets manager and back it up separately. Rotating it requires a versioned key-management procedure so older exports remain verifiable.
