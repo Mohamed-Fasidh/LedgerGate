@@ -159,6 +159,7 @@ class AuthSession(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     replaced_by_token_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    __table_args__ = (Index("ix_auth_sessions_tenant_expires", "tenant_id", "expires_at"),)
 
 
 class IdempotencyRecord(Base):
