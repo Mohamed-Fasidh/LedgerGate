@@ -6,7 +6,7 @@ Last checked: 2026-11-16
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest fully passing CI:** run [43842528416](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43842528416) passed backend, frontend, and Docker on PR #5 head `5cdaf47fe65a657daf3defdb12b0d10931cb774f`. PR #5 is open and unmerged.
+- **Latest fully passing CI:** run [43864520264](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43864520264) passed backend, frontend, and Docker on PR #5 head `0d8c41d58ac8f72aea523699656dd11e81cb5863`. PR #5 is open and unmerged.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
@@ -30,32 +30,12 @@ Last checked: 2026-11-16
 
 ## Latest CI result
 
-The latest fully successful run is **43842528416** on commit `5cdaf47fe65a657daf3defdb12b0d10931cb774f` (backend, frontend, Docker all passed):
-- Backend: migrations through `0017_login_throttle_indexes`, restricted runtime-role bootstrap, Python compilation, and pytest — passed.
-- Frontend: dependency advisory report, high-severity npm audit gate, and production build — passed.
-- Docker: operational-script syntax and regression checks, Compose configuration validation, and backend/frontend image builds — passed.
+The latest fully successful run is **43864520264** on commit `0d8c41d58ac8f72aea523699656dd11e81cb5863` (backend, frontend, and Docker all passed):
+- Backend: database migrations, restricted runtime-role bootstrap, Python compilation, and the full pytest suite — passed. This includes the corrected UTF-8 password byte-limit boundary tests.
+- Frontend: dependency advisory reporting, high-severity dependency audit gate, and production build — passed.
+- Docker: operational-script and cleanup-safety tests, production startup and one-shot migration guards, PostgreSQL backup/restore checks, non-root container and health-check tests, Compose validation, and backend/frontend image builds — passed.
 
-Subsequent changes added tenant-member deactivation, audit and approval-policy administration screens, row-locked idempotent approval-policy deactivation, and regression tests for that operation. PR #5 remains unmerged pending independent review and explicit merge approval.
-
-- Refresh-session logout now row-locks the presented session and revokes its entire token family, closing the concurrent refresh-rotation/logout race; regression coverage is included in the passing run above.
-
-CI validates automated repository checks. It does not provision cloud resources, validate production secrets/IAM policies, prove disaster recovery, or replace an independent security assessment.
-
-
-## Additional audit-export and recovery hardening (PR #5)
-
-- Audit export attempts now use a unique UUID in the signed document and S3 object key, including when the same event range is exported again. This avoids reusing an Object Lock key on retries.
-- PostgreSQL backup publication now writes and validates the archive first, publishes its checksum sidecar atomically last, and removes incomplete outputs on failure.
-- Paginated audit verification regression fixtures now implement the SQLAlchemy limit operation used by the production query path, including valid, empty, and corrupted-chain cases.
-- Audit-chain verification now reads bounded pages (default 1,000, maximum 10,000) rather than loading the tenant's full history into application memory. Admin verification also takes the shared tenant writer lock so the multi-page result represents a stable chain.
-- Immutable audit export now acquires the same PostgreSQL transaction-scoped tenant advisory lock as audit writers before verification and holds it through export commit. This prevents a delayed writer with a lower global sequence ID from committing behind an advanced export cursor. Added PostgreSQL/non-PostgreSQL lock tests and endpoint lock-order regression coverage.
-- Audit export queries are now bounded by the exact event ID at the verified chain head; concurrent later appends are deferred until the next fresh verification. Regression tests cover the verified head, empty chains, and cursor-at-head behavior.
-- Added an offline `python -m scripts.verify_audit_export` CLI that validates downloaded exports against a protected operator keyring file, enforces restrictive POSIX keyring permissions, and returns automation-friendly exit codes. Added valid, tampered, insecure-permission, and malformed-keyring tests.
-- Added an independent export verifier that checks the signing-key ID/HMAC, export format and metadata, tenant consistency, ascending event IDs, event count, first/last event metadata, and every event's previous-hash and calculated hash.
-- Added regression coverage for valid exports, tampered event hashes and links, cross-tenant events, inconsistent metadata, unknown keys, and malformed verifier inputs.
-- Documented reconciliation for immutable S3 objects that may be left unreferenced if the database commit fails after a successful object write.
-- Added PostgreSQL backup and disposable restore-drill scripts with archive validation and SHA-256 checksums. CI checks their Bash syntax; a real restore drill still needs to be executed against an isolated database environment.
-- CI run [43825372024](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43825372024) passed backend, frontend, and Docker for the backup/restore scripts and operations documentation. Later audit-verifier changes are awaiting their own CI result.
+The passing run verifies this exact PR #5 head. It does not certify cloud configuration, production deployment, disaster recovery, or independent security assurance. PR #5 remains open and unmerged pending independent review and explicit merge approval.
 
 ## Remaining work before production
 
