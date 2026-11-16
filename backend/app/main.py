@@ -624,7 +624,7 @@ def request_password_reset(
             created_at=now,
         ))
         db.commit()
-        reset_url = f"{settings.public_app_url.rstrip('/')}/?reset_token={quote(raw_token, safe='')}"
+        reset_url = f"{settings.public_app_url.rstrip('/')}/#reset_token={quote(raw_token, safe='')}"
         # Deliver after the generic 202 response to reduce account-enumeration timing.
         background_tasks.add_task(_deliver_password_reset_email, user.email, reset_url)
     return {"status": "accepted", "message": "If the account exists, a reset link will be sent."}
