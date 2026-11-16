@@ -59,7 +59,7 @@ For production:
 - Enforce TLS-only bucket access, encryption at rest, access logging, and lifecycle/retention rules.
 - Current adapters request AES256/SSE-S3. If customer-managed KMS encryption is required, implement and test SSE-KMS with an explicit key ID and least-privilege KMS grants before claiming that control.
 - Configure ClamAV signature updates, health monitoring, CPU/memory limits, and private-only network access.
-- Test object restore, malware detection, scanner outage, and tenant-authorized download paths.
+- Test object restore, malware detection, scanner outage, and tenant-authorized download paths. Document extraction caps text at 2 million characters, PDFs at 50 pages, and OCR rendering at 12 million pixels per page / 48 million pixels per document before allocating page images.
 
 No cloud bucket, IAM role, KMS key, DNS name, or production credential is provisioned by this repository.
 
