@@ -591,6 +591,59 @@ def test_runtime_role_cannot_attach_cross_tenant_invoice_and_approval_references
         engine.dispose()
 
 
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_runtime_role_cannot_reassign_referenced_user_to_another_tenant():
+    """A user with tenant-owned auth sessions cannot be moved to another tenant."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    Session = sessionmaker(bind=engine)
+    suffix = uuid.uuid4().hex
+    tenant_a = "user-reassign-a-" + suffix
+    tenant_b = "user-reassign-b-" + suffix
+    user_id = None
+    session_id = str(uuid.uuid4())
+    family_id = str(uuid.uuid4())
+    try:
+        with engine.begin() as admin:
+            user_id = admin.execute(text("""
+                INSERT INTO public.users
+                    (tenant_id, tenant_name, email, hashed_password, role, is_active, email_verified, created_at)
+                VALUES (:tenant, 'Test Workspace', :email, 'not-a-real-password-hash', 'analyst', true, true, now())
+                RETURNING id
+            """), {"tenant": tenant_a, "email": f"user-reassign-{suffix}@example.invalid"}).scalar_one()
+            admin.execute(text("""
+                INSERT INTO public.auth_sessions
+                    (tenant_id, user_id, token_id, token_hash, family_id, expires_at, created_at)
+                VALUES (:tenant, :user_id, :token_id, :token_hash, :family_id, now() + interval '1 day', now())
+            """), {
+                "tenant": tenant_a,
+                "user_id": user_id,
+                "token_id": session_id,
+                "token_hash": uuid.uuid4().hex + uuid.uuid4().hex,
+                "family_id": family_id,
+            })
+
+        with Session() as runtime:
+            runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            runtime.execute(text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": tenant_a})
+            with pytest.raises(Exception, match="cannot reassign user tenant while tenant-owned references exist"):
+                runtime.execute(text("""
+                    UPDATE public.users SET tenant_id = :new_tenant WHERE id = :user_id
+                """), {"new_tenant": tenant_b, "user_id": user_id})
+            runtime.rollback()
+
+        with engine.connect() as admin:
+            owner = admin.execute(text("SELECT tenant_id FROM public.users WHERE id = :id"),
+                                  {"id": user_id}).scalar_one()
+            assert owner == tenant_a
+    finally:
+        with engine.begin() as admin:
+            if user_id is not None:
+                admin.execute(text("DELETE FROM public.auth_sessions WHERE user_id = :id"), {"id": user_id})
+                admin.execute(text("DELETE FROM public.users WHERE id = :id"), {"id": user_id})
+        engine.dispose()
+
+
 @pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
 def test_runtime_role_cannot_reassign_referenced_supplier_to_another_tenant():
     """Changing a parent tenant must not invalidate existing child references."""
