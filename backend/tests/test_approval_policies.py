@@ -220,3 +220,50 @@ def test_approval_policy_create_rechecks_idempotency_after_tenant_lock(monkeypat
 
     assert result == replay
     assert [item[0] for item in calls] == ["lookup", "lock", "lookup"]
+
+
+@pytest.mark.parametrize(
+    ("status", "allowed", "expected_status"),
+    [
+        ("extraction_review", {"extraction_review", "received"}, None),
+        ("received", {"extraction_review", "received"}, None),
+        ("approved", {"extraction_review", "received"}, 409),
+        ("rejected", {"extraction_review", "received"}, 409),
+        ("review_required", {"received"}, 409),
+        ("processing", {"received"}, 409),
+    ],
+)
+def test_invoice_state_guard_rejects_invalid_transitions(status, allowed, expected_status):
+    from types import SimpleNamespace
+    from app.main import _require_invoice_status
+    from app.models import InvoiceStatus
+
+    invoice = SimpleNamespace(status=InvoiceStatus(status))
+    allowed_statuses = {InvoiceStatus(value) for value in allowed}
+    if expected_status is None:
+        assert _require_invoice_status(invoice, allowed_statuses, "invalid transition") is None
+    else:
+        with pytest.raises(HTTPException) as exc:
+            _require_invoice_status(invoice, allowed_statuses, "invalid transition")
+        assert exc.value.status_code == expected_status
+
+
+def test_extraction_confirmation_and_reconciliation_enforce_workflow_state_guard():
+    import ast
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1] / "app" / "main.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    guarded_routes = {
+        "confirm_extraction": False,
+        "reconcile": False,
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in guarded_routes:
+            guarded_routes[node.name] = any(
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Name)
+                and call.func.id == "_require_invoice_status"
+                for call in ast.walk(node)
+            )
+    assert guarded_routes == {"confirm_extraction": True, "reconcile": True}
