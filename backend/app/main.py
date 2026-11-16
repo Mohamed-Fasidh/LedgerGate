@@ -245,8 +245,10 @@ def login(
     password_valid = bool(user and verify_password(password, user.hashed_password))
     matched_step = None
     remaining_recovery_hashes = None
-    authenticated = password_valid
-    if password_valid and user.mfa_enabled:
+    # Disabled accounts must never receive a new access or refresh session,
+    # even when their password (and any configured MFA factor) is valid.
+    authenticated = bool(password_valid and user and user.is_active)
+    if authenticated and user.mfa_enabled:
         try:
             secret = decrypt_totp_secret(user.mfa_secret_encrypted or "")
             matched_step = matching_totp_step(secret, totp_code, last_used_step=user.mfa_last_used_step)
