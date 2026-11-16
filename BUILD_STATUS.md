@@ -6,7 +6,7 @@ Last checked: 2026-11-16
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest code CI:** GitHub Actions run [43817928322](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43816875357) completed successfully on application code commit `bee2a9d668c8756da18ce76e294e229bff459c4a`; backend, frontend, and Docker jobs all passed. A subsequent documentation-only commit is awaiting its own CI run. PR #5 is open and marked ready for review; it has not been merged.
+- **Latest fully passing CI:** run [43818537960](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43818537960) passed backend, frontend, and Docker on commit `14608bfe4a5c0aed888118a443a1043d5c34f236`. New MFA session-revocation changes and their tests are on PR #5 head `41c510b797148a5673b47f6dcbc82ce32d9685b8`; CI run [43819401259](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43819401259) is pending. PR #5 is open and unmerged.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
@@ -24,27 +24,27 @@ Last checked: 2026-11-16
 ### Security and audit
 - Password hashing, short-lived access JWTs, persisted refresh sessions, 30-day refresh expiry, single-use rotation, reuse detection/family revocation, logout, and sign-out-all.
 - Host-only HttpOnly refresh cookie, production Secure flag, SameSite=Lax, CSRF cookie/header comparison, allowlisted Origin checks, and frontend removal of refresh tokens from web storage.
-- Optional authenticator-app TOTP MFA, encrypted TOTP secrets, replay prevention, failed-code throttling, and one-time hashed recovery codes.
+- Optional authenticator-app TOTP MFA, encrypted TOTP secrets, replay prevention, failed-code throttling, and one-time hashed recovery codes. Disabling MFA requires the current password plus fresh TOTP or an unused recovery code, revokes all active refresh sessions, clears auth cookies, and records the revoked-session count in the audit event.
 - Tenant-wide idempotency for supported write operations, request fingerprint conflict protection, replayed response handling, and bounded tenant-admin retention maintenance.
 - Append-only audit mutation protection, per-tenant SHA-256 event chains, admin chain verification, and signed audit export to a separately provisioned S3 Object Lock bucket with COMPLIANCE retention and AES256 server-side encryption.
 
 ## Latest CI result
 
-Run **43816875357** on application code commit `b6e07246c69d19cbe2e992ab4116942db267ab1e`):
-- Backend: migrations, restricted runtime-role bootstrap, Python compilation, and pytest — passed.
+The last fully successful run is **43818537960** on commit `14608bfe4a5c0aed888118a443a1043d5c34f236`:
+- Backend: migrations through `0017_login_throttle_indexes`, restricted runtime-role bootstrap, Python compilation, and pytest — passed.
 - Frontend: dependency advisory report, high-severity npm audit gate, and production build — passed.
 - Docker: Compose configuration validation and backend/frontend image builds — passed.
 
-All three jobs in run [43816875357](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43816875357) completed successfully: backend, frontend, and Docker. PR #5 remains unmerged pending independent review and explicit merge approval.
+The current PR head is `41c510b797148a5673b47f6dcbc82ce32d9685b8`. Its CI run [43819401259](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43819401259) is pending and must pass before these newest MFA session-revocation changes can be considered CI-verified. PR #5 remains unmerged pending independent review and explicit merge approval.
 
-CI validates the repository's automated checks. It does not provision cloud resources, validate production secrets/IAM policies, prove disaster recovery, or replace an independent security assessment.
+CI validates automated repository checks. It does not provision cloud resources, validate production secrets/IAM policies, prove disaster recovery, or replace an independent security assessment.
 
 ## Remaining work before production
 
 ### Application and identity
 - SSO/OIDC, verified email, password reset/account recovery, and richer session/device management.
 - Registration now has persistent 15-minute limits (5 per normalized email and 20 per source IP), keyed HMAC identifiers, PostgreSQL advisory-lock serialization, bounded stale-row cleanup, and regression/concurrency coverage. Login throttling now uses keyed HMAC identifiers, cross-replica PostgreSQL advisory locks, a 10-failure/15-minute threshold, bounded cleanup, and composite query indexes; PostgreSQL concurrency coverage verifies simultaneous requests are serialized. Continue reviewing other unauthenticated account lifecycle endpoints and extend idempotency to any remaining or future non-repeatable writes.
-- Validate MFA recovery, administrator-assisted recovery procedures, and session revocation behavior with real multi-user scenarios.
+- Validate MFA recovery, administrator-assisted recovery procedures, and MFA-disable/session-revocation behavior with real multi-user scenarios.
 
 ### Cloud and operations
 - Provision staging and production infrastructure; configure managed PostgreSQL, private networking, TLS/reverse proxy, WAF/rate limits, secret manager, workload IAM, and alerting.
