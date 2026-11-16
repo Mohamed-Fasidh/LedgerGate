@@ -78,7 +78,7 @@ def validate_production_settings(config: Settings) -> None:
         if (
             parsed.scheme != "https"
             or not parsed.netloc
-            or parsed.path not in ("", "/")
+            or parsed.path != ""
             or parsed.query
             or parsed.fragment
             or parsed.username
