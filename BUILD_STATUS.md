@@ -238,3 +238,11 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Verified job results: backend (Alembic migrations, restricted runtime-role bootstrap, Python compilation, and pytest), frontend (dependency audit and production build), and Docker (operational-script tests, backup/restore checks, container hardening, Compose validation, and image builds) all passed.
 - This is repository CI evidence only. It does not replace staging/UAT, provisioned cloud validation, independent security testing, real backup/restore drills, or production sign-off.
 - PR #5 remains open and unmerged pending review and production acceptance.
+
+## Workflow-run retention cleanup — 2026-11-16
+
+- Updated `.github/workflows/cleanup-cancelled-runs.yml` to remove completed runs whose conclusion is `cancelled` or `failure`; successful runs are preserved.
+- The workflow checks all pages of completed runs and supports manual dispatch.
+- Scheduled cadence is every five minutes. GitHub Actions does not support a one-minute scheduled-workflow interval.
+- Workflow change commit: `61bc76247153cb8dc88eebf1ce98e492c83bbe69`.
+- The cleanup workflow is on PR #5's branch and will not become active on `main` until the PR is merged. The latest fully successful CI run before this workflow change is [43856458704](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43856458704); the current head requires a fresh CI result.
