@@ -240,6 +240,8 @@ def test_runtime_role_cannot_create_purchase_order_with_another_tenants_supplier
     tenant_b = "reference-b-" + suffix
     supplier_a = "reference-supplier-a-" + suffix
     supplier_b = "reference-supplier-b-" + suffix
+    supplier_a_id = None
+    supplier_b_id = None
 
     try:
         with engine.begin() as admin:
@@ -284,8 +286,9 @@ def test_runtime_role_cannot_create_purchase_order_with_another_tenants_supplier
         with engine.begin() as admin:
             admin.execute(text("DELETE FROM public.purchase_orders WHERE po_number = :po_number"),
                           {"po_number": "valid-" + suffix})
-            admin.execute(text("DELETE FROM public.suppliers WHERE id IN (:a, :b)"),
-                          {"a": supplier_a_id, "b": supplier_b_id})
+            ids = [value for value in (supplier_a_id, supplier_b_id) if value is not None]
+            if ids:
+                admin.execute(text("DELETE FROM public.suppliers WHERE id = ANY(:ids)"), {"ids": ids})
         engine.dispose()
 
 
