@@ -115,7 +115,7 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 
 ## Verification refresh — 2026-11-16
 
-- Latest PR #5 head `0fa714dfff727fe6aaa17b59268d98c06106feff` passed GitHub Actions run [43834868897](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43834868897): backend migrations/runtime-role bootstrap/compilation/pytest, frontend dependency audit and production build, and Docker operational-script checks/Compose validation/image builds all passed.
+- PR #5 head `0a2608d6a033989053741367c20b209ff9871e70` passed GitHub Actions run [43836611143](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43836611143): backend migrations/runtime-role bootstrap/compilation/pytest, frontend dependency audit and production build, and Docker operational-script checks/Compose validation/image builds all passed.
 - This is CI evidence for the PR branch only. PR #5 remains open and unmerged; `main` does not yet contain these changes.
-- Several earlier runs were automatically cancelled when newer commits superseded them. One earlier run failed ([43833599492](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43833599492)); the latest head subsequently passed all three jobs.
+- Several earlier runs were automatically cancelled when newer commits superseded them. One earlier run failed ([43833599492](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43833599492)); the current PR head subsequently passed all three jobs.
 - The repository is not production-complete. Staging deployment, cloud resource provisioning and end-to-end IAM/KMS/Object Lock validation, real backup/restore and audit-export drills, identity lifecycle features (SSO/OIDC, verified email, password recovery), independent security/load testing, and operational/legal sign-off remain outstanding.
