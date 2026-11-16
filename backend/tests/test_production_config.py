@@ -10,6 +10,7 @@ def production_settings(**overrides):
         "database_url": "postgresql+psycopg://ledgergate_runtime:runtime-password@db.internal:5432/ledgergate",
         "jwt_secret_key": "j" * 48,
         "mfa_encryption_key": Fernet.generate_key().decode("ascii"),
+        "email_outbox_encryption_key": Fernet.generate_key().decode("ascii"),
         "audit_worm_bucket": "ledgergate-audit-worm",
         "audit_export_signing_key": "s" * 48,
         "audit_export_signing_key_id": "key-2026-01",
@@ -109,3 +110,11 @@ def test_production_requires_starttls_smtp_port():
 def test_production_requires_https_public_app_origin():
     with pytest.raises(RuntimeError, match="PUBLIC_APP_URL"):
         validate_production_settings(production_settings(public_app_url="http://app.example.com"))
+
+
+
+def test_production_requires_dedicated_valid_email_outbox_encryption_key():
+    with pytest.raises(RuntimeError, match="EMAIL_OUTBOX_ENCRYPTION_KEY"):
+        validate_production_settings(production_settings(email_outbox_encryption_key=""))
+    with pytest.raises(RuntimeError, match="valid Fernet key"):
+        validate_production_settings(production_settings(email_outbox_encryption_key="not-a-fernet-key"))
