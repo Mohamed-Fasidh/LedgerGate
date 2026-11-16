@@ -10,8 +10,8 @@ MAX_OCR_PAGE_PIXELS = 12_000_000
 MAX_OCR_TOTAL_PIXELS = 48_000_000
 
 AMOUNT_PATTERNS = [
-    r"(?:grand\s+total|invoice\s+total|total\s+amount|amount\s+due|total)\s*[:\-]?\s*(?:(₹|INR\b|\$|USD\b|€|EUR\b|£|GBP\b)\s*)?([\d,]+(?:\.\d{1,2})?)",
-    r"(₹|INR\b|\$|USD\b|€|EUR\b|£|GBP\b)\s*([\d,]+(?:\.\d{1,2})?)",
+    r"(?:grand\s+total|invoice\s+total|total\s+amount|amount\s+due|total)\s*[:\-]?\s*(?:(₹|INR\b|\$|USD\b|€|EUR\b|£|GBP\b)\s*)?([\d,]+(?:\.\d{1,2})?)(?:\s*(₹|INR\b|\$|USD\b|€|EUR\b|£|GBP\b))?",
+    r"(₹|INR\b|\$|USD\b|€|EUR\b|£|GBP\b)\s*([\d,]+(?:\.\d{1,2})?)(?:\s*(₹|INR\b|\$|USD\b|€|EUR\b|£|GBP\b))?",
 ]
 CURRENCY_CODES = {
     "₹": "INR", "INR": "INR",
@@ -42,7 +42,7 @@ def parse_text(text: str) -> dict:
         matches = list(re.finditer(pat, normalized, re.I))
         if matches:
             matched = matches[-1]
-            currency_token, raw = matched.group(1), matched.group(2)
+            currency_token, raw = matched.group(1) or matched.group(3), matched.group(2)
             try:
                 result["amount"] = round(float(raw.replace(",", "")), 2)
                 result["confidence"]["amount"] = "regex_candidate"
