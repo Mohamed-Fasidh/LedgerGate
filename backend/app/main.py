@@ -16,7 +16,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, Role, InvoiceStatus
-from app.schemas import RegisterIn, TokenOut, RefreshIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn
+from app.schemas import RegisterIn, TokenOut, RefreshIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn
 from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code
 from app.audit import record_event, verify_tenant_chain, event_payload
 from app.services.audit_export import store_immutable_audit_export, AuditExportUnavailable
@@ -581,6 +581,47 @@ def create_tenant_user(
             if cached is not None:
                 return cached
         raise HTTPException(409, "Email already registered")
+
+@app.patch("/api/v1/users/{user_id}/role")
+def update_tenant_user_role(
+    user_id: int,
+    payload: TenantUserRoleUpdateIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin")),
+):
+    member = db.query(User).filter(
+        User.id == user_id,
+        User.tenant_id == user.tenant_id,
+    ).with_for_update().first()
+    if member is None:
+        raise HTTPException(404, "User not found")
+    if member.role == Role.admin:
+        raise HTTPException(409, "Administrator roles cannot be changed through this endpoint")
+    if not member.is_active:
+        raise HTTPException(409, "Deactivated members cannot have their role changed")
+    previous_role = member.role.value
+    if previous_role == payload.role:
+        return {"status": "unchanged", "user_id": member.id, "role": previous_role, "revoked_sessions": 0}
+    member.role = Role(payload.role)
+    revoked_count = _revoke_refresh_sessions(
+        db, member.tenant_id, member.id, datetime.now(timezone.utc)
+    )
+    record_event(
+        db, user, "user", member.id, "tenant_user_role_changed",
+        {
+            "previous_role": previous_role,
+            "new_role": member.role.value,
+            "revoked_refresh_sessions": revoked_count,
+        },
+    )
+    db.commit()
+    return {
+        "status": "updated",
+        "user_id": member.id,
+        "role": member.role.value,
+        "revoked_sessions": revoked_count,
+    }
+
 
 @app.post("/api/v1/users/{user_id}/deactivate")
 def deactivate_tenant_user(
