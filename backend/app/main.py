@@ -87,6 +87,11 @@ def _registration_lock_key(namespace: str, value_hash: str) -> int:
     return int.from_bytes(digest[:8], byteorder="big", signed=True)
 
 
+def _login_credentials_are_valid(user: User | None, password_valid: bool) -> bool:
+    """Require a valid password and an active account before issuing a session."""
+    return bool(password_valid and user is not None and user.is_active)
+
+
 def _login_attempt_hash(value: str) -> str:
     # Login telemetry contains only keyed identifiers, never raw identities or IPs.
     return hmac.new(
@@ -247,7 +252,7 @@ def login(
     remaining_recovery_hashes = None
     # Disabled accounts must never receive a new access or refresh session,
     # even when their password (and any configured MFA factor) is valid.
-    authenticated = bool(password_valid and user and user.is_active)
+    authenticated = _login_credentials_are_valid(user, password_valid)
     if authenticated and user.mfa_enabled:
         try:
             secret = decrypt_totp_secret(user.mfa_secret_encrypted or "")
