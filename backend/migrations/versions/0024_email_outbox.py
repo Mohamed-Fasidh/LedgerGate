@@ -16,6 +16,7 @@ def upgrade():
             sa.Column("recipient", sa.String(length=255), nullable=False),
             sa.Column("message_type", sa.String(length=40), nullable=False),
             sa.Column("encrypted_payload", sa.Text(), nullable=False),
+            sa.Column("token_hash", sa.String(length=64), nullable=True),
             sa.Column("status", sa.String(length=16), nullable=False, server_default="pending"),
             sa.Column("attempts", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("max_attempts", sa.Integer(), nullable=False, server_default="12"),
@@ -29,6 +30,7 @@ def upgrade():
     existing = {item["name"] for item in sa.inspect(op.get_bind()).get_indexes("outbound_emails")}
     for name, columns in (
         ("ix_outbound_emails_pending_due", ["status", "next_attempt_at", "id"]),
+        ("ix_outbound_emails_token_hash", ["token_hash"]),
         ("ix_outbound_emails_locked_at", ["status", "locked_at"]),
     ):
         if name not in existing:
