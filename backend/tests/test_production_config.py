@@ -129,3 +129,26 @@ def test_production_requires_verified_postgresql_tls():
         validate_production_settings(
             production_settings(database_url="postgresql+psycopg://ledgergate_runtime:runtime-password@db.internal:5432/ledgergate?sslmode=verify-full")
         )
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "https://app.example.com/dashboard",
+        "https://app.example.com/path/",
+        "https://localhost:3000",
+        "https://127.0.0.1:8000",
+        "https://user:password@app.example.com",
+        "https://app.example.com?next=/login",
+        "https://app.example.com#fragment",
+        "https://app.example.com:invalid",
+        "https://app.example.com:70000",
+    ],
+)
+def test_production_rejects_non_origin_public_app_urls(public_url):
+    with pytest.raises(RuntimeError, match="PUBLIC_APP_URL"):
+        validate_production_settings(production_settings(public_app_url=public_url))
+
+
+def test_production_allows_trailing_slash_on_public_app_origin():
+    validate_production_settings(production_settings(public_app_url="https://app.example.com/"))
