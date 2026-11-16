@@ -19,6 +19,9 @@ class MalwareDetected(ValueError):
 class StorageUnavailable(RuntimeError):
     pass
 
+
+MAX_CLAMAV_RESPONSE_BYTES = 4096
+
 def scan_with_clamav(content: bytes) -> None:
     if not settings.clamav_host:
         if settings.app_env.lower() == "production":
@@ -38,6 +41,11 @@ def scan_with_clamav(content: bytes) -> None:
                 if not part:
                     break
                 response += part
+                # The daemon should return one short status line. Bound the
+                # response so a faulty or hostile scanner cannot grow memory
+                # without limit while an upload request is waiting.
+                if len(response) > MAX_CLAMAV_RESPONSE_BYTES:
+                    raise StorageUnavailable("Malware scanner response exceeded the allowed size")
     except (OSError, TimeoutError) as exc:
         raise StorageUnavailable("Malware scanner is unavailable; upload rejected") from exc
     result = response.decode("utf-8", errors="replace").strip("\0 ")
