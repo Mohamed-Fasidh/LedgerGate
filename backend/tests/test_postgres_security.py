@@ -66,3 +66,82 @@ def test_rls_blocks_cross_tenant_and_audit_is_append_only():
             )
         db.rollback()
     engine.dispose()
+
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_every_tenant_table_has_forced_rls_and_tenant_policy():
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    expected_tables = (
+        "suppliers",
+        "purchase_orders",
+        "invoices",
+        "policy_documents",
+        "agent_memories",
+        "audit_events",
+    )
+    try:
+        with engine.connect() as connection:
+            rows = connection.execute(text("""
+                SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
+                       EXISTS (
+                           SELECT 1 FROM pg_policies p
+                           WHERE p.schemaname = current_schema()
+                             AND p.tablename = c.relname
+                             AND p.policyname = 'tenant_isolation'
+                             AND p.cmd = 'ALL'
+                       ) AS has_tenant_policy
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = current_schema()
+                  AND c.relname = ANY(:table_names)
+            """), {"table_names": list(expected_tables)}).mappings().all()
+
+        actual = {row["relname"]: row for row in rows}
+        assert set(actual) == set(expected_tables)
+        for table in expected_tables:
+            assert actual[table]["relrowsecurity"] is True, f"{table} must enable RLS"
+            assert actual[table]["relforcerowsecurity"] is True, f"{table} must FORCE RLS"
+            assert actual[table]["has_tenant_policy"] is True, f"{table} must have tenant_isolation policy"
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_runtime_role_cannot_insert_or_move_rows_into_another_tenant():
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    Session = sessionmaker(bind=engine)
+    suffix = str(uuid.uuid4())
+    supplier_name = f"rls-write-{suffix}"
+
+    try:
+        with Session() as db:
+            db.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            db.execute(text("SELECT set_config('app.tenant_id', 'tenant-a', false)"))
+            db.execute(text("""
+                INSERT INTO suppliers (tenant_id, name, tax_id, created_at)
+                VALUES ('tenant-a', :name, NULL, now())
+            """), {"name": supplier_name})
+            db.commit()
+
+        with Session() as db:
+            db.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            db.execute(text("SELECT set_config('app.tenant_id', 'tenant-a', false)"))
+            with pytest.raises(Exception, match="row-level security"):
+                db.execute(text("""
+                    INSERT INTO suppliers (tenant_id, name, tax_id, created_at)
+                    VALUES ('tenant-b', :name, NULL, now())
+                """), {"name": f"{supplier_name}-cross-tenant"})
+            db.rollback()
+
+        with Session() as db:
+            db.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            db.execute(text("SELECT set_config('app.tenant_id', 'tenant-a', false)"))
+            with pytest.raises(Exception, match="row-level security"):
+                db.execute(text("""
+                    UPDATE suppliers SET tenant_id = 'tenant-b'
+                    WHERE tenant_id = 'tenant-a' AND name = :name
+                """), {"name": supplier_name})
+            db.rollback()
+    finally:
+        engine.dispose()
