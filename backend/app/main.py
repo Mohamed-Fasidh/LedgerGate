@@ -56,7 +56,9 @@ def login(request:Request,username:str=Form(...),password:str=Form(...),db:Sessi
     failures=failed_query.count()
     if failures>=10:
         oldest=failed_query.order_by(LoginAttempt.attempted_at.asc()).first()
-        oldest_at=oldest.attempted_at if oldest else now-timedelta(minutes=15)\n        if oldest_at.tzinfo is None: oldest_at=oldest_at.replace(tzinfo=timezone.utc)\n        retry_after=max(1,900-int((now-oldest_at).total_seconds()))
+        oldest_at=oldest.attempted_at if oldest else now-timedelta(minutes=15)
+        if oldest_at.tzinfo is None: oldest_at=oldest_at.replace(tzinfo=timezone.utc)
+        retry_after=max(1,900-int((now-oldest_at).total_seconds()))
         raise HTTPException(429,"Too many login attempts. Try again later.",headers={"Retry-After":str(retry_after)})
     user=db.query(User).filter(User.email==normalized_email).first()
     authenticated=bool(user and verify_password(password,user.hashed_password))
