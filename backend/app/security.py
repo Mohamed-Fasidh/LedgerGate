@@ -21,10 +21,19 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
 
 def hash_password(password: str) -> str:
+    if len(password.encode("utf-8")) > 72:
+        raise ValueError("Password must not exceed 72 UTF-8 bytes")
     return pwd_context.hash(password)
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    # bcrypt implementations reject inputs beyond 72 bytes. Treat an oversized
+    # login attempt as invalid credentials rather than surfacing a server error.
+    if len(plain.encode("utf-8")) > 72:
+        return False
+    try:
+        return pwd_context.verify(plain, hashed)
+    except (ValueError, TypeError):
+        return False
 
 def create_access_token(user: User):
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
