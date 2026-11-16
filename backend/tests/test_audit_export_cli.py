@@ -157,3 +157,18 @@ def test_cli_rejects_non_regular_export_input(tmp_path, capsys):
 
     assert result == 2
     assert "regular file" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes are unavailable")
+def test_cli_rejects_fifo_input_without_blocking(tmp_path, capsys):
+    _, keyring = _signed_valid_chain_document()
+    keyring_path = tmp_path / "keyring.json"
+    keyring_path.write_text(json.dumps(keyring), encoding="utf-8")
+    keyring_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    fifo_path = tmp_path / "export-pipe"
+    os.mkfifo(fifo_path)
+
+    result = main(["--document", str(fifo_path), "--keyring-file", str(keyring_path)])
+
+    assert result == 2
+    assert "regular file" in capsys.readouterr().err
