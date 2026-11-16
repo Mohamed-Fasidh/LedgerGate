@@ -20,7 +20,7 @@ Policy retrieval combines token overlap and character n-gram similarity. This is
 Ollama and vLLM adapters can explain already-computed findings. They are not used to compute the financial decision. Provider calls have a bounded timeout and return an error if not configured.
 
 ## Tenant boundaries
-All business records include tenant_id and API queries filter by the authenticated user's tenant. Before production, enforce PostgreSQL RLS and use a non-owner role; application filters alone are not a complete defense against every query bug.
+All tenant-owned business and identity records carry tenant_id. API queries are tenant-filtered, PostgreSQL FORCE ROW LEVEL SECURITY is enabled, and production uses a restricted non-owner, NOBYPASSRLS runtime role. Composite tenant-aware foreign keys and database triggers prevent cross-tenant references even when IDs are globally valid. Migration 0027 refuses to install if pre-existing rows violate those relationships; operators must reconcile such rows before retrying. Application filters remain defense-in-depth, not the sole tenant boundary.
 
 ## Data flow and trust boundaries
 - Uploaded files are untrusted input.
