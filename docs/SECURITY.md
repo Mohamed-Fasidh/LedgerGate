@@ -31,3 +31,8 @@ Serve the dashboard and API on the **same hostname** in production, preferably w
 7. **Independent assurance:** threat model, SAST/DAST, penetration testing, load tests, privacy/legal review, incident response plan, and operational sign-off.
 
 Never commit production secrets. Do not store card data, bank credentials, or payment secrets in LedgerGate. LedgerGate does not initiate payments. Passing CI does not certify the platform for regulated financial production use.
+
+
+## Public registration throttling
+
+Unauthenticated workspace registration is protected by a persistent 15-minute sliding window: at most five attempts per normalized email and twenty attempts per source IP. Email and IP values are stored only as SHA-256 digests. PostgreSQL advisory transaction locks serialize concurrent checks across API replicas; stale throttle records are pruned in bounded batches after 24 hours. The application uses the direct peer address (`request.client.host`); deployments behind a reverse proxy must configure trusted proxy handling and should also enforce edge/WAF rate limits. The application limiter is a defense-in-depth control, not a substitute for perimeter abuse protection.
