@@ -10,6 +10,8 @@ PUBLIC_API_ROUTES = {
     "/api/v1/auth/logout",
     "/api/v1/auth/password-reset/request",
     "/api/v1/auth/password-reset/confirm",
+    "/api/v1/auth/email-verification/request",
+    "/api/v1/auth/email-verification/confirm",
 }
 
 
@@ -79,6 +81,8 @@ PUBLIC_ROUTE_GUARDS = {
     "/api/v1/auth/logout": {"_require_csrf"},
     "/api/v1/auth/password-reset/request": {"_require_allowed_origin"},
     "/api/v1/auth/password-reset/confirm": {"_require_allowed_origin"},
+    "/api/v1/auth/email-verification/request": {"_require_allowed_origin"},
+    "/api/v1/auth/email-verification/confirm": {"_require_allowed_origin"},
 }
 
 
