@@ -976,3 +976,46 @@ def test_runtime_role_cannot_reassign_referenced_invoice_to_another_tenant():
                     {"id": user_id},
                 )
         engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_postgres_has_validated_tenant_composite_constraints():
+    """Verify migration 0027 installed real, validated PostgreSQL constraints."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    expected_foreign_keys = {
+        "fk_purchase_orders_tenant_supplier",
+        "fk_invoices_tenant_supplier",
+        "fk_invoices_tenant_purchase_order",
+        "fk_invoices_tenant_creator",
+        "fk_invoices_tenant_approval_policy",
+        "fk_approval_policies_tenant_creator",
+        "fk_invoice_approvals_tenant_invoice",
+        "fk_invoice_approvals_tenant_approver",
+        "fk_invoice_approvals_tenant_policy",
+        "fk_auth_sessions_tenant_user",
+        "fk_password_reset_tokens_tenant_user",
+        "fk_email_verification_tokens_tenant_user",
+    }
+    expected_unique_constraints = {
+        "uq_users_tenant_id_id",
+        "uq_suppliers_tenant_id_id",
+        "uq_purchase_orders_tenant_id_id",
+        "uq_approval_policies_tenant_id_id",
+        "uq_invoices_tenant_id_id",
+    }
+    expected = expected_foreign_keys | expected_unique_constraints
+    try:
+        with engine.connect() as connection:
+            rows = connection.execute(text("""
+                SELECT conname, contype, convalidated
+                FROM pg_catalog.pg_constraint
+                WHERE conname = ANY(:constraint_names)
+            """), {"constraint_names": sorted(expected)}).mappings().all()
+
+        actual = {row["conname"]: row for row in rows}
+        assert set(actual) == expected
+        assert all(actual[name]["contype"] == "f" for name in expected_foreign_keys)
+        assert all(actual[name]["contype"] == "u" for name in expected_unique_constraints)
+        assert all(actual[name]["convalidated"] for name in expected)
+    finally:
+        engine.dispose()
