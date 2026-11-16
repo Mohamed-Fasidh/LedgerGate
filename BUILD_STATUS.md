@@ -6,7 +6,7 @@ Last checked: 2026-11-16
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest code CI:** GitHub Actions run [43815575935](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43815575935) completed successfully on the current PR head; backend, frontend, and Docker jobs all passed. PR #5 is open and marked ready for review; it has not been merged.
+- **Latest code CI:** GitHub Actions run [43816875357](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43816875357) completed successfully on the current PR head; backend, frontend, and Docker jobs all passed. PR #5 is open and marked ready for review; it has not been merged.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
@@ -30,12 +30,12 @@ Last checked: 2026-11-16
 
 ## Latest CI result
 
-Run **43815575935** on the current PR head (commit `194c37d55b1f77f6f0ce93f511d83a01dc7c3bd8`):
+Run **43816875357** on the current PR head (commit `b6e07246c69d19cbe2e992ab4116942db267ab1e`):
 - Backend: migrations, restricted runtime-role bootstrap, Python compilation, and pytest — passed.
 - Frontend: dependency advisory report, high-severity npm audit gate, and production build — passed.
 - Docker: Compose configuration validation and backend/frontend image builds — passed.
 
-All three jobs in run [43815575935](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43815575935) completed successfully: backend, frontend, and Docker. PR #5 remains unmerged pending independent review and explicit merge approval.
+All three jobs in run [43816875357](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43816875357) completed successfully: backend, frontend, and Docker. PR #5 remains unmerged pending independent review and explicit merge approval.
 
 CI validates the repository's automated checks. It does not provision cloud resources, validate production secrets/IAM policies, prove disaster recovery, or replace an independent security assessment.
 
@@ -43,7 +43,7 @@ CI validates the repository's automated checks. It does not provision cloud reso
 
 ### Application and identity
 - SSO/OIDC, verified email, password reset/account recovery, and richer session/device management.
-- Add dedicated rate limiting and abuse controls for unauthenticated registration and account lifecycle endpoints; extend idempotency to any remaining or future non-repeatable writes.
+- Registration now has persistent 15-minute limits (5 per normalized email and 20 per source IP), keyed HMAC identifiers, PostgreSQL advisory-lock serialization, bounded stale-row cleanup, and regression/concurrency coverage. Continue reviewing other unauthenticated account lifecycle endpoints and extend idempotency to any remaining or future non-repeatable writes.
 - Validate MFA recovery, administrator-assisted recovery procedures, and session revocation behavior with real multi-user scenarios.
 
 ### Cloud and operations
