@@ -15,8 +15,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, PasswordResetToken, Role, InvoiceStatus
-from app.schemas import RegisterIn, TokenOut, RefreshIn, ChangePasswordIn, PasswordResetRequestIn, PasswordResetConfirmIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, PasswordResetToken, EmailVerificationToken, Role, InvoiceStatus
+from app.schemas import RegisterIn, TokenOut, RefreshIn, ChangePasswordIn, PasswordResetRequestIn, PasswordResetConfirmIn, EmailVerificationRequestIn, EmailVerificationConfirmIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn
 from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code
 from app.audit import record_event, verify_tenant_chain, event_payload, lock_tenant_audit_chain
 from app.services.audit_export import store_immutable_audit_export, AuditExportUnavailable
@@ -27,7 +27,7 @@ from app.services.evaluation import run_evaluation
 from app.services.model_router import explain_findings, ModelUnavailable
 from app.services.memory import remember, recall
 from app.services.storage import store_invoice, read_invoice, delete_invoice, scan_with_clamav, MalwareDetected, StorageUnavailable
-from app.services.email import send_password_reset_email
+from app.services.email import send_password_reset_email, send_email_verification_email
 
 logger = logging.getLogger(__name__)
 
@@ -262,21 +262,140 @@ def readiness(db: Session = Depends(get_db)):
         )
     return {"status": "ready", "dependencies": dependencies}
 
-@app.post("/api/v1/auth/register",response_model=TokenOut)
-def register(payload:RegisterIn,request:Request,response:Response,db:Session=Depends(get_db)):
+EMAIL_VERIFICATION_TTL = timedelta(hours=24)
+
+
+def _deliver_email_verification(recipient: str, verification_url: str) -> None:
+    try:
+        send_email_verification_email(recipient, verification_url)
+    except Exception:
+        # Do not expose delivery state or token material to the requesting client.
+        logger.exception("Email verification delivery failed")
+
+
+@app.post("/api/v1/auth/register", status_code=202)
+def register(
+    payload: RegisterIn,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     _require_allowed_origin(request)
     remote_ip = request.client.host if request.client else "unknown"
     retry_after = _record_registration_attempt(db, payload.email, remote_ip)
     if retry_after is not None:
         raise HTTPException(429, "Too many registration attempts. Try again later.", headers={"Retry-After": str(retry_after)})
-    tenant_id=str(uuid.uuid4())
-    user=User(tenant_id=tenant_id,tenant_name=payload.tenant_name,email=payload.email.lower(),hashed_password=hash_password(payload.password),role=Role.admin)
+
+    tenant_id = str(uuid.uuid4())
+    user = User(
+        tenant_id=tenant_id,
+        tenant_name=payload.tenant_name,
+        email=payload.email.strip().lower(),
+        hashed_password=hash_password(payload.password),
+        role=Role.admin,
+        email_verified=False,
+    )
     db.add(user)
-    try: db.commit()
-    except IntegrityError: db.rollback(); raise HTTPException(409,"Account already exists")
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "Account already exists")
     db.refresh(user)
+
+    now = datetime.now(timezone.utc)
+    raw_token = secrets.token_urlsafe(48)
+    db.add(EmailVerificationToken(
+        user_id=user.id,
+        token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+        expires_at=now + EMAIL_VERIFICATION_TTL,
+        created_at=now,
+    ))
+    db.commit()
+    verification_url = f"{settings.public_app_url.rstrip('/')}/#verify_email_token={quote(raw_token, safe='')}"
+    background_tasks.add_task(_deliver_email_verification, user.email, verification_url)
+    return {
+        "status": "verification_required",
+        "message": "Workspace created. Check your email for a verification link before signing in.",
+    }
+
+
+@app.post("/api/v1/auth/email-verification/request", status_code=202)
+def request_email_verification(
+    payload: EmailVerificationRequestIn,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Resend verification without revealing whether an address has an account."""
+    _require_allowed_origin(request)
+    remote_ip = request.client.host if request.client else "unknown"
+    retry_after = _record_registration_attempt(db, payload.email, remote_ip)
+    if retry_after is None:
+        user = db.query(User).filter(
+            User.email == payload.email.strip().lower(),
+            User.is_active.is_(True),
+            User.email_verified.is_(False),
+        ).first()
+        if user is not None:
+            now = datetime.now(timezone.utc)
+            db.query(EmailVerificationToken).filter(
+                EmailVerificationToken.user_id == user.id,
+                EmailVerificationToken.used_at.is_(None),
+            ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
+            raw_token = secrets.token_urlsafe(48)
+            db.add(EmailVerificationToken(
+                user_id=user.id,
+                token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+                expires_at=now + EMAIL_VERIFICATION_TTL,
+                created_at=now,
+            ))
+            db.commit()
+            verification_url = f"{settings.public_app_url.rstrip('/')}/#verify_email_token={quote(raw_token, safe='')}"
+            background_tasks.add_task(_deliver_email_verification, user.email, verification_url)
+    return {
+        "status": "accepted",
+        "message": "If the account needs verification, a verification link will be emailed.",
+    }
+
+
+@app.post("/api/v1/auth/email-verification/confirm")
+def confirm_email_verification(
+    payload: EmailVerificationConfirmIn,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    _require_allowed_origin(request)
+    token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    verification = db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.token_hash == token_hash
+    ).with_for_update().first()
+    now = datetime.now(timezone.utc)
+    if verification is None or verification.used_at is not None:
+        raise HTTPException(400, "Verification link is invalid or expired")
+    expires_at = verification.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= now:
+        verification.used_at = now
+        db.commit()
+        raise HTTPException(400, "Verification link is invalid or expired")
+
+    user = db.query(User).filter(User.id == verification.user_id).with_for_update().first()
+    if user is None or not user.is_active:
+        db.rollback()
+        raise HTTPException(400, "Verification link is invalid or expired")
+    verification.used_at = now
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.used_at.is_(None),
+    ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
+    user.email_verified = True
     set_database_tenant(db, user.tenant_id)
-    tokens=_issue_token_pair(db,user); db.commit(); _set_auth_cookies(response,tokens["refresh_token"]); return {"access_token":tokens["access_token"]}
+    record_event(db, user, "user", user.id, "email_verified", {"email_verified": True})
+    db.commit()
+    return {"status": "email_verified", "message": "Email verified. You can now sign in."}
+
 
 @app.post("/api/v1/auth/token",response_model=TokenOut)
 def login(
@@ -326,7 +445,8 @@ def login(
     remaining_recovery_hashes = None
     # Disabled accounts must never receive a new access or refresh session,
     # even when their password (and any configured MFA factor) is valid.
-    authenticated = _login_credentials_are_valid(user, password_valid)
+    verification_required = bool(user and password_valid and user.is_active and not getattr(user, "email_verified", True))
+    authenticated = _login_credentials_are_valid(user, password_valid) and not verification_required
     if authenticated and user.mfa_enabled:
         try:
             secret = decrypt_totp_secret(user.mfa_secret_encrypted or "")
@@ -348,6 +468,8 @@ def login(
         user.mfa_recovery_code_hashes = remaining_recovery_hashes
     db.add(LoginAttempt(email_hash=email_hash, ip_hash=ip_hash, succeeded=authenticated, attempted_at=now))
     db.commit()
+    if verification_required:
+        raise HTTPException(403, "Email verification required. Request a new verification link.")
     if not authenticated:
         raise HTTPException(401, "Incorrect email, password, or authenticator code")
 
@@ -607,7 +729,7 @@ def request_password_reset(
         return {"status": "accepted", "message": "If the account exists, a reset link will be sent."}
 
     normalized_email = payload.email.strip().lower()
-    user = db.query(User).filter(User.email == normalized_email, User.is_active.is_(True)).first()
+    user = db.query(User).filter(User.email == normalized_email, User.is_active.is_(True), User.email_verified.is_(True)).first()
     if user is not None:
         now = datetime.now(timezone.utc)
         raw_token = secrets.token_urlsafe(48)
