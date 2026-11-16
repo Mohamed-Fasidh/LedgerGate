@@ -20,7 +20,7 @@ from app.services.retrieval import retrieve_policy, retrieve_business_records
 from app.services.evaluation import run_evaluation
 from app.services.model_router import explain_findings, ModelUnavailable
 from app.services.memory import remember, recall
-from app.services.storage import store_invoice, read_invoice, MalwareDetected, StorageUnavailable
+from app.services.storage import store_invoice, read_invoice, scan_with_clamav, MalwareDetected, StorageUnavailable
 
 app=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
 app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type"])
@@ -144,6 +144,7 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
     if suffix==".pdf" and not content.startswith(b"%PDF"): raise HTTPException(415,"File content is not a valid PDF")
     temp_path=None
     try:
+        scan_with_clamav(content)
         with tempfile.NamedTemporaryFile(delete=False,suffix=suffix) as tmp:
             tmp.write(content); temp_path=tmp.name
         extracted,fields=extract_file(temp_path,suffix)
