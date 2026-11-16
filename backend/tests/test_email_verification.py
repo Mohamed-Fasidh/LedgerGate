@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.exc import IntegrityError
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import HTTPException
 from starlette.requests import Request
 
 import app.main as main
@@ -68,16 +68,15 @@ class _DB:
 
 def test_registration_creates_unverified_account_and_emails_single_use_link(monkeypatch):
     db = _DB()
-    sent = []
+    queued = []
+    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url: queued.append((email, kind, url)))
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
     monkeypatch.setattr(main, "hash_password", lambda value: "hashed-password")
-    monkeypatch.setattr(main, "_deliver_email_verification", lambda email, url: sent.append((email, url)))
     monkeypatch.setattr(settings, "public_app_url", "https://app.example.com")
-    tasks = BackgroundTasks()
 
     result = main.register(
         main.RegisterIn(email="person@example.com", password="long-strong-password", tenant_name="Example Workspace"),
-        _request(), tasks, db,
+        _request(), db,
     )
 
     user, token = db.added
@@ -87,40 +86,36 @@ def test_registration_creates_unverified_account_and_emails_single_use_link(monk
     assert isinstance(token, EmailVerificationToken)
     assert len(token.token_hash) == 64
     assert token.expires_at - token.created_at == timedelta(hours=24)
-    assert len(tasks.tasks) == 1
-    tasks.tasks[0].func(*tasks.tasks[0].args, **tasks.tasks[0].kwargs)
-    assert sent[0][0] == "person@example.com"
-    assert sent[0][1].startswith("https://app.example.com/#verify_email_token=")
-    assert token.token_hash not in sent[0][1]
+    assert queued[0][0:2] == ("person@example.com", "email_verification")
+    assert queued[0][2].startswith("https://app.example.com/#verify_email_token=")
+    assert token.token_hash not in queued[0][2]
 
 
 def test_verification_resend_is_generic_and_queues_new_link(monkeypatch):
     user = SimpleNamespace(id=7, email="person@example.com", is_active=True, email_verified=False)
     db = _DB(user=user)
-    sent = []
-    tasks = BackgroundTasks()
+    queued = []
+    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url: queued.append((email, kind, url)))
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
-    monkeypatch.setattr(main, "_deliver_email_verification", lambda email, url: sent.append((email, url)))
     monkeypatch.setattr(settings, "public_app_url", "https://app.example.com")
 
     result = main.request_email_verification(
-        main.EmailVerificationRequestIn(email="person@example.com"), _request(), tasks, db
+        main.EmailVerificationRequestIn(email="person@example.com"), _request(), db
     )
 
     assert result["status"] == "accepted"
     assert "If this address is eligible" in result["message"]
     assert db.queries[0].locked  # user lock serializes verification-link replacement
     assert len(db.added) == 1 and isinstance(db.added[0], EmailVerificationToken)
-    assert len(tasks.tasks) == 1
-    tasks.tasks[0].func(*tasks.tasks[0].args, **tasks.tasks[0].kwargs)
-    assert sent[0][1].startswith("https://app.example.com/#verify_email_token=")
+    assert queued[0][0:2] == ("person@example.com", "email_verification")
+    assert queued[0][2].startswith("https://app.example.com/#verify_email_token=")
 
 
 def test_verification_request_does_not_disclose_unknown_email(monkeypatch):
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
     result = main.request_email_verification(
         main.EmailVerificationRequestIn(email="unknown@example.com"),
-        _request(), BackgroundTasks(), _DB(user=None),
+        _request(), _DB(user=None),
     )
     assert result["status"] == "accepted"
     assert "If this address is eligible" in result["message"]
@@ -187,24 +182,21 @@ def test_duplicate_registration_is_generic_and_resends_only_unverified_account(m
             self.added.clear()
 
     db = DuplicateDB(user=existing)
-    sent = []
-    tasks = BackgroundTasks()
+    queued = []
+    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url: queued.append((email, kind, url)))
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
     monkeypatch.setattr(main, "hash_password", lambda value: "hashed-password")
-    monkeypatch.setattr(main, "_deliver_email_verification", lambda email, url: sent.append((email, url)))
     monkeypatch.setattr(settings, "public_app_url", "https://app.example.com")
 
     result = main.register(
         main.RegisterIn(email="person@example.com", password="long-strong-password", tenant_name="Other Workspace"),
-        _request(), tasks, db,
+        _request(), db,
     )
 
     assert result == {"status": "accepted", "message": main.EMAIL_VERIFICATION_GENERIC_MESSAGE}
     assert db.rollbacks == 1
     assert len(db.added) == 1 and isinstance(db.added[0], EmailVerificationToken)
-    assert len(tasks.tasks) == 1
-    tasks.tasks[0].func(*tasks.tasks[0].args, **tasks.tasks[0].kwargs)
-    assert sent[0][0] == "person@example.com"
+    assert queued[0][0:2] == ("person@example.com", "email_verification")
 
 
 def test_duplicate_verified_registration_does_not_disclose_or_send_email(monkeypatch):
@@ -220,15 +212,16 @@ def test_duplicate_verified_registration_does_not_disclose_or_send_email(monkeyp
             self.added.clear()
 
     db = DuplicateDB(user=existing)
-    tasks = BackgroundTasks()
+    queued = []
+    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url: queued.append((email, kind, url)))
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
     monkeypatch.setattr(main, "hash_password", lambda value: "hashed-password")
 
     result = main.register(
         main.RegisterIn(email="person@example.com", password="long-strong-password", tenant_name="Other Workspace"),
-        _request(), tasks, db,
+        _request(), db,
     )
 
     assert result == {"status": "accepted", "message": main.EMAIL_VERIFICATION_GENERIC_MESSAGE}
-    assert not tasks.tasks
+    assert not queued
     assert not db.added
