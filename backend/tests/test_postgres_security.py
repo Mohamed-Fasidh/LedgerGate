@@ -348,6 +348,38 @@ def test_tenant_reference_migration_covers_all_business_relationship_tables():
     assert 'f"uq_{table}_tenant_id_id"' in migration
     assert 'for table in ("users", "suppliers", "purchase_orders", "approval_policies", "invoices")' in migration
 
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_composite_tenant_foreign_keys_are_installed_and_validated():
+    """The migration must install native PostgreSQL tenant-aware foreign keys."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    expected = {
+        "fk_purchase_orders_tenant_supplier",
+        "fk_invoices_tenant_supplier",
+        "fk_invoices_tenant_purchase_order",
+        "fk_invoices_tenant_creator",
+        "fk_invoices_tenant_approval_policy",
+        "fk_approval_policies_tenant_creator",
+        "fk_invoice_approvals_tenant_invoice",
+        "fk_invoice_approvals_tenant_approver",
+        "fk_invoice_approvals_tenant_policy",
+        "fk_auth_sessions_tenant_user",
+        "fk_password_reset_tokens_tenant_user",
+        "fk_email_verification_tokens_tenant_user",
+    }
+    try:
+        with engine.connect() as connection:
+            installed = set(connection.execute(text("""
+                SELECT conname
+                FROM pg_constraint
+                WHERE connamespace = 'public'::regnamespace
+                  AND contype = 'f'
+                  AND convalidated
+            """)).scalars())
+        assert expected <= installed
+    finally:
+        engine.dispose()
+
+
 
 @pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
 def test_runtime_role_cannot_attach_another_tenants_user_to_identity_records():
