@@ -97,10 +97,13 @@ class WorkflowCleanupTests(unittest.TestCase):
         failing_bin.mkdir()
         fake = failing_bin / "gh"
         fake.write_text(
-            "#!/usr/bin/env python3\\n"
-            "import sys\\n"
-            "if '--paginate' in sys.argv: print('101'); raise SystemExit(0)\\n"
-            "raise SystemExit(1)\\n",
+            """#!/usr/bin/env python3
+import sys
+if "--paginate" in sys.argv:
+    print("101")
+    raise SystemExit(0)
+raise SystemExit(1)
+""",
             encoding="utf-8",
         )
         fake.chmod(0o755)
