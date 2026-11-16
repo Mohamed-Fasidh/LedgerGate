@@ -63,3 +63,9 @@ def test_development_keeps_localhost_http_origin_supported():
 def test_production_requires_explicit_audit_signing_key_id():
     with pytest.raises(RuntimeError, match="AUDIT_EXPORT_SIGNING_KEY_ID"):
         validate_production_settings(production_settings(audit_export_signing_key_id=""))
+
+
+@pytest.mark.parametrize("algorithm", ["none", "RS256", "HS512"])
+def test_production_rejects_unapproved_jwt_algorithms(algorithm):
+    with pytest.raises(RuntimeError, match="JWT_ALGORITHM must be HS256"):
+        validate_production_settings(production_settings(jwt_algorithm=algorithm))
