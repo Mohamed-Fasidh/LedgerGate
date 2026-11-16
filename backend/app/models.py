@@ -36,7 +36,10 @@ class User(Base):
     mfa_last_used_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
     mfa_recovery_code_hashes: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    __table_args__ = (UniqueConstraint("email", name="uq_user_email"),)
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_user_email"),
+        Index("ix_users_tenant_created_id", "tenant_id", "created_at", "id"),
+    )
 
 class Supplier(Base):
     __tablename__ = "suppliers"
@@ -45,7 +48,10 @@ class Supplier(Base):
     name: Mapped[str] = mapped_column(String(255))
     tax_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_tenant_supplier_name"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_tenant_supplier_name"),
+        Index("ix_suppliers_tenant_id_id", "tenant_id", "id"),
+    )
 
 class PurchaseOrder(Base):
     __tablename__ = "purchase_orders"
@@ -57,7 +63,10 @@ class PurchaseOrder(Base):
     total_amount: Mapped[float] = mapped_column(Numeric(14,2))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    __table_args__ = (UniqueConstraint("tenant_id", "po_number", name="uq_tenant_po"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "po_number", name="uq_tenant_po"),
+        Index("ix_purchase_orders_tenant_id_id", "tenant_id", "id"),
+    )
 
 class Invoice(Base):
     __tablename__ = "invoices"
@@ -84,7 +93,12 @@ class Invoice(Base):
     approval_policy_id: Mapped[int | None] = mapped_column(ForeignKey("approval_policies.id"), nullable=True)
     approval_steps_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
     approval_stage: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    __table_args__ = (Index("ix_invoice_tenant_number_supplier", "tenant_id", "invoice_number", "supplier_id"), UniqueConstraint("tenant_id", "idempotency_key", name="uq_invoice_tenant_idempotency"))
+    __table_args__ = (
+        Index("ix_invoice_tenant_number_supplier", "tenant_id", "invoice_number", "supplier_id"),
+        Index("ix_invoices_tenant_created_id", "tenant_id", "created_at", "id"),
+        Index("ix_invoices_tenant_status_created_id", "tenant_id", "status", "created_at", "id"),
+        UniqueConstraint("tenant_id", "idempotency_key", name="uq_invoice_tenant_idempotency"),
+    )
     __mapper_args__ = {"version_id_col": version}
 
 class PolicyDocument(Base):
@@ -116,6 +130,10 @@ class AuditEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     previous_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     event_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    __table_args__ = (
+        Index("ix_audit_events_tenant_created_id", "tenant_id", "created_at", "id"),
+        Index("ix_audit_events_tenant_id_id", "tenant_id", "id"),
+    )
 
 class RegistrationAttempt(Base):
     """Privacy-preserving registration throttle events; raw email/IP are never stored."""
@@ -150,7 +168,10 @@ class ApprovalPolicy(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_tenant_approval_policy_name"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_tenant_approval_policy_name"),
+        Index("ix_approval_policies_tenant_min_id", "tenant_id", "min_amount", "id"),
+    )
 
 class InvoiceApproval(Base):
     __tablename__ = "invoice_approvals"
