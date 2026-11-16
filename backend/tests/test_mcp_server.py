@@ -62,3 +62,28 @@ def test_authenticated_mcp_api_calls_do_not_follow_redirects(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer user-scoped-test-token"
     assert captured["follow_redirects"] is False
     assert captured["timeout"] == 15
+
+
+def test_mcp_tools_publish_accurate_read_and_write_safety_hints():
+    tools = {tool.name: tool for tool in mcp_server.mcp._tool_manager.list_tools()}
+
+    read_only_names = {
+        "list_invoices",
+        "invoice_details",
+        "purchase_orders",
+        "search_financial_policies",
+        "search_agent_memory",
+    }
+    assert read_only_names.issubset(tools)
+    for name in read_only_names:
+        annotations = tools[name].annotations
+        assert annotations is not None
+        assert annotations.readOnlyHint is True
+        assert annotations.openWorldHint is False
+
+    reconcile = tools["reconcile_invoice"].annotations
+    assert reconcile is not None
+    assert reconcile.readOnlyHint is not True
+    assert reconcile.destructiveHint is True
+    assert reconcile.idempotentHint is False
+    assert reconcile.openWorldHint is False
