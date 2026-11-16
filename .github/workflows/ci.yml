@@ -1,10 +1,9 @@
 name: LedgerGate CI
 
 on:
+  # PR checks run once per PR update. Avoid duplicate push + pull_request runs.
   pull_request:
     branches: [main]
-  push:
-    branches: [main, "hardening/**"]
 
 permissions:
   contents: read
