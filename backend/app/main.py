@@ -1,13 +1,20 @@
-import uuid, hashlib
+import uuid, hashlib, tempfile, json
+from decimal import Decimal
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
+from urllib.parse import quote
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, Request
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, Role, InvoiceStatus
-from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, Role, InvoiceStatus
+from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn
 from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
 from app.audit import record_event
 from app.agent.runtime import AgentContext, ReconciliationAgent
@@ -16,9 +23,10 @@ from app.services.retrieval import retrieve_policy, retrieve_business_records
 from app.services.evaluation import run_evaluation
 from app.services.model_router import explain_findings, ModelUnavailable
 from app.services.memory import remember, recall
+from app.services.storage import store_invoice, read_invoice, delete_invoice, scan_with_clamav, MalwareDetected, StorageUnavailable
 
 app=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
-app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type"])
+app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type","Idempotency-Key"])
 
 @app.get("/health")
 def health(): return {"status":"ok","service":"ledgergate-api"}
@@ -34,9 +42,30 @@ def register(payload:RegisterIn,db:Session=Depends(get_db)):
     return {"access_token":create_access_token(user)}
 
 @app.post("/api/v1/auth/token",response_model=TokenOut)
-def login(username:str=Form(...),password:str=Form(...),db:Session=Depends(get_db)):
-    user=db.query(User).filter(User.email==username.lower()).first()
-    if not user or not verify_password(password,user.hashed_password): raise HTTPException(401,"Incorrect email or password")
+def login(request:Request,username:str=Form(...),password:str=Form(...),db:Session=Depends(get_db)):
+    normalized_email=username.strip().lower()
+    email_hash=hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
+    remote_ip=request.client.host if request.client else "unknown"
+    ip_hash=hashlib.sha256(remote_ip.encode("utf-8")).hexdigest()
+    now=datetime.now(timezone.utc)
+    window_start=now-timedelta(minutes=15)
+    failed_query=db.query(LoginAttempt).filter(
+        LoginAttempt.succeeded.is_(False),
+        LoginAttempt.attempted_at>=window_start,
+        or_(LoginAttempt.email_hash==email_hash,LoginAttempt.ip_hash==ip_hash)
+    )
+    failures=failed_query.count()
+    if failures>=10:
+        oldest=failed_query.order_by(LoginAttempt.attempted_at.asc()).first()
+        oldest_at=oldest.attempted_at if oldest else now-timedelta(minutes=15)
+        if oldest_at.tzinfo is None: oldest_at=oldest_at.replace(tzinfo=timezone.utc)
+        retry_after=max(1,900-int((now-oldest_at).total_seconds()))
+        raise HTTPException(429,"Too many login attempts. Try again later.",headers={"Retry-After":str(retry_after)})
+    user=db.query(User).filter(User.email==normalized_email).first()
+    authenticated=bool(user and verify_password(password,user.hashed_password))
+    db.add(LoginAttempt(email_hash=email_hash,ip_hash=ip_hash,succeeded=authenticated,attempted_at=now))
+    db.commit()
+    if not authenticated: raise HTTPException(401,"Incorrect email or password")
     return {"access_token":create_access_token(user)}
 
 @app.post("/api/v1/users")
@@ -82,18 +111,61 @@ def list_pos(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     return [po_view(x) for x in db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id==user.tenant_id).all()]
 
 def invoice_view(x):
-    return {"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"created_at":x.created_at.isoformat()}
+    steps=x.approval_steps_snapshot or []
+    stage=x.approval_stage or 1
+    required_roles=steps[stage-1] if 1<=stage<=len(steps) else []
+    return {"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"approval_stage":stage,"approval_total_stages":len(steps),"approval_required_roles":required_roles,"created_at":x.created_at.isoformat()}
+
+def _validate_idempotency_key(key: str | None) -> None:
+    if key is not None and (len(key)<8 or len(key)>128 or not key.isascii() or any(ord(c)<33 or ord(c)>126 for c in key)):
+        raise HTTPException(400,"Idempotency-Key must be 8-128 printable ASCII characters")
+
+def _request_fingerprint(operation: str, payload: dict) -> str:
+    canonical = json.dumps({"operation":operation,"payload":payload},sort_keys=True,separators=(",",":"),ensure_ascii=True,default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+def _same_idempotent_request(existing: Invoice, operation: str, fingerprint: str) -> bool:
+    # Older create-invoice keys predate operation/fingerprint columns; retain
+    # backwards compatibility for those records without replaying them as uploads.
+    existing_operation = existing.idempotency_operation or "create"
+    if existing_operation != operation:
+        return False
+    if existing.idempotency_request_hash:
+        return existing.idempotency_request_hash == fingerprint
+    return operation == "create"
 
 @app.post("/api/v1/invoices")
-def create_invoice(payload:InvoiceIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+def create_invoice(payload:InvoiceIn,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    _validate_idempotency_key(idempotency_key)
+    payload_data=payload.model_dump()
+    fingerprint=_request_fingerprint("create",payload_data)
+    def matches(existing):
+        return all(getattr(existing,k)==v for k,v in payload_data.items())
+    if idempotency_key:
+        existing=db.query(Invoice).filter(Invoice.tenant_id==user.tenant_id,Invoice.idempotency_key==idempotency_key).first()
+        if existing:
+            if not _same_idempotent_request(existing,"create",fingerprint) or (not existing.idempotency_request_hash and not matches(existing)):
+                raise HTTPException(409,"Idempotency key was already used with a different request")
+            return invoice_view(existing)
     if payload.supplier_id and not db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Supplier not found")
-    po=None
     if payload.purchase_order_id:
         po=db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first()
         if not po: raise HTTPException(404,"Purchase order not found")
-    obj=Invoice(tenant_id=user.tenant_id,**payload.model_dump()); db.add(obj); db.flush()
-    record_event(db,user,"invoice",obj.id,"created",{"invoice_number":obj.invoice_number}); db.commit(); db.refresh(obj)
-    return invoice_view(obj)
+    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,idempotency_key=idempotency_key,idempotency_operation="create" if idempotency_key else None,idempotency_request_hash=fingerprint if idempotency_key else None,**payload_data)
+    db.add(obj)
+    try:
+        db.flush()
+        record_event(db,user,"invoice",obj.id,"created",{"invoice_number":obj.invoice_number,"idempotent":bool(idempotency_key)})
+        db.commit(); db.refresh(obj)
+        return invoice_view(obj)
+    except IntegrityError:
+        db.rollback()
+        if idempotency_key:
+            existing=db.query(Invoice).filter(Invoice.tenant_id==user.tenant_id,Invoice.idempotency_key==idempotency_key).first()
+            if existing and _same_idempotent_request(existing,"create",fingerprint) and (existing.idempotency_request_hash or matches(existing)):
+                return invoice_view(existing)
+            if existing: raise HTTPException(409,"Idempotency key was already used with a different request")
+        raise HTTPException(409,"Invoice conflicts with an existing record")
 
 @app.get("/api/v1/invoices")
 def list_invoices(status:str|None=None,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
@@ -110,23 +182,79 @@ def get_invoice(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_
     return invoice_view(x)
 
 @app.post("/api/v1/invoices/upload")
-async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    _validate_idempotency_key(idempotency_key)
     suffix=Path(file.filename or "").suffix.lower()
     if suffix not in {".pdf",".txt"}: raise HTTPException(415,"Only PDF and TXT files are accepted")
     content=await file.read(settings.max_upload_mb*1024*1024+1)
     if len(content)>settings.max_upload_mb*1024*1024: raise HTTPException(413,"File too large")
     if not content: raise HTTPException(400,"Empty file")
-    # Basic signature validation; production should additionally scan with AV and use private object storage.
     if suffix==".pdf" and not content.startswith(b"%PDF"): raise HTTPException(415,"File content is not a valid PDF")
-    upload_dir=Path(settings.upload_dir)/user.tenant_id; upload_dir.mkdir(parents=True,exist_ok=True)
-    safe_name=f"{uuid.uuid4().hex}{suffix}"; path=upload_dir/safe_name; path.write_bytes(content)
-    try: extracted,fields=extract_file(str(path),suffix)
+    safe_filename=Path(file.filename or "document").name
+    content_hash=hashlib.sha256(content).hexdigest()
+    fingerprint=_request_fingerprint("upload",{"filename":safe_filename,"suffix":suffix,"content_sha256":content_hash})
+    if idempotency_key:
+        existing=db.query(Invoice).filter(Invoice.tenant_id==user.tenant_id,Invoice.idempotency_key==idempotency_key).first()
+        if existing:
+            if _same_idempotent_request(existing,"upload",fingerprint):
+                return invoice_view(existing)
+            raise HTTPException(409,"Idempotency key was already used with a different request")
+    temp_path=None
+    stored_location=None
+    try:
+        scan_with_clamav(content)
+        with tempfile.NamedTemporaryFile(delete=False,suffix=suffix) as tmp:
+            tmp.write(content); temp_path=tmp.name
+        extracted,fields=extract_file(temp_path,suffix)
+        stored_location=store_invoice(user.tenant_id,suffix,content)
+    except MalwareDetected as exc:
+        raise HTTPException(415,str(exc))
+    except StorageUnavailable as exc:
+        raise HTTPException(503,str(exc))
     except Exception as exc:
-        path.unlink(missing_ok=True); raise HTTPException(422,f"Document extraction failed: {type(exc).__name__}")
+        raise HTTPException(422,f"Document processing failed: {type(exc).__name__}")
+    finally:
+        if temp_path:
+            Path(temp_path).unlink(missing_ok=True)
     candidate=fields.get("invoice_number") or f"UNCONFIRMED-{uuid.uuid4().hex[:10].upper()}"
-    obj=Invoice(tenant_id=user.tenant_id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.EXTRACTION_REVIEW,file_name=Path(file.filename or "document").name,file_path=str(path),extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
-    db.add(obj); db.flush(); record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":hashlib.sha256(content).hexdigest(),"bytes":len(content)}); db.commit(); db.refresh(obj)
-    return invoice_view(obj)
+    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,idempotency_key=idempotency_key,idempotency_operation="upload" if idempotency_key else None,idempotency_request_hash=fingerprint if idempotency_key else None,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.EXTRACTION_REVIEW,file_name=safe_filename,file_path=stored_location,extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
+    db.add(obj)
+    try:
+        db.flush()
+        record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":content_hash,"bytes":len(content),"idempotent":bool(idempotency_key)})
+        db.commit(); db.refresh(obj)
+        return invoice_view(obj)
+    except IntegrityError:
+        db.rollback()
+        if stored_location:
+            delete_invoice(user.tenant_id,stored_location)
+        if idempotency_key:
+            existing=db.query(Invoice).filter(Invoice.tenant_id==user.tenant_id,Invoice.idempotency_key==idempotency_key).first()
+            if existing and _same_idempotent_request(existing,"upload",fingerprint):
+                return invoice_view(existing)
+            if existing: raise HTTPException(409,"Idempotency key was already used with a different request")
+        raise HTTPException(409,"Invoice upload conflicts with an existing record")
+    except Exception:
+        db.rollback()
+        if stored_location:
+            delete_invoice(user.tenant_id,stored_location)
+        raise
+
+@app.get("/api/v1/invoices/{invoice_id}/file")
+def download_invoice_file(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    if not inv or not inv.file_path: raise HTTPException(404,"Invoice file not found")
+    try:
+        content,suffix=read_invoice(user.tenant_id,inv.file_path)
+    except FileNotFoundError:
+        raise HTTPException(404,"Invoice file not found")
+    except StorageUnavailable as exc:
+        raise HTTPException(503,str(exc))
+    media_type="application/pdf" if suffix==".pdf" else "text/plain"
+    safe_filename=quote(Path(inv.file_name or "invoice-document").name)
+    record_event(db,user,"invoice",inv.id,"file_downloaded",{"file_name":inv.file_name})
+    db.commit()
+    return StreamingResponse(BytesIO(content),media_type=media_type,headers={"Content-Disposition":f"attachment; filename*=UTF-8''{safe_filename}","X-Content-Type-Options":"nosniff","Cache-Control":"private, no-store"})
 
 @app.post("/api/v1/invoices/{invoice_id}/confirm-extraction")
 def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
@@ -165,23 +293,138 @@ def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_cu
     db.commit()
     return {"invoice_id":inv.id,"status":inv.status.value,"decision":decision,"findings":result.findings,"evidence":evidence,"requires_human_review":decision=="HUMAN_REVIEW"}
 
+def _validate_approval_steps(steps:list):
+    allowed={"admin","reviewer"}
+    if not steps or len(steps)>5 or any(not stage or len(stage)>2 or len(set(stage))!=len(stage) or not set(stage).issubset(allowed) for stage in steps):
+        raise HTTPException(400,"Each approval stage must contain one or two distinct roles: admin and/or reviewer")
+    return steps
+
+def _approval_ranges_overlap(first_min:Decimal,first_max:Decimal|None,second_min:Decimal,second_max:Decimal|None)->bool:
+    # Ranges are half-open: [minimum, maximum). Adjacent boundaries do not overlap.
+    return (first_max is None or second_min<first_max) and (second_max is None or first_min<second_max)
+
+def _resolve_invoice_approval_plan(db:Session,inv:Invoice,user:User):
+    if inv.approval_steps_snapshot:
+        return inv.approval_steps_snapshot
+    amount=inv.amount if inv.amount is not None else Decimal('0.00')
+    policy=db.query(ApprovalPolicy).filter(
+        ApprovalPolicy.tenant_id==user.tenant_id,
+        ApprovalPolicy.is_active.is_(True),
+        ApprovalPolicy.min_amount<=amount,
+        or_(ApprovalPolicy.max_amount.is_(None),ApprovalPolicy.max_amount>amount)
+    ).order_by(ApprovalPolicy.min_amount.desc()).first()
+    steps=policy.approval_steps if policy else [["reviewer","admin"]]
+    inv.approval_policy_id=policy.id if policy else None
+    inv.approval_steps_snapshot=steps
+    inv.approval_stage=1
+    return steps
+
+def _validate_approval_actor(db:Session,inv:Invoice,user:User,steps:list):
+    stage=inv.approval_stage or 1
+    if stage<1 or stage>len(steps):
+        raise HTTPException(409,"Invoice approval workflow is in an invalid state")
+    allowed_roles=steps[stage-1]
+    if user.role.value not in allowed_roles:
+        raise HTTPException(403,f"Current approval stage requires one of these roles: {', '.join(allowed_roles)}")
+    previous=db.query(InvoiceApproval).filter(
+        InvoiceApproval.tenant_id==user.tenant_id,
+        InvoiceApproval.invoice_id==inv.id,
+        InvoiceApproval.approver_user_id==user.id
+    ).first()
+    if previous:
+        raise HTTPException(409,"You have already submitted a decision for this invoice")
+    return stage
+
+@app.post("/api/v1/approval-policies")
+def create_approval_policy(payload:ApprovalPolicyIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+    _validate_approval_steps(payload.approval_steps)
+    if payload.max_amount is not None and payload.max_amount<=payload.min_amount:
+        raise HTTPException(400,"max_amount must be greater than min_amount")
+    existing=db.query(ApprovalPolicy).filter(ApprovalPolicy.tenant_id==user.tenant_id,ApprovalPolicy.is_active.is_(True)).all()
+    for policy in existing:
+        old_min=policy.min_amount
+        old_max=policy.max_amount
+        overlaps=_approval_ranges_overlap(payload.min_amount,payload.max_amount,old_min,old_max)
+        if overlaps:
+            raise HTTPException(409,f"Amount range overlaps active policy '{policy.name}'")
+    policy=ApprovalPolicy(tenant_id=user.tenant_id,created_by_user_id=user.id,name=payload.name,min_amount=payload.min_amount,max_amount=payload.max_amount,approval_steps=payload.approval_steps)
+    db.add(policy)
+    try:
+        db.flush()
+        record_event(db,user,"approval_policy",policy.id,"created",{"name":policy.name,"min_amount":str(payload.min_amount),"max_amount":str(payload.max_amount) if payload.max_amount is not None else None,"approval_steps":payload.approval_steps})
+        db.commit(); db.refresh(policy)
+    except IntegrityError:
+        db.rollback(); raise HTTPException(409,"An approval policy with this name already exists")
+    return {"id":policy.id,"name":policy.name,"min_amount":float(policy.min_amount),"max_amount":float(policy.max_amount) if policy.max_amount is not None else None,"approval_steps":policy.approval_steps,"is_active":policy.is_active}
+
+@app.get("/api/v1/approval-policies")
+def list_approval_policies(db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+    rows=db.query(ApprovalPolicy).filter(ApprovalPolicy.tenant_id==user.tenant_id).order_by(ApprovalPolicy.min_amount.asc()).all()
+    return [{"id":p.id,"name":p.name,"min_amount":float(p.min_amount),"max_amount":float(p.max_amount) if p.max_amount is not None else None,"approval_steps":p.approval_steps,"is_active":p.is_active} for p in rows]
+
+@app.post("/api/v1/approval-policies/{policy_id}/deactivate")
+def deactivate_approval_policy(policy_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+    policy=db.query(ApprovalPolicy).filter(ApprovalPolicy.id==policy_id,ApprovalPolicy.tenant_id==user.tenant_id).first()
+    if not policy: raise HTTPException(404,"Approval policy not found")
+    policy.is_active=False
+    record_event(db,user,"approval_policy",policy.id,"deactivated",{"name":policy.name})
+    db.commit()
+    return {"id":policy.id,"is_active":False}
+
 @app.post("/api/v1/invoices/{invoice_id}/approve")
-def approve(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+def approve(invoice_id:int,payload:ApprovalDecisionIn|None=None,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
+    if inv.created_by_user_id == user.id: raise HTTPException(403,"Maker-checker policy: the invoice creator cannot approve their own invoice")
     if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before approval")
-    inv.status=InvoiceStatus.APPROVED
-    record_event(db,user,"invoice",inv.id,"human_approved",{"warning":"Approval recorded; no payment is initiated."})
-    db.commit(); return {"id":inv.id,"status":inv.status.value,"message":"Human approval recorded. No payment was initiated."}
+    steps=_resolve_invoice_approval_plan(db,inv,user)
+    stage=_validate_approval_actor(db,inv,user,steps)
+    db.add(InvoiceApproval(tenant_id=user.tenant_id,invoice_id=inv.id,policy_id=inv.approval_policy_id,stage=stage,approver_user_id=user.id,decision="approved",comment=payload.comment if payload else None))
+    try:
+        db.flush()
+        if stage>=len(steps):
+            inv.status=InvoiceStatus.APPROVED
+            message="All approval stages completed. Human approval recorded; no payment was initiated."
+            record_event(db,user,"invoice",inv.id,"human_approved",{"stage":stage,"total_stages":len(steps),"maker_user_id":inv.created_by_user_id,"warning":"No payment is initiated."})
+        else:
+            inv.approval_stage=stage+1
+            message=f"Approval stage {stage} recorded. Waiting for stage {stage+1} of {len(steps)}."
+            record_event(db,user,"invoice",inv.id,"approval_stage_approved",{"stage":stage,"total_stages":len(steps),"next_stage_roles":steps[stage]})
+        db.commit()
+    except StaleDataError:
+        db.rollback(); raise HTTPException(409,"Invoice changed concurrently; reload it before approving")
+    except IntegrityError:
+        db.rollback(); raise HTTPException(409,"An approval decision already exists for this user or stage")
+    return {"id":inv.id,"status":inv.status.value,"approval_stage":inv.approval_stage,"approval_total_stages":len(steps),"message":message}
 
 @app.post("/api/v1/invoices/{invoice_id}/reject")
-def reject(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+def reject(invoice_id:int,payload:ApprovalDecisionIn|None=None,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status in (InvoiceStatus.APPROVED,InvoiceStatus.REJECTED): raise HTTPException(409,"Invoice is already finalized")
-    inv.status=InvoiceStatus.REJECTED; record_event(db,user,"invoice",inv.id,"human_rejected",{})
-    db.commit(); return {"id":inv.id,"status":inv.status.value}
+    if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
+    if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before rejection")
+    if inv.created_by_user_id == user.id: raise HTTPException(403,"Maker-checker policy: the invoice creator cannot reject their own invoice")
+    steps=_resolve_invoice_approval_plan(db,inv,user)
+    stage=_validate_approval_actor(db,inv,user,steps)
+    db.add(InvoiceApproval(tenant_id=user.tenant_id,invoice_id=inv.id,policy_id=inv.approval_policy_id,stage=stage,approver_user_id=user.id,decision="rejected",comment=payload.comment if payload else None))
+    inv.status=InvoiceStatus.REJECTED
+    record_event(db,user,"invoice",inv.id,"human_rejected",{"stage":stage,"total_stages":len(steps),"maker_user_id":inv.created_by_user_id})
+    try:
+        db.commit()
+    except StaleDataError:
+        db.rollback(); raise HTTPException(409,"Invoice changed concurrently; reload it before rejecting")
+    except IntegrityError:
+        db.rollback(); raise HTTPException(409,"An approval decision already exists for this user or stage")
+    return {"id":inv.id,"status":inv.status.value,"approval_stage":stage,"message":"Invoice rejected at approval stage."}
+
+@app.get("/api/v1/invoices/{invoice_id}/approvals")
+def invoice_approvals(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    if not inv: raise HTTPException(404,"Invoice not found")
+    rows=db.query(InvoiceApproval).filter(InvoiceApproval.tenant_id==user.tenant_id,InvoiceApproval.invoice_id==inv.id).order_by(InvoiceApproval.stage.asc(),InvoiceApproval.created_at.asc()).all()
+    return {"invoice_id":inv.id,"policy_id":inv.approval_policy_id,"approval_steps":inv.approval_steps_snapshot or [["reviewer","admin"]],"current_stage":inv.approval_stage or 1,"decisions":[{"stage":r.stage,"approver_user_id":r.approver_user_id,"decision":r.decision,"comment":r.comment,"created_at":r.created_at.isoformat()} for r in rows]}
 
 @app.post("/api/v1/agent/memory")
 def add_agent_memory(content:str,memory_type:str="episodic",db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):

@@ -1,4 +1,5 @@
 import enum
+from decimal import Decimal
 from datetime import datetime, timezone
 from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Boolean, Enum, JSON, Integer, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column
@@ -57,6 +58,8 @@ class Invoice(Base):
     __tablename__ = "invoices"
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     invoice_number: Mapped[str] = mapped_column(String(100))
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True)
     purchase_order_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_orders.id"), nullable=True)
@@ -70,7 +73,14 @@ class Invoice(Base):
     extraction_fields: Mapped[dict] = mapped_column(JSON, default=dict)
     reconciliation: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    __table_args__ = (Index("ix_invoice_tenant_number_supplier", "tenant_id", "invoice_number", "supplier_id"),)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    idempotency_operation: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    idempotency_request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    approval_policy_id: Mapped[int | None] = mapped_column(ForeignKey("approval_policies.id"), nullable=True)
+    approval_steps_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    approval_stage: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    __table_args__ = (Index("ix_invoice_tenant_number_supplier", "tenant_id", "invoice_number", "supplier_id"), UniqueConstraint("tenant_id", "idempotency_key", name="uq_invoice_tenant_idempotency"))
+    __mapper_args__ = {"version_id_col": version}
 
 class PolicyDocument(Base):
     __tablename__ = "policy_documents"
@@ -79,7 +89,6 @@ class PolicyDocument(Base):
     title: Mapped[str] = mapped_column(String(255))
     body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
 
 class AgentMemory(Base):
     __tablename__ = "agent_memories"
@@ -100,3 +109,37 @@ class AuditEvent(Base):
     action: Mapped[str] = mapped_column(String(100))
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+class LoginAttempt(Base):
+    __tablename__ = "login_attempts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email_hash: Mapped[str] = mapped_column(String(64), index=True)
+    ip_hash: Mapped[str] = mapped_column(String(64), index=True)
+    succeeded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+class ApprovalPolicy(Base):
+    __tablename__ = "approval_policies"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    min_amount: Mapped[Decimal] = mapped_column(Numeric(14,2), default=Decimal('0.00'))
+    max_amount: Mapped[Decimal | None] = mapped_column(Numeric(14,2), nullable=True)
+    approval_steps: Mapped[list] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_tenant_approval_policy_name"),)
+
+class InvoiceApproval(Base):
+    __tablename__ = "invoice_approvals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("invoices.id"), index=True)
+    policy_id: Mapped[int | None] = mapped_column(ForeignKey("approval_policies.id"), nullable=True)
+    stage: Mapped[int] = mapped_column(Integer, nullable=False)
+    approver_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    __table_args__ = (UniqueConstraint("tenant_id", "invoice_id", "approver_user_id", name="uq_invoice_approval_actor"),)

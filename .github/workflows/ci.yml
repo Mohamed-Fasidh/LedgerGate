@@ -1,0 +1,79 @@
+name: LedgerGate CI
+
+on:
+  # PR checks run once per PR update. Avoid duplicate push + pull_request runs.
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ledgergate-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: ledgergate
+          POSTGRES_USER: ledgergate
+          POSTGRES_PASSWORD: ledgergate_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ledgergate -d ledgergate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+psycopg://ledgergate:ledgergate_ci_password@localhost:5432/ledgergate
+      TEST_POSTGRES_URL: postgresql+psycopg://ledgergate:ledgergate_ci_password@localhost:5432/ledgergate
+      MIGRATION_DATABASE_URL: postgresql+psycopg://ledgergate:ledgergate_ci_password@localhost:5432/ledgergate
+      DB_RUNTIME_PASSWORD: runtime_ci_password
+      JWT_SECRET_KEY: ci-only-secret-key-at-least-32-characters-long
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: alembic upgrade head
+      - name: Bootstrap restricted runtime role
+        run: sh ./scripts/bootstrap_runtime_role.sh
+      - run: python -m compileall -q app migrations
+      - run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package.json
+      - run: npm install
+      - run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+      - name: Build backend and frontend images
+        run: docker compose build api web

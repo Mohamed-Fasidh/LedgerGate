@@ -1,26 +1,34 @@
 # Build and verification status
 
-## Implemented in this ZIP
-- FastAPI application and PostgreSQL/Docker configuration.
-- JWT authentication, workspace registration, admin-created tenant users, and roles.
-- Tenant-scoped suppliers, purchase orders, invoices, policies, memories, and audit events.
-- PDF/TXT upload, text extraction, regex-based candidate extraction, optional Tesseract OCR fallback.
-- Human confirmation gate before invoice reconciliation.
-- Deterministic invoice-vs-PO reconciliation for amount, currency, supplier, missing PO, and duplicate cases.
-- Human review/approval/rejection; no payment initiation.
-- Custom finite-state agent runtime and Pydantic allowlisted tool executor.
-- MCP stdio tools delegating through a tenant-authenticated API token.
-- Hybrid lexical/fuzzy retrieval baseline and tenant-scoped memory retrieval.
-- Optional Ollama and vLLM advisory explanation adapters.
-- Evaluation suite, unit tests, Next.js dashboard, docs, Docker Compose, and Alembic migrations.
+## Implemented in repository
+- FastAPI API, PostgreSQL, Alembic migrations, Next.js dashboard, and Docker Compose.
+- JWT authentication, role checks, tenant-scoped queries, PostgreSQL FORCE RLS, and pooled-connection tenant-context cleanup.
+- Separate migration-owner and non-owner `ledgergate_runtime` database connections; runtime role is provisioned without superuser or BYPASSRLS privileges.
+- Append-only PostgreSQL audit mutation trigger and audit events for invoice file downloads.
+- Invoice creator attribution, maker-checker approval/rejection, optimistic concurrency versioning, and tenant-scoped invoice-create idempotency.
+- Persistent login throttling using hashed email/IP identifiers (10 failures per 15-minute window).
+- S3-compatible private invoice storage adapter, server-side encryption, tenant-prefixed object keys, tenant-authorized downloads, and no-store download responses.
+- ClamAV INSTREAM scanning before document parsing and storage; scanner failures fail closed.
+- PDF page-count and extracted-text size limits; human confirmation of extracted invoice fields.
+- Deterministic invoice/PO reconciliation, approval/rejection, agent tool allowlists, MCP adapter, lexical/fuzzy retrieval, and advisory-only model integrations.
+- GitHub Actions for PostgreSQL migrations, runtime-role bootstrap, backend tests, frontend build, Compose validation, and Docker image builds.
 
-## Checks performed in this environment
-- Python source compilation succeeded.
-- Deterministic evaluation smoke suite: 5/5 designed scenarios passed.
-- Invoice extraction parser smoke test successfully detected a sample invoice number, amount, currency, and date.
+## Latest verification
+- Latest GitHub Actions run 421: backend migrations passed; runtime-role bootstrap passed; Python compilation passed; pytest passed; frontend production build passed.
+- Compose configuration validation passed.
+- Backend/frontend Docker image build was still running at the last status check; do not mark it passed until the workflow reports success.
+- Earlier completed workflow run passed Docker image builds, but it predates the latest code changes.
+- PostgreSQL security tests run against a disposable PostgreSQL service with a restricted non-owner role.
 
-## Not independently verified here
-The environment could not reach the Python package index, so dependencies could not be installed and the full FastAPI integration tests, Docker image build, frontend npm build, PostgreSQL migrations, MCP runtime, OCR binary, and model-provider connections were not executed. The ZIP includes pinned dependencies and test/run instructions for verification on your machine.
+## Remaining production gates
+- SSO/OIDC, MFA, verified email, password reset, refresh-token rotation/revocation, and session/device management.
+- External WORM audit export, cryptographic event chaining/signing, and independent audit retention.
+- Idempotency for remaining state-changing endpoints (supplier/PO creation, extraction confirmation, reconciliation, approval/rejection, policy and memory writes).
+- Policy lifecycle/version governance, configurable approval notifications, and stronger operational reporting for approval stages.
+- Customer-managed KMS encryption, bucket lifecycle/retention/access logging, and cloud IAM review.
+- Production bucket, ClamAV signature updates, secrets manager, TLS/WAF, monitoring, backup/PITR and restore drills.
+- Benchmark-backed embedding/vector retrieval if semantic RAG is required; current retrieval remains lexical/fuzzy.
+- MCP runtime and model-provider integration verification.
+- Load testing, independent penetration testing, privacy/legal review, and incident-response procedures.
 
-## Still required before real production use
-SSO/MFA, PostgreSQL RLS, non-owner DB role, private object storage, malware scanning, immutable/WORM audit, idempotency and dual approval, rate limiting, secrets management, backups/restore drills, security review, penetration testing, load testing, and jurisdiction-specific financial/privacy controls.
+LedgerGate remains an invoice verification and human-approval workflow. It does not initiate payments, and passing CI does not certify the platform for regulated financial production use.

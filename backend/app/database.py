@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from app.config import settings
 
@@ -14,4 +14,12 @@ def get_db():
     try:
         yield db
     finally:
+        # Tenant context is session-scoped so it survives endpoint commits. Always
+        # clear it before returning a pooled connection to prevent cross-tenant leaks.
+        try:
+            db.rollback()
+            db.execute(text("RESET app.tenant_id"))
+            db.commit()
+        except Exception:
+            db.rollback()
         db.close()

@@ -18,8 +18,18 @@ services:
     build: ./backend
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://ledgergate:${POSTGRES_PASSWORD:-change_me_local_only}@db:5432/ledgergate
+      MIGRATION_DATABASE_URL: postgresql+psycopg://ledgergate:${POSTGRES_PASSWORD:-change_me_local_only}@db:5432/ledgergate
+      DATABASE_URL: postgresql+psycopg://ledgergate_runtime:${DB_RUNTIME_PASSWORD:-change_me_runtime_local_only}@db:5432/ledgergate
+      DB_RUNTIME_PASSWORD: ${DB_RUNTIME_PASSWORD:-change_me_runtime_local_only}
       UPLOAD_DIR: /app/uploads
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-ap-south-1}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
     ports:
       - "8000:8000"
     volumes:
@@ -27,6 +37,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      clamav:
+        condition: service_started
+    restart: unless-stopped
+
+  clamav:
+    image: clamav/clamav:1.4.2
     restart: unless-stopped
 
   web:
