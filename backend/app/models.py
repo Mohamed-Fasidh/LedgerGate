@@ -57,6 +57,8 @@ class Invoice(Base):
     __tablename__ = "invoices"
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     invoice_number: Mapped[str] = mapped_column(String(100))
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True)
     purchase_order_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_orders.id"), nullable=True)
@@ -71,6 +73,7 @@ class Invoice(Base):
     reconciliation: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     __table_args__ = (Index("ix_invoice_tenant_number_supplier", "tenant_id", "invoice_number", "supplier_id"),)
+    __mapper_args__ = {"version_id_col": version}
 
 class PolicyDocument(Base):
     __tablename__ = "policy_documents"
@@ -79,7 +82,6 @@ class PolicyDocument(Base):
     title: Mapped[str] = mapped_column(String(255))
     body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
 
 class AgentMemory(Base):
     __tablename__ = "agent_memories"
