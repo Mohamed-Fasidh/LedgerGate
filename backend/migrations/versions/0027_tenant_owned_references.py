@@ -102,8 +102,7 @@ def upgrade() -> None:
         op.execute(f"DROP TRIGGER IF EXISTS ledgergate_same_tenant_reference ON public.{table}")
         op.execute(f"""
             CREATE TRIGGER ledgergate_same_tenant_reference
-            BEFORE INSERT OR UPDATE OF tenant_id, supplier_id, purchase_order_id,
-                created_by_user_id, approval_policy_id, invoice_id, approver_user_id, policy_id
+            BEFORE INSERT OR UPDATE
             ON public.{table}
             FOR EACH ROW
             EXECUTE FUNCTION public.ledgergate_enforce_same_tenant_reference()
