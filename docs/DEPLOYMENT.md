@@ -29,7 +29,8 @@ Configure all values through the cloud secret manager or protected deployment en
 - Strong, separate `POSTGRES_PASSWORD` and `DB_RUNTIME_PASSWORD`.
 - `MIGRATION_DATABASE_URL` for the migration owner; `DATABASE_URL` for the restricted `ledgergate_runtime` role.
 - Production `DATABASE_URL` must use `sslmode=verify-full` and an explicit mounted `sslrootcert` CA bundle; do not downgrade to `require`, `prefer`, or plaintext. Mount the CA certificate read-only and include its path in the connection URL.
-- Exact `CORS_ORIGINS` containing the public UI origin only.
+- Exact `CORS_ORIGINS` containing public UI origins only (for example `https://app.example.com`); do not include paths or trailing slashes because browser `Origin` headers contain only the origin.
+- `PUBLIC_APP_URL` must be the public HTTPS frontend origin only, with no path, query, fragment, credentials, or localhost hostname.
 - `STORAGE_BACKEND=s3`, `S3_BUCKET`, `S3_REGION`, and workload IAM credentials/identity.
 - Private ClamAV endpoint, signature update process, and scanner resource limits.
 - Valid `MFA_ENCRYPTION_KEY` (Fernet key).
