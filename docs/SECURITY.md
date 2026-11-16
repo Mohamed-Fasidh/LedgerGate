@@ -5,6 +5,7 @@ Last reviewed: 2026-11-16
 ## Implemented in the application
 
 - Password hashing, short-lived access JWTs, persisted refresh sessions, single-use refresh-token rotation, reuse detection and token-family revocation, logout, and sign-out-all.
+- Password changes share the login endpoint's persistent 10-failure/15-minute email-and-IP throttle. Incorrect current passwords and failed MFA challenges are recorded using keyed HMAC identifiers; PostgreSQL advisory locks serialize checks across replicas, acquired before the account row lock to preserve a consistent lock order.
 - Host-only HttpOnly refresh cookie, production Secure flag, SameSite=Lax, CSRF cookie/header validation, allowlisted Origin checks, and no refresh tokens in browser storage.
 - Optional authenticator-app TOTP MFA with encrypted secrets, replay prevention, one-time hashed recovery codes, and session revocation when MFA is disabled.
 - Persistent login and registration throttling using keyed HMAC identifiers, bounded retention cleanup, and PostgreSQL advisory locks to serialize limits across API replicas.
