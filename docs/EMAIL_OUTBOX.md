@@ -8,6 +8,7 @@ LedgerGate persists verification and password-reset delivery requests in Postgre
 - Workers claim due messages using PostgreSQL `FOR UPDATE SKIP LOCKED` and a five-minute lease, so multiple replicas can work concurrently.
 - Transient errors retry with exponential backoff starting at 30 seconds and capped at one hour. After 12 attempts, a message is marked `dead`.
 - Expired worker leases are reclaimed automatically after five minutes.
+- Sent and cancelled records have their encrypted token payload cleared immediately. Sent/cancelled metadata is purged after 30 days; dead-letter metadata is purged after 90 days.
 - Delivery is **at least once**, not exactly once. If SMTP accepts a message but the worker crashes before committing `sent`, the same email can be delivered again after lease expiry. The links themselves remain single-use.
 - The outbox deliberately does not log raw URLs, token values, SMTP response bodies, or exception messages. `last_error` stores only the exception class.
 
@@ -50,7 +51,7 @@ ORDER BY created_at DESC
 LIMIT 100;
 ```
 
-Alert on any `dead` message and on sustained growth in old `pending` messages. Do not manually reset a dead message to pending until the SMTP/provider issue is understood; doing so may send duplicate messages.
+Alert on any `dead` message and on sustained growth in old `pending` messages. Terminal records are retained for a bounded period (30 days for sent/cancelled, 90 days for dead) and purged hourly by the worker. Do not manually reset a dead message to pending until the SMTP/provider issue is understood; doing so may send duplicate messages.
 
 ## Encryption-key rotation
 
