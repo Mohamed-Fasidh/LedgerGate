@@ -241,8 +241,10 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 
 ## Workflow-run retention cleanup — 2026-11-16
 
-- Updated `.github/workflows/cleanup-cancelled-runs.yml` to remove completed runs whose conclusion is `cancelled` or `failure`; successful runs are preserved.
+- Updated `.github/workflows/cleanup-failed-runs.yml` to remove completed runs whose conclusion is `cancelled` or `failure`; successful runs are preserved.
 - The workflow checks all pages of completed runs and supports manual dispatch.
 - Scheduled cadence is every five minutes. GitHub Actions does not support a one-minute scheduled-workflow interval.
 - Workflow change commit: `61bc76247153cb8dc88eebf1ce98e492c83bbe69`.
 - The cleanup workflow is on PR #5's branch and will not become active on `main` until the PR is merged. The latest fully successful CI run before this workflow change is [43856458704](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43856458704); the current head requires a fresh CI result.
+
+- Replaced the obsolete workflow path that was removed from `main` with the new `.github/workflows/cleanup-failed-runs.yml` path so the cleanup automation can be reviewed and merged without restoring the deleted file.
