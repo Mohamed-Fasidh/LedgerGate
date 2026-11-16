@@ -25,17 +25,19 @@ class FakeS3:
 
 
 def _events():
+    from app.audit import GENESIS_HASH, calculate_event_hash, event_payload
+
+    created_at = datetime(2026, 11, 16, tzinfo=timezone.utc)
+    payload = event_payload(
+        tenant_id="tenant-a", actor_user_id=7, entity_type="invoice",
+        entity_id="99", action="created", details={"amount": "12.00"},
+        created_at=created_at,
+    )
     return [{
         "id": 1,
-        "tenant_id": "tenant-a",
-        "actor_user_id": 7,
-        "entity_type": "invoice",
-        "entity_id": "99",
-        "action": "created",
-        "details": {"amount": "12.00"},
-        "created_at": datetime(2026, 11, 16, tzinfo=timezone.utc).isoformat(),
-        "previous_hash": "0" * 64,
-        "event_hash": "a" * 64,
+        **payload,
+        "previous_hash": GENESIS_HASH,
+        "event_hash": calculate_event_hash(GENESIS_HASH, payload),
     }]
 
 
@@ -467,3 +469,30 @@ def test_export_verifier_rejects_invalid_event_field_types_even_when_resigned(fi
     digest, signature = audit_export.sign_audit_payload(payload, keyring["verify-key-v1"])
     tampered.update(payload_sha256=digest, signature=signature)
     assert not audit_export.verify_audit_export_document(tampered, keyring)
+
+
+
+@pytest.mark.parametrize(
+    "tenant_id,retention_days,mutate",
+    [
+        ("../other-tenant", 365, None),
+        ("tenant-a", True, None),
+        ("tenant-a", 365, "corrupt_event_hash"),
+    ],
+)
+def test_immutable_export_rejects_unsafe_or_invalid_input_before_write(
+    monkeypatch, tenant_id, retention_days, mutate
+):
+    _settings(monkeypatch)
+    client = FakeS3()
+    monkeypatch.setattr(audit_export, "_s3_client", lambda: client)
+    events = _events()
+    if mutate == "corrupt_event_hash":
+        events[0]["event_hash"] = "a" * 64
+
+    with pytest.raises(audit_export.AuditExportUnavailable):
+        audit_export.store_immutable_audit_export(
+            tenant_id, events, retention_days=retention_days
+        )
+
+    assert client.put_args is None
