@@ -27,6 +27,13 @@ def _digest(previous, payload):
 
 def upgrade():
     bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        # The existing append-only trigger and FORCE RLS protect normal runtime
+        # writes. Temporarily suspend them inside this schema migration only so
+        # the migration owner can backfill historical rows, then restore both.
+        op.execute("DROP TRIGGER IF EXISTS audit_events_no_update ON audit_events")
+        op.execute("ALTER TABLE audit_events NO FORCE ROW LEVEL SECURITY")
+        op.execute("ALTER TABLE audit_events DISABLE ROW LEVEL SECURITY")
     columns = {c["name"] for c in inspect(bind).get_columns("audit_events")}
     if "previous_hash" not in columns:
         op.add_column("audit_events", sa.Column("previous_hash", sa.String(64), nullable=True))
@@ -59,6 +66,15 @@ def upgrade():
         batch.alter_column("previous_hash", existing_type=sa.String(64), nullable=False)
         batch.alter_column("event_hash", existing_type=sa.String(64), nullable=False)
         batch.create_unique_constraint("uq_audit_events_event_hash", ["event_hash"])
+
+    if bind.dialect.name == "postgresql":
+        op.execute("ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY")
+        op.execute("ALTER TABLE audit_events FORCE ROW LEVEL SECURITY")
+        op.execute("""
+            CREATE TRIGGER audit_events_no_update
+            BEFORE UPDATE OR DELETE ON audit_events
+            FOR EACH ROW EXECUTE FUNCTION ledgergate_prevent_audit_mutation()
+        """)
 
 def downgrade():
     with op.batch_alter_table("audit_events") as batch:
