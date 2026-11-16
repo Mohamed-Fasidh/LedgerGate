@@ -5,6 +5,7 @@ from io import BytesIO
 from urllib.parse import quote
 from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -275,7 +276,7 @@ def _get_idempotent_response(db: Session, tenant_id: str, key: str, operation: s
 def _store_idempotency_response(db: Session, tenant_id: str, key: str, operation: str, request_hash: str, response: dict):
     db.add(IdempotencyRecord(
         tenant_id=tenant_id, key=key, operation=operation,
-        request_hash=request_hash, response_json=response,
+        request_hash=request_hash, response_json=jsonable_encoder(response),
     ))
 
 def _same_idempotent_request(existing: Invoice, operation: str, fingerprint: str) -> bool:
