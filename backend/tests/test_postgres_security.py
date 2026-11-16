@@ -644,6 +644,64 @@ def test_runtime_role_cannot_reassign_referenced_user_to_another_tenant():
         engine.dispose()
 
 
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_runtime_role_cannot_reassign_referenced_purchase_order_to_another_tenant():
+    """A purchase order referenced by an invoice cannot change tenant."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    Session = sessionmaker(bind=engine)
+    suffix = uuid.uuid4().hex
+    tenant_a = "po-reassign-a-" + suffix
+    tenant_b = "po-reassign-b-" + suffix
+    supplier_id = None
+    po_id = None
+    invoice_id = None
+    try:
+        with engine.begin() as admin:
+            supplier_id = admin.execute(text("""
+                INSERT INTO public.suppliers (tenant_id, name, tax_id, created_at)
+                VALUES (:tenant, :name, NULL, now())
+                RETURNING id
+            """), {"tenant": tenant_a, "name": "po-reassign-" + suffix}).scalar_one()
+            po_id = admin.execute(text("""
+                INSERT INTO public.purchase_orders
+                    (tenant_id, po_number, supplier_id, currency, total_amount, description, created_at)
+                VALUES (:tenant, :number, :supplier_id, 'INR', 100.00, NULL, now())
+                RETURNING id
+            """), {"tenant": tenant_a, "number": "PO-reassign-" + suffix, "supplier_id": supplier_id}).scalar_one()
+            invoice_id = admin.execute(text("""
+                INSERT INTO public.invoices
+                    (tenant_id, invoice_number, purchase_order_id, currency, amount, invoice_date,
+                     status, extraction_fields, reconciliation, created_at)
+                VALUES (:tenant, :number, :po_id, 'INR', 100.00, '2026-01-01',
+                        'received', '{}'::json, '{}'::json, now())
+                RETURNING id
+            """), {"tenant": tenant_a, "number": "INV-reassign-" + suffix, "po_id": po_id}).scalar_one()
+
+        with Session() as runtime:
+            runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            runtime.execute(text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": tenant_a})
+            with pytest.raises(Exception, match="cannot reassign purchase-order tenant while tenant-owned references exist"):
+                runtime.execute(text("""
+                    UPDATE public.purchase_orders SET tenant_id = :new_tenant WHERE id = :po_id
+                """), {"new_tenant": tenant_b, "po_id": po_id})
+            runtime.rollback()
+
+        with engine.connect() as admin:
+            owner = admin.execute(text("SELECT tenant_id FROM public.purchase_orders WHERE id = :id"),
+                                  {"id": po_id}).scalar_one()
+            assert owner == tenant_a
+    finally:
+        with engine.begin() as admin:
+            if invoice_id is not None:
+                admin.execute(text("DELETE FROM public.invoices WHERE id = :id"), {"id": invoice_id})
+            if po_id is not None:
+                admin.execute(text("DELETE FROM public.purchase_orders WHERE id = :id"), {"id": po_id})
+            if supplier_id is not None:
+                admin.execute(text("DELETE FROM public.suppliers WHERE id = :id"), {"id": supplier_id})
+        engine.dispose()
+
+
 @pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
 def test_runtime_role_cannot_reassign_referenced_supplier_to_another_tenant():
     """Changing a parent tenant must not invalidate existing child references."""
