@@ -6,7 +6,7 @@
 - Admin, analyst, and reviewer role checks.
 - Application tenant filters plus PostgreSQL RLS with FORCE ROW LEVEL SECURITY for tenant-owned tables.
 - Authenticated tenant context set on the DB session and reset before pooled connections are released.
-- PostgreSQL trigger preventing audit-event updates and deletes; per-tenant SHA-256 hash chaining with an admin verification endpoint (tamper-evident within the database, not a substitute for external WORM).
+- PostgreSQL trigger preventing audit-event updates and deletes; per-tenant SHA-256 hash chaining with an admin verification endpoint; signed HMAC-SHA256 audit exports to a separately configured, versioned S3 Object Lock bucket using COMPLIANCE retention and server-side encryption. Export refuses to run if the database chain, bucket versioning, or Object Lock configuration cannot be verified.
 - Invoice creator attribution, maker-checker enforcement, configurable amount-based sequential approval stages, per-stage role requirements, unique approver records, invoice-level policy snapshots, and SQLAlchemy optimistic version checks on concurrent decisions.
 - Tenant-authorized invoice file download from local development storage or a private S3-compatible bucket.
 - ClamAV INSTREAM scanning before storage; scanner unavailability fails closed.
