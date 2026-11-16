@@ -68,6 +68,34 @@ def test_pre_auth_identity_tables_are_tenant_scoped_and_lookup_functions_are_nar
                 "created_at": now,
             })
 
+        # The privileged function owner is non-login and is never a
+        # member of the runtime role; only fixed EXECUTE grants cross the boundary.
+        with engine.connect() as admin:
+            owner_state = admin.execute(text("""
+                SELECT rolcanlogin, rolbypassrls,
+                       pg_has_role('ledgergate_runtime', 'ledgergate_auth_owner', 'MEMBER')
+                FROM pg_roles
+                WHERE rolname = 'ledgergate_auth_owner'
+            """)).one()
+            assert tuple(owner_state) == (False, True, False)
+
+            function_owners = admin.execute(text("""
+                SELECT p.proname, owner.rolname, p.prosecdef,
+                       has_function_privilege('ledgergate_runtime', p.oid, 'EXECUTE')
+                FROM pg_proc AS p
+                JOIN pg_namespace AS n ON n.oid = p.pronamespace
+                JOIN pg_roles AS owner ON owner.oid = p.proowner
+                WHERE n.nspname = 'public'
+                  AND p.proname IN (
+                    'auth_lookup_user', 'auth_email_exists',
+                    'auth_lookup_password_reset', 'auth_lookup_email_verification'
+                  )
+                ORDER BY p.proname
+            """)).all()
+            assert len(function_owners) == 4
+            assert all(owner == "ledgergate_auth_owner" and security_definer and can_execute
+                       for _, owner, security_definer, can_execute in function_owners)
+
         # No tenant context exposes no user or token rows to the runtime role.
         with engine.begin() as runtime:
             runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
