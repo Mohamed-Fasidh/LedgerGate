@@ -2,7 +2,7 @@ import os
 import uuid
 import hashlib
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, UniqueConstraint
 from sqlalchemy.orm import sessionmaker
 
 @pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
@@ -347,6 +347,48 @@ def test_tenant_reference_migration_covers_all_business_relationship_tables():
         assert constraint_name in migration
     assert 'f"uq_{table}_tenant_id_id"' in migration
     assert 'for table in ("users", "suppliers", "purchase_orders", "approval_policies", "invoices")' in migration
+
+def test_orm_metadata_declares_tenant_composite_constraints():
+    """Keep SQLAlchemy metadata aligned with migration 0027."""
+    from app.models import Base
+
+    expected_foreign_keys = {
+        "fk_purchase_orders_tenant_supplier",
+        "fk_invoices_tenant_supplier",
+        "fk_invoices_tenant_purchase_order",
+        "fk_invoices_tenant_creator",
+        "fk_invoices_tenant_approval_policy",
+        "fk_approval_policies_tenant_creator",
+        "fk_invoice_approvals_tenant_invoice",
+        "fk_invoice_approvals_tenant_approver",
+        "fk_invoice_approvals_tenant_policy",
+        "fk_auth_sessions_tenant_user",
+        "fk_password_reset_tokens_tenant_user",
+        "fk_email_verification_tokens_tenant_user",
+    }
+    metadata_foreign_keys = {
+        constraint.name
+        for table in Base.metadata.tables.values()
+        for constraint in table.foreign_key_constraints
+        if constraint.name
+    }
+    assert expected_foreign_keys <= metadata_foreign_keys
+
+    expected_unique_constraints = {
+        "uq_users_tenant_id_id",
+        "uq_suppliers_tenant_id_id",
+        "uq_purchase_orders_tenant_id_id",
+        "uq_approval_policies_tenant_id_id",
+        "uq_invoices_tenant_id_id",
+    }
+    metadata_unique_constraints = {
+        constraint.name
+        for table in Base.metadata.tables.values()
+        for constraint in table.constraints
+        if isinstance(constraint, UniqueConstraint) and constraint.name
+    }
+    assert expected_unique_constraints <= metadata_unique_constraints
+
 
 @pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
 def test_composite_tenant_foreign_keys_are_installed_and_validated():
