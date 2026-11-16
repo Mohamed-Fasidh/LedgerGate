@@ -16,6 +16,11 @@ class AuditExportUnavailable(RuntimeError):
     pass
 
 
+# Bound synchronous export memory use and S3 object size. Larger audit histories
+# must be exported as multiple verified batches using the after_id cursor.
+MAX_AUDIT_EXPORT_BYTES = 10 * 1024 * 1024
+
+
 def canonical_json(value: dict) -> bytes:
     return json.dumps(
         value,
@@ -251,6 +256,10 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
     ):
         raise AuditExportUnavailable("Audit export events or metadata failed strict validation")
     body = canonical_json(document)
+    if len(body) > MAX_AUDIT_EXPORT_BYTES:
+        raise AuditExportUnavailable(
+            f"Audit export exceeds the {MAX_AUDIT_EXPORT_BYTES}-byte object limit; export a smaller batch"
+        )
     key = (
         f"tenants/{tenant_id}/audit-exports/"
         f"{events[0]['id']}-{events[-1]['id']}/{export_id}.json"
