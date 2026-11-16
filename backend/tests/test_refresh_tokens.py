@@ -322,3 +322,35 @@ def test_legacy_access_token_without_version_defaults_to_zero(monkeypatch):
     db.query.return_value.filter.return_value.first.return_value = user
     monkeypatch.setattr("app.security.set_database_tenant", lambda db, tenant: None)
     assert get_current_user(token=token, db=db) is user
+
+
+def test_logout_all_invalidates_access_tokens_and_revokes_refresh_sessions(monkeypatch):
+    from fastapi import Response
+    from app import main
+
+    user = User(id=9, tenant_id="tenant-test", role=Role.admin)
+    user.auth_token_version = 0
+    captured = {}
+    monkeypatch.setattr(
+        main, "_revoke_refresh_sessions",
+        lambda db, tenant_id, user_id, now: captured.update(
+            tenant_id=tenant_id, user_id=user_id
+        ) or 4,
+    )
+    monkeypatch.setattr(main, "record_event", lambda *args: None)
+
+    class DB:
+        def commit(self):
+            captured["committed"] = True
+
+    response = Response()
+    result = main.logout_all_sessions(response, DB(), user)
+
+    assert result == {"status": "logged_out_everywhere", "revoked_sessions": 4}
+    assert user.auth_token_version == 1
+    assert captured["tenant_id"] == "tenant-test"
+    assert captured["user_id"] == 9
+    assert captured["committed"] is True
+    cookies = response.headers.getlist("set-cookie")
+    assert any(value.startswith("ledgergate_refresh=") and "max-age=0" in value.lower() for value in cookies)
+    assert any(value.startswith("ledgergate_csrf=") and "max-age=0" in value.lower() for value in cookies)
