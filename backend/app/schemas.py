@@ -9,7 +9,11 @@ class RegisterIn(BaseModel):
 
 class TokenOut(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
+
+class RefreshIn(BaseModel):
+    refresh_token: str = Field(min_length=20, max_length=4096)
 
 class SupplierIn(BaseModel):
     name: str = Field(min_length=2, max_length=255)
