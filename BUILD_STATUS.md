@@ -6,7 +6,7 @@ Last checked: 2026-11-16
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest fully passing CI:** run [43818537960](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43818537960) passed backend, frontend, and Docker on commit `14608bfe4a5c0aed888118a443a1043d5c34f236`. New MFA session-revocation changes and their tests are on PR #5 head `41c510b797148a5673b47f6dcbc82ce32d9685b8`; CI run [43819401259](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43819401259) is pending. PR #5 is open and unmerged.
+- **Latest fully passing CI:** run [43823358318](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43823358318) passed backend, frontend, and Docker on PR #5 commit `e94d2522807f2c0b31cc9a3e7ab1f1c0b8f721d3`. PR #5 is open and unmerged.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
@@ -30,12 +30,12 @@ Last checked: 2026-11-16
 
 ## Latest CI result
 
-The last fully successful run is **43818537960** on commit `14608bfe4a5c0aed888118a443a1043d5c34f236`:
+The latest fully successful run is **43823358318** on commit `e94d2522807f2c0b31cc9a3e7ab1f1c0b8f721d3`:
 - Backend: migrations through `0017_login_throttle_indexes`, restricted runtime-role bootstrap, Python compilation, and pytest — passed.
 - Frontend: dependency advisory report, high-severity npm audit gate, and production build — passed.
 - Docker: Compose configuration validation and backend/frontend image builds — passed.
 
-The MFA session-revocation changes and their regression tests passed in run [43819463852](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43819463852) on commit `1142aa231008c330384b6f2c60b77118dc59cc93`. Tenant-member deactivation and its regression tests were added afterward; the newest branch head is awaiting its own CI run. PR #5 remains unmerged pending independent review and explicit merge approval.
+Subsequent changes added tenant-member deactivation, audit and approval-policy administration screens, row-locked idempotent approval-policy deactivation, and regression tests for that operation. PR #5 remains unmerged pending independent review and explicit merge approval.
 
 CI validates automated repository checks. It does not provision cloud resources, validate production secrets/IAM policies, prove disaster recovery, or replace an independent security assessment.
 
