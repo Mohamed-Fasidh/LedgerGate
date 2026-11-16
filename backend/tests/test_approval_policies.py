@@ -150,3 +150,38 @@ def test_approval_policy_mutation_lock_is_skipped_for_non_postgres():
             pytest.fail("PostgreSQL advisory locks must not run on SQLite")
 
     main._lock_approval_policy_ranges(DB(), "tenant-secure")
+
+
+@pytest.mark.parametrize(
+    ("max_amount", "expected_filter_count"),
+    [(None, 3), (Decimal("500.00"), 4)],
+)
+def test_overlap_lookup_is_tenant_scoped_and_uses_half_open_bounds(max_amount, expected_filter_count):
+    from decimal import Decimal
+    from app.models import ApprovalPolicy
+    import app.main as main
+
+    captured = {"conditions": []}
+    class Query:
+        def filter(self, *conditions):
+            captured["conditions"].extend(conditions)
+            return self
+        def first(self):
+            return None
+
+    class DB:
+        def query(self, model):
+            assert model is ApprovalPolicy
+            return Query()
+
+    result = main._find_overlapping_approval_policy(
+        DB(), "tenant-a", Decimal("100.00"), max_amount,
+    )
+    assert result is None
+    assert len(captured["conditions"]) == expected_filter_count
+    rendered = [str(condition) for condition in captured["conditions"]]
+    assert any("approval_policies.tenant_id" in item for item in rendered)
+    assert any("approval_policies.is_active" in item for item in rendered)
+    assert any("approval_policies.max_amount" in item for item in rendered)
+    if max_amount is not None:
+        assert any("approval_policies.min_amount" in item for item in rendered)
