@@ -796,3 +796,90 @@ def test_runtime_role_cannot_reassign_referenced_supplier_to_another_tenant():
                 admin.execute(text("DELETE FROM public.purchase_orders WHERE supplier_id = :id"), {"id": supplier_id})
                 admin.execute(text("DELETE FROM public.suppliers WHERE id = :id"), {"id": supplier_id})
         engine.dispose()
+
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_runtime_role_cannot_reassign_referenced_invoice_to_another_tenant():
+    """An invoice with approval history cannot change tenant."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    Session = sessionmaker(bind=engine)
+    suffix = uuid.uuid4().hex
+    tenant_a = "invoice-reassign-a-" + suffix
+    tenant_b = "invoice-reassign-b-" + suffix
+    user_id = None
+    invoice_id = None
+    try:
+        with engine.begin() as admin:
+            user_id = admin.execute(text("""
+                INSERT INTO public.users
+                    (tenant_id, tenant_name, email, hashed_password, role,
+                     is_active, email_verified, created_at)
+                VALUES (:tenant, 'Invoice Reassign Test', :email,
+                        'not-a-real-password-hash', 'analyst', true, true, now())
+                RETURNING id
+            """), {
+                "tenant": tenant_a,
+                "email": f"invoice-reassign-{suffix}@example.invalid",
+            }).scalar_one()
+            invoice_id = admin.execute(text("""
+                INSERT INTO public.invoices
+                    (tenant_id, invoice_number, currency, amount, invoice_date,
+                     status, extraction_fields, reconciliation, created_at)
+                VALUES (:tenant, :number, 'INR', 100.00, '2026-01-01',
+                        'received', '{}'::json, '{}'::json, now())
+                RETURNING id
+            """), {
+                "tenant": tenant_a,
+                "number": "INV-reassign-" + suffix,
+            }).scalar_one()
+            admin.execute(text("""
+                INSERT INTO public.invoice_approvals
+                    (tenant_id, invoice_id, policy_id, stage, approver_user_id,
+                     decision, comment, created_at)
+                VALUES (:tenant, :invoice_id, NULL, 1, :approver_id,
+                        'pending', NULL, now())
+            """), {
+                "tenant": tenant_a,
+                "invoice_id": invoice_id,
+                "approver_id": user_id,
+            })
+
+        with Session() as runtime:
+            runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            runtime.execute(
+                text("SELECT set_config('app.tenant_id', :tenant, true)"),
+                {"tenant": tenant_a},
+            )
+            with pytest.raises(
+                Exception,
+                match="cannot reassign invoice tenant while tenant-owned references exist",
+            ):
+                runtime.execute(text("""
+                    UPDATE public.invoices SET tenant_id = :new_tenant WHERE id = :invoice_id
+                """), {"new_tenant": tenant_b, "invoice_id": invoice_id})
+            runtime.rollback()
+
+        with engine.connect() as admin:
+            owner = admin.execute(
+                text("SELECT tenant_id FROM public.invoices WHERE id = :id"),
+                {"id": invoice_id},
+            ).scalar_one()
+            assert owner == tenant_a
+    finally:
+        with engine.begin() as admin:
+            if invoice_id is not None:
+                admin.execute(
+                    text("DELETE FROM public.invoice_approvals WHERE invoice_id = :id"),
+                    {"id": invoice_id},
+                )
+                admin.execute(
+                    text("DELETE FROM public.invoices WHERE id = :id"),
+                    {"id": invoice_id},
+                )
+            if user_id is not None:
+                admin.execute(
+                    text("DELETE FROM public.users WHERE id = :id"),
+                    {"id": user_id},
+                )
+        engine.dispose()
