@@ -182,13 +182,15 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
     retention = settings.audit_worm_retention_days if retention_days is None else retention_days
     if not bucket:
         raise AuditExportUnavailable("AUDIT_WORM_BUCKET is not configured")
-    if not settings.audit_export_signing_key_id.strip():
-        raise AuditExportUnavailable("AUDIT_EXPORT_SIGNING_KEY_ID is not configured")
-    if len(signing_key) < 32:
+    if not isinstance(tenant_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", tenant_id) is None:
+        raise AuditExportUnavailable("Tenant ID must be a safe, bounded storage path segment")
+    if not isinstance(settings.audit_export_signing_key_id, str) or not _is_bounded_text(settings.audit_export_signing_key_id, 128):
+        raise AuditExportUnavailable("AUDIT_EXPORT_SIGNING_KEY_ID is invalid")
+    if not isinstance(signing_key, str) or len(signing_key) < 32:
         raise AuditExportUnavailable("AUDIT_EXPORT_SIGNING_KEY must contain at least 32 characters")
-    if retention < 1 or retention > 3650:
-        raise AuditExportUnavailable("Audit export retention must be between 1 and 3650 days")
-    if not events:
+    if not isinstance(retention, int) or isinstance(retention, bool) or not 1 <= retention <= 3650:
+        raise AuditExportUnavailable("Audit export retention must be an integer between 1 and 3650 days")
+    if not isinstance(events, list) or not events:
         raise AuditExportUnavailable("An audit export must contain at least one event")
 
     client = _s3_client()
@@ -232,6 +234,14 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
         "signature_algorithm": "HMAC-SHA256",
         "signature": signature,
     }
+    # Validate the exact signed representation before making an irreversible
+    # COMPLIANCE-mode write. This protects the storage boundary even when a
+    # future caller bypasses the API's database-chain verification.
+    if not verify_audit_export_document(
+        document,
+        {settings.audit_export_signing_key_id: signing_key},
+    ):
+        raise AuditExportUnavailable("Audit export events or metadata failed strict validation")
     body = canonical_json(document)
     key = (
         f"tenants/{tenant_id}/audit-exports/"
