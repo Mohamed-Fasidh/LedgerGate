@@ -254,6 +254,7 @@ def test_audit_export_endpoint_uses_tenant_cursor_and_records_export(monkeypatch
 
     monkeypatch.setattr(main, "verify_tenant_chain", lambda db, tenant_id: {
         "valid": True, "verified_events": 12, "head_hash": "a" * 64,
+        "last_event_id": 12,
     })
 
     def store(tenant_id, events):
@@ -281,6 +282,7 @@ def test_audit_export_endpoint_uses_tenant_cursor_and_records_export(monkeypatch
     assert captured["limit"] == 25
     assert any("audit_events.tenant_id" in item for item in captured["filters"])
     assert any("audit_events.id >" in item for item in captured["filters"])
+    assert any("audit_events.id <=" in item for item in captured["filters"])
     assert captured["stored"][0][0] == "tenant-a"
     assert captured["stored"][0][1][0]["id"] == 12
     assert captured["events"][0][4] == "immutable_export_created"
