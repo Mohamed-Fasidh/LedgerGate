@@ -6,7 +6,7 @@ Last checked: 2026-11-16
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest fully passing CI:** run [43823358318](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43823358318) passed backend, frontend, and Docker on PR #5 commit `e94d2522807f2c0b31cc9a3e7ab1f1c0b8f721d3`. PR #5 is open and unmerged.
+- **Latest fully passing CI:** run [43837754285](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43837754285) passed backend, frontend, and Docker on PR #5 head `3fe36c4fa2a6b69edbc28e75d6b3e82d8946119e`. PR #5 is open and unmerged.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
@@ -30,10 +30,10 @@ Last checked: 2026-11-16
 
 ## Latest CI result
 
-The latest fully successful run is **43832313424** on commit `9b909e0bb3306fe6beeff7035da301611a1ad9df` (backend, frontend, Docker all passed):
+The latest fully successful run is **43837754285** on commit `3fe36c4fa2a6b69edbc28e75d6b3e82d8946119e` (backend, frontend, Docker all passed):
 - Backend: migrations through `0017_login_throttle_indexes`, restricted runtime-role bootstrap, Python compilation, and pytest — passed.
 - Frontend: dependency advisory report, high-severity npm audit gate, and production build — passed.
-- Docker: Compose configuration validation and backend/frontend image builds — passed.
+- Docker: operational-script syntax and regression checks, Compose configuration validation, and backend/frontend image builds — passed.
 
 Subsequent changes added tenant-member deactivation, audit and approval-policy administration screens, row-locked idempotent approval-policy deactivation, and regression tests for that operation. PR #5 remains unmerged pending independent review and explicit merge approval.
 
