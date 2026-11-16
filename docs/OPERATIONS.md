@@ -24,12 +24,12 @@ Run these scripts from the repository root with the Compose database service hea
 bash scripts/backup_postgres.sh
 
 # Verify checksum and restore into a disposable database, then drop it.
-bash scripts/restore_drill_postgres.sh ./backups/ledgergate-YYYYMMDDTHHMMSSZ.dump
+bash scripts/restore_drill_postgres.sh ./backups/ledgergate-YYYYMMDDTHHMMSSZ-unique-token.dump
 ```
 
 - Backups are written under `./backups` by default with restrictive permissions. Set `BACKUP_DIR` to a protected, capacity-managed destination and `BACKUP_RETENTION_DAYS` (1–3650; default 30) to control local cleanup.
-- The backup script validates the PostgreSQL custom archive before publishing it, writes the SHA-256 sidecar to a temporary file, and atomically publishes the checksum last. Failed/incomplete runs clean up the dump and sidecar so they are not mistaken for a complete backup. Copy both files to encrypted off-host storage; a local dump is not a disaster-recovery strategy.
-- The restore drill checks the checksum, restores into a newly created disposable database, and confirms the Alembic version table exists. It never restores over the configured application database. Set `RESTORE_DRILL_KEEP_DB=1` only when you intentionally want to inspect the temporary database; remove it manually afterwards.
+- The backup script uses a collision-resistant temporary filename and a unique final filename, validates the PostgreSQL custom archive before publishing it, writes the SHA-256 sidecar to a temporary file, and atomically publishes the checksum last. Failed/incomplete runs clean up the dump and sidecar so they are not mistaken for a complete backup. Copy both files to encrypted off-host storage; a local dump is not a disaster-recovery strategy.
+- The restore drill checks the checksum, restores into a uniquely named disposable database, and confirms that the Alembic version table contains a version and the core users and invoices tables exist. It never restores over the configured application database. Set `RESTORE_DRILL_KEEP_DB=1` only when you intentionally want to inspect the temporary database; remove it manually afterwards.
 - These scripts do not back up PostgreSQL roles/globals, object-storage invoice files, secrets, or cloud configuration. Back up and test those separately. Production backups should use managed encrypted backups/PITR and an independently secured off-site copy.
 - Run restore drills against an isolated recovery environment, not a busy production database. Record duration, backup age, row counts, and recovery-point/recovery-time results.
 
