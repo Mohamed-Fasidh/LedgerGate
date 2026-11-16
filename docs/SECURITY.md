@@ -6,7 +6,7 @@
 - Application tenant filters plus PostgreSQL RLS with FORCE ROW LEVEL SECURITY for tenant-owned tables.
 - Authenticated tenant context set on the DB session and reset before pooled connections are released.
 - PostgreSQL trigger preventing audit-event updates and deletes.
-- Invoice creator attribution, maker-checker enforcement (creator cannot approve/reject their own invoice), and SQLAlchemy optimistic version checks on concurrent invoice updates.
+- Invoice creator attribution, maker-checker enforcement, configurable amount-based sequential approval stages, per-stage role requirements, unique approver records, invoice-level policy snapshots, and SQLAlchemy optimistic version checks on concurrent decisions.
 - Tenant-authorized invoice file download from local development storage or a private S3-compatible bucket.
 - ClamAV INSTREAM scanning before storage; scanner unavailability fails closed.
 - Production startup requires S3-compatible storage, a bucket, a configured malware-scanner host, a strong runtime database password, and the restricted runtime PostgreSQL role.
@@ -14,6 +14,7 @@
 - Tenant-scoped invoice idempotency for both JSON invoice creation and file uploads; request fingerprints prevent a key from being replayed with different content or across operations.
 - API runtime role bootstrap separates table ownership/migrations from the non-owner, NOBYPASSRLS application connection.
 - Optional `Idempotency-Key` on invoice creation and upload is unique per tenant; identical retries return the existing invoice, while different payloads or cross-operation reuse return HTTP 409. Concurrent upload races clean up the losing uncommitted object.
+- Configurable approval policies select by invoice amount and define sequential role-based stages; each invoice snapshots its approval plan, requires distinct approvers, and is only marked approved after every stage succeeds.
 - Upload extension, size, empty-file, and basic PDF-signature checks; randomized server-side upload names.
 - Pydantic validation for API inputs and agent tool arguments.
 - Production startup rejects the default JWT secret and wildcard CORS.
