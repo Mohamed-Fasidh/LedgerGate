@@ -82,6 +82,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate operational scripts
         run: bash -n scripts/backup_postgres.sh scripts/restore_drill_postgres.sh scripts/cleanup_workflow_runs.sh
+      - name: Enforce immutable GitHub Actions references
+        run: python3 scripts/test_workflow_action_pins.py
       - name: Test workflow-run cleanup safety
         run: python3 scripts/test_cleanup_workflow_runs.py
       - name: Guard production API startup and one-shot migrations
