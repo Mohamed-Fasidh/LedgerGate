@@ -40,7 +40,24 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      clamav:
+    
+  email-worker:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://ledgergate_runtime:${DB_RUNTIME_PASSWORD:-change_me_runtime_local_only}@db:5432/ledgergate
+      DB_RUNTIME_PASSWORD: ${DB_RUNTIME_PASSWORD:-change_me_runtime_local_only}
+    command: ["python", "-m", "app.email_worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+  clamav:
         condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
