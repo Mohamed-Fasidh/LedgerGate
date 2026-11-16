@@ -179,3 +179,23 @@ def test_terminal_outbox_retention_removes_old_records(db_factory):
     with db_factory() as db:
         rows = db.query(OutboundEmail).all()
         assert len(rows) == 1 and rows[0].recipient == "recent@example.com"
+
+
+def test_worker_does_not_exceed_attempt_limit_after_crash(db_factory):
+    row_id = _enqueue(db_factory)
+    now = datetime.now(timezone.utc)
+    with db_factory() as db:
+        row = db.get(OutboundEmail, row_id)
+        row.status = "sending"
+        row.attempts = row.max_attempts
+        row.locked_at = now - timedelta(seconds=301)
+        db.commit()
+
+    delivered = []
+    assert process_one(db_factory, sender=lambda row: delivered.append(row), now=now)
+    with db_factory() as db:
+        row = db.get(OutboundEmail, row_id)
+        assert row.status == "dead"
+        assert row.last_error == "WorkerLeaseExpired"
+        assert row.encrypted_payload == ""
+    assert delivered == []
