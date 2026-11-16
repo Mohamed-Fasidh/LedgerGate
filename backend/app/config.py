@@ -56,6 +56,8 @@ def validate_production_settings(config: Settings) -> None:
         raise RuntimeError("Production requires AUDIT_EXPORT_SIGNING_KEY_ID")
     if config.audit_worm_retention_days < 1 or config.audit_worm_retention_days > 3650:
         raise RuntimeError("AUDIT_WORM_RETENTION_DAYS must be between 1 and 3650")
+    if config.jwt_algorithm != "HS256":
+        raise RuntimeError("Production JWT_ALGORITHM must be HS256; asymmetric or unsecured algorithms are not supported")
     if config.jwt_secret_key == "unsafe-development-secret-change-this" or len(config.jwt_secret_key) < 32:
         raise RuntimeError("Production requires a unique JWT_SECRET_KEY of at least 32 characters")
 
