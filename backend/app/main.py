@@ -770,8 +770,18 @@ def create_supplier(payload:SupplierIn,idempotency_key:str|None=Header(default=N
         raise HTTPException(409,"Supplier already exists")
 
 @app.get("/api/v1/suppliers")
-def list_suppliers(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
-    return [{"id":x.id,"name":x.name,"tax_id":x.tax_id} for x in db.query(Supplier).filter(Supplier.tenant_id==user.tenant_id).all()]
+def list_suppliers(
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if limit < 1 or limit > 200 or offset < 0:
+        raise HTTPException(400, "Limit must be 1-200 and offset must be non-negative")
+    rows = db.query(Supplier).filter(
+        Supplier.tenant_id == user.tenant_id
+    ).order_by(Supplier.id.desc()).offset(offset).limit(limit).all()
+    return [{"id": x.id, "name": x.name, "tax_id": x.tax_id} for x in rows]
 
 @app.post("/api/v1/purchase-orders")
 def create_po(payload:POIn,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
@@ -804,8 +814,18 @@ def po_view(x):
     return {"id":x.id,"po_number":x.po_number,"supplier_id":x.supplier_id,"currency":x.currency,"total_amount":float(x.total_amount),"description":x.description}
 
 @app.get("/api/v1/purchase-orders")
-def list_pos(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
-    return [po_view(x) for x in db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id==user.tenant_id).all()]
+def list_pos(
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if limit < 1 or limit > 200 or offset < 0:
+        raise HTTPException(400, "Limit must be 1-200 and offset must be non-negative")
+    rows = db.query(PurchaseOrder).filter(
+        PurchaseOrder.tenant_id == user.tenant_id
+    ).order_by(PurchaseOrder.id.desc()).offset(offset).limit(limit).all()
+    return [po_view(x) for x in rows]
 
 def invoice_view(x):
     steps=x.approval_steps_snapshot or []
@@ -939,12 +959,23 @@ def create_invoice(payload:InvoiceIn,idempotency_key:str|None=Header(default=Non
         raise HTTPException(409,"Invoice conflicts with an existing record")
 
 @app.get("/api/v1/invoices")
-def list_invoices(status:str|None=None,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
-    q=db.query(Invoice).filter(Invoice.tenant_id==user.tenant_id)
+def list_invoices(
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if limit < 1 or limit > 200 or offset < 0:
+        raise HTTPException(400, "Limit must be 1-200 and offset must be non-negative")
+    query = db.query(Invoice).filter(Invoice.tenant_id == user.tenant_id)
     if status:
-        try: q=q.filter(Invoice.status==InvoiceStatus(status))
-        except ValueError: raise HTTPException(400,"Unknown invoice status")
-    return [invoice_view(x) for x in q.order_by(Invoice.created_at.desc()).all()]
+        try:
+            query = query.filter(Invoice.status == InvoiceStatus(status))
+        except ValueError:
+            raise HTTPException(400, "Unknown invoice status")
+    rows = query.order_by(Invoice.created_at.desc(), Invoice.id.desc()).offset(offset).limit(limit).all()
+    return [invoice_view(row) for row in rows]
 
 @app.get("/api/v1/invoices/{invoice_id}")
 def get_invoice(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
@@ -1183,9 +1214,23 @@ def create_approval_policy(payload:ApprovalPolicyIn,idempotency_key:str|None=Hea
         raise HTTPException(409,"An approval policy with this name or idempotency key already exists")
 
 @app.get("/api/v1/approval-policies")
-def list_approval_policies(db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
-    rows=db.query(ApprovalPolicy).filter(ApprovalPolicy.tenant_id==user.tenant_id).order_by(ApprovalPolicy.min_amount.asc()).all()
-    return [{"id":p.id,"name":p.name,"min_amount":float(p.min_amount),"max_amount":float(p.max_amount) if p.max_amount is not None else None,"approval_steps":p.approval_steps,"is_active":p.is_active} for p in rows]
+def list_approval_policies(
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin", "reviewer")),
+):
+    if limit < 1 or limit > 200 or offset < 0:
+        raise HTTPException(400, "Limit must be 1-200 and offset must be non-negative")
+    rows = db.query(ApprovalPolicy).filter(
+        ApprovalPolicy.tenant_id == user.tenant_id
+    ).order_by(ApprovalPolicy.min_amount.asc(), ApprovalPolicy.id.asc()).offset(offset).limit(limit).all()
+    return [
+        {"id": p.id, "name": p.name, "min_amount": float(p.min_amount),
+         "max_amount": float(p.max_amount) if p.max_amount is not None else None,
+         "approval_steps": p.approval_steps, "is_active": p.is_active}
+        for p in rows
+    ]
 
 @app.post("/api/v1/approval-policies/{policy_id}/deactivate")
 def deactivate_approval_policy(policy_id:int,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
