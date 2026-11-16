@@ -358,6 +358,23 @@ def _store_idempotency_response(db: Session, tenant_id: str, key: str, operation
         request_hash=request_hash, response_json=jsonable_encoder(response),
     ))
 
+def _delete_expired_idempotency_records(db: Session, tenant_id: str, cutoff: datetime, batch_size: int = 1000) -> int:
+    """Delete a bounded batch of expired records for the current tenant only."""
+    records = (
+        db.query(IdempotencyRecord)
+        .filter(
+            IdempotencyRecord.tenant_id == tenant_id,
+            IdempotencyRecord.created_at < cutoff,
+        )
+        .order_by(IdempotencyRecord.created_at.asc())
+        .limit(batch_size)
+        .all()
+    )
+    for record in records:
+        db.delete(record)
+    return len(records)
+
+
 def _same_idempotent_request(existing: Invoice, operation: str, fingerprint: str) -> bool:
     # Older create-invoice keys predate operation/fingerprint columns; retain
     # backwards compatibility for those records without replaying them as uploads.
@@ -837,6 +854,35 @@ def agent_tools(user:User=Depends(get_current_user)):
 @app.get("/api/v1/evaluations/run")
 def evaluate(user:User=Depends(require_roles("admin","reviewer"))):
     return run_evaluation()
+
+@app.post("/api/v1/maintenance/idempotency/cleanup")
+def cleanup_idempotency_records(
+    retention_days: int = 90,
+    batch_size: int = 1000,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin")),
+):
+    """Remove one bounded batch of this tenant's idempotency keys older than the retention window."""
+    if retention_days < 30 or retention_days > 3650:
+        raise HTTPException(400, "retention_days must be between 30 and 3650")
+    if batch_size < 1 or batch_size > 10000:
+        raise HTTPException(400, "batch_size must be between 1 and 10000")
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    deleted = _delete_expired_idempotency_records(db, user.tenant_id, cutoff, batch_size)
+    record_event(db, user, "idempotency_record", user.tenant_id, "expired_records_cleaned", {
+        "deleted_count": deleted,
+        "retention_days": retention_days,
+        "batch_size": batch_size,
+    })
+    db.commit()
+    return {
+        "status": "completed",
+        "deleted_records": deleted,
+        "retention_days": retention_days,
+        "cutoff": cutoff.isoformat(),
+        "has_more": deleted == batch_size,
+    }
+
 
 @app.get("/api/v1/audit-events")
 def audit_events(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
