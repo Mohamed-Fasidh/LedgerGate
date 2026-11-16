@@ -10,21 +10,21 @@ MAX_OCR_PAGE_PIXELS = 12_000_000
 MAX_OCR_TOTAL_PIXELS = 48_000_000
 
 AMOUNT_PATTERNS = [
-    r"(?:grand\\s+total|invoice\\s+total|total\\s+amount|amount\\s+due|total)\\s*[:\\-]?\\s*(?:₹|INR\\s*)?([\\d,]+(?:\\.\\d{1,2})?)",
-    r"(?:₹|INR)\\s*([\\d,]+(?:\\.\\d{1,2})?)",
+    r"(?:grand\s+total|invoice\s+total|total\s+amount|amount\s+due|total)\s*[:\-]?\s*(?:₹|INR\s*)?([\d,]+(?:\.\d{1,2})?)",
+    r"(?:₹|INR)\s*([\d,]+(?:\.\d{1,2})?)",
 ]
 INVOICE_PATTERNS = [
-    r"(?:invoice\\s*(?:no|number|#))\\s*[:\\-]?\\s*([A-Z0-9][A-Z0-9\\-\\/]+)",
+    r"(?:invoice\s*(?:no|number|#))\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/]+)",
 ]
 DATE_PATTERNS = [
-    r"(?:invoice\\s*date|date)\\s*[:\\-]?\\s*(\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{2,4}|\\d{4}-\\d{2}-\\d{2})",
+    r"(?:invoice\s*date|date)\s*[:\-]?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}-\d{2}-\d{2})",
 ]
 
 
 def parse_text(text: str) -> dict:
     if len(text) > MAX_EXTRACTED_TEXT_CHARS:
         raise ValueError("Extracted text exceeds the 2 MB processing limit")
-    normalized = text.replace("\\u00a0", " ")
+    normalized = text.replace("\u00a0", " ")
     result = {"invoice_number": None, "amount": None, "currency": "INR", "invoice_date": None, "confidence": {}}
     for pat in INVOICE_PATTERNS:
         m = re.search(pat, normalized, re.I)
@@ -39,7 +39,7 @@ def parse_text(text: str) -> dict:
             try:
                 result["amount"] = round(float(raw), 2)
                 result["confidence"]["amount"] = "regex_candidate"
-                if "₹" in normalized or re.search(r"\\bINR\\b", normalized, re.I):
+                if "₹" in normalized or re.search(r"\bINR\b", normalized, re.I):
                     result["currency"] = "INR"
                 elif "$" in normalized:
                     result["currency"] = "USD"
@@ -88,7 +88,7 @@ def extract_file(path: str, suffix: str) -> tuple[str, dict]:
                 if total_chars > MAX_EXTRACTED_TEXT_CHARS:
                     raise ValueError("PDF extracted text exceeds the 2 MB processing limit")
                 page_text.append(chunk)
-            text = "\\n".join(page_text)
+            text = "\n".join(page_text)
 
             if len(text.strip()) < 20:
                 # Check every page before OCR allocates rendered image buffers.
@@ -105,7 +105,7 @@ def extract_file(path: str, suffix: str) -> tuple[str, dict]:
                     for page in doc:
                         pix = page.get_pixmap(matrix=fitz.Matrix(OCR_SCALE, OCR_SCALE), alpha=False)
                         chunks.append(pytesseract.image_to_string(Image.open(io.BytesIO(pix.tobytes("png")))))
-                    text = "\\n".join(chunks)
+                    text = "\n".join(chunks)
                     if len(text) > MAX_EXTRACTED_TEXT_CHARS:
                         raise ValueError("OCR text exceeds the 2 MB processing limit")
                 except ImportError:
