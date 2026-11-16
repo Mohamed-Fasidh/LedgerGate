@@ -50,3 +50,5 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 ## Immediate access-token invalidation
 
 Access tokens include an account-scoped auth_token_version claim. The API checks this claim against the active user row on every authenticated request. Password changes, MFA disablement, logout-all, tenant-member role changes, and tenant-member deactivation increment the version in the same database transaction as their account/session changes. Previously issued access tokens are therefore rejected immediately after those operations commit, rather than remaining usable until their JWT expiry. Existing tokens without the version claim are treated as version zero during the compatibility window; the migration initializes existing accounts to zero.
+
+The route-level AST regression suite also asserts that password changes, MFA disablement, logout-all, member role changes, and member deactivation invoke the account-version invalidation helper.
