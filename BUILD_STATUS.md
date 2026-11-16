@@ -13,6 +13,9 @@ Last checked: 2026-11-16
 - Agent-memory search rejects queries over 500 characters, caps results at 20, and bounds candidate reads to 500 tenant records.
 - Email outbox delivery, retry, and cancellation updates are fenced to the active worker lease. Delivery remains at-least-once; SMTP acceptance followed by worker crash can still cause duplicate email.
 - Remote MCP API origins require HTTPS; plain HTTP is permitted only for loopback development. Authenticated MCP API requests do not follow redirects. MCP SDK is pinned to v1.30.0 to avoid the Pydantic compatibility failure found by CI.
+- PR #17 adds MCP tool titles and explicit behavior annotations: invoice, purchase-order, policy, and memory lookups are read-only; invoice reconciliation is marked as a non-idempotent potentially destructive write. PR CI [43890546373](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43890546373) and CodeQL [43890546355](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43890546355) passed.
+- PR #17 merged as `37aaac226003595c83278c9f73d84900d1dedb2a`. Post-merge main CI and CodeQL are pending and must pass before the commit is marked main-verified.
+- A secure MCP integration guide now documents stdio setup, short-lived user access-token handling, remote HTTPS requirements, and the reconciliation tool's write behavior.
 - Production PostgreSQL connections require `sslmode=verify-full` and an explicit `sslrootcert` CA bundle path. Staging must verify the mounted CA and actual managed-database certificate chain/hostname.
 - Passing repository CI and CodeQL does not certify production. Staging deployment, cloud integration, external SMTP receipt, Object Lock/IAM verification, restore drills, independent security testing, and operational acceptance remain outstanding.
 
