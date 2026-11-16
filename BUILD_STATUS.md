@@ -44,6 +44,7 @@ CI validates automated repository checks. It does not provision cloud resources,
 
 - Audit export attempts now use a unique UUID in the signed document and S3 object key, including when the same event range is exported again. This avoids reusing an Object Lock key on retries.
 - PostgreSQL backup publication now writes and validates the archive first, publishes its checksum sidecar atomically last, and removes incomplete outputs on failure.
+- Paginated audit verification regression fixtures now implement the SQLAlchemy limit operation used by the production query path, including valid, empty, and corrupted-chain cases.
 - Audit-chain verification now reads bounded pages (default 1,000, maximum 10,000) rather than loading the tenant's full history into application memory. Admin verification also takes the shared tenant writer lock so the multi-page result represents a stable chain.
 - Immutable audit export now acquires the same PostgreSQL transaction-scoped tenant advisory lock as audit writers before verification and holds it through export commit. This prevents a delayed writer with a lower global sequence ID from committing behind an advanced export cursor. Added PostgreSQL/non-PostgreSQL lock tests and endpoint lock-order regression coverage.
 - Audit export queries are now bounded by the exact event ID at the verified chain head; concurrent later appends are deferred until the next fresh verification. Regression tests cover the verified head, empty chains, and cursor-at-head behavior.
