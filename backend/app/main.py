@@ -430,6 +430,22 @@ def _delete_expired_idempotency_records(db: Session, tenant_id: str, cutoff: dat
         db.delete(record)
     return len(records)
 
+def _delete_expired_auth_sessions(db: Session, tenant_id: str, cutoff: datetime, batch_size: int = 1000) -> int:
+    """Delete a bounded batch of sessions expired before the retention cutoff."""
+    sessions = (
+        db.query(AuthSession)
+        .filter(
+            AuthSession.tenant_id == tenant_id,
+            AuthSession.expires_at < cutoff,
+        )
+        .order_by(AuthSession.expires_at.asc())
+        .limit(batch_size)
+        .all()
+    )
+    for session in sessions:
+        db.delete(session)
+    return len(sessions)
+
 
 def _same_idempotent_request(existing: Invoice, operation: str, fingerprint: str) -> bool:
     # Older create-invoice keys predate operation/fingerprint columns; retain
@@ -951,6 +967,35 @@ def cleanup_idempotency_records(
         "status": "completed",
         "deleted_records": deleted,
         "retention_days": retention_days,
+        "cutoff": cutoff.isoformat(),
+        "has_more": deleted == batch_size,
+    }
+
+
+@app.post("/api/v1/maintenance/auth-sessions/cleanup")
+def cleanup_expired_auth_sessions(
+    retention_days: int = 30,
+    batch_size: int = 1000,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin")),
+):
+    """Remove a bounded batch of sessions expired beyond the investigation grace period."""
+    if retention_days < 0 or retention_days > 3650:
+        raise HTTPException(400, "retention_days must be between 0 and 3650")
+    if batch_size < 1 or batch_size > 10000:
+        raise HTTPException(400, "batch_size must be between 1 and 10000")
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    deleted = _delete_expired_auth_sessions(db, user.tenant_id, cutoff, batch_size)
+    record_event(db, user, "auth_session", user.tenant_id, "expired_sessions_cleaned", {
+        "deleted_count": deleted,
+        "retention_days_after_expiry": retention_days,
+        "batch_size": batch_size,
+    })
+    db.commit()
+    return {
+        "status": "completed",
+        "deleted_sessions": deleted,
+        "retention_days_after_expiry": retention_days,
         "cutoff": cutoff.isoformat(),
         "has_more": deleted == batch_size,
     }
