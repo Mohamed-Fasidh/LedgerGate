@@ -2,24 +2,23 @@
 
 Last checked: 2026-11-16
 
-## Latest full CI verification — 2026-11-16
+## Current verified state — main branch
 
-- GitHub Actions run [43876897116](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43876897116) completed successfully on PR #5 head `c4b87bdcd1bd4a2f757110c6f6ee9c0e41bcfcba`.
-- Backend migrations, restricted runtime-role bootstrap, Python compilation, and the full pytest suite passed (**235 tests**). Frontend dependency audit and Next.js production build passed. Docker operational checks, Compose validation, and both image builds passed.
-- Registration now returns a generic response for both new and existing addresses; unverified existing accounts can receive a fresh link without account enumeration. Verification and password-reset issuance/confirmation use consistent user-then-token row locking to avoid deadlocks with concurrent resend requests. Identity lifecycle includes mandatory email verification for new registrations and email-based password recovery. Verification links are single-use and expire after 24 hours; reset links are single-use and expire after 30 minutes. Both use SHA-256 token hashes, generic resend/reset responses, shared email/IP throttling, authenticated SMTP STARTTLS, and URL-fragment tokens. Password reset additionally requires MFA when enabled and revokes all sessions.
-- Verification and password-reset emails are transactionally queued in an encrypted PostgreSQL outbox and delivered by a separate Compose worker. The worker uses SKIP LOCKED claims, five-minute leases, up to 12 exponential-backoff attempts, stale-token cancellation, payload scrubbing, 30/90-day terminal retention, and configurable Fernet key rotation. Delivery is at-least-once; a crash after SMTP acceptance but before the sent-state commit can result in a duplicate.
-- SMTP delivery uses authenticated STARTTLS on port 587. Production startup requires SMTP, HTTPS public-app, and dedicated outbox-encryption configuration; actual provider delivery and mailbox verification remain external deployment checks.
-- Exactly one workflow-run cleanup schedule is retained: `.github/workflows/cleanup-unsuccessful-runs.yml`, every five minutes. It targets completed failed and cancelled runs only. GitHub Actions scheduled workflows do not support a one-minute cadence.
-- PR #5 remains open and unmerged. This CI result verifies repository automation only; it is not staging or production deployment evidence.
+- PR #4 and PR #5 are both **merged** into `main`. PR #5 merge commit: `f50bdf6b23c9d882e8cf67ef45e2024971f6bdb3`.
+- The CI workflow was updated to run on pull requests, pushes to `main`, and manual dispatch.
+- The first post-merge main-branch verification completed successfully: [GitHub Actions run 43879483600](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43879483600), commit `20a25b663415030b1ea8e5bcce1e7f9eea2c1f9d`.
+- **Backend passed:** dependency installation, PostgreSQL migrations, restricted runtime-role bootstrap, Python compilation, and the complete pytest suite.
+- **Frontend passed:** dependency advisory reporting, high-severity npm audit gate, and Next.js production build.
+- **Docker passed:** operational-script validation, cleanup safety tests, production startup/migration guards, PostgreSQL backup/restore regression checks, non-root container checks, Compose validation, and backend/frontend image builds.
+- This is repository CI verification. It does not prove deployment to a real staging/production environment, live SMTP delivery, cloud IAM/Object Lock/KMS configuration, real restore recovery, or independent security acceptance.
 
 ## Current delivery state
 
-- **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
-- **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest fully passing CI:** run [43876897116](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43876897116) passed backend, frontend, and Docker on PR #5 head `c4b87bdcd1bd4a2f757110c6f6ee9c0e41bcfcba`. PR #5 is open and unmerged.
-- **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
-- **Stage 4 — public production deployment:** not yet deployed.
-- **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
+- **Stage 1 — core platform:** implemented and merged in PR #4.
+- **Stage 2 — application hardening:** implemented and merged in PR #5.
+- **Stage 3 — main-branch CI:** post-merge backend, frontend, and Docker jobs passed.
+- **Stage 4 — staging deployment:** not yet verified against a provisioned staging environment.
+- **Stage 5 — production launch:** not complete; external infrastructure, security assurance, recovery drills, UAT, and operational sign-off remain required.
 
 ## Implemented in PR #4 and PR #5
 
