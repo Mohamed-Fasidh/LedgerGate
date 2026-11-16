@@ -81,6 +81,7 @@ def test_password_reset_request_stores_only_hash_and_sends_expiring_link(monkeyp
     )
     assert result["status"] == "accepted"
     assert db.commits == 1
+    assert db.queries[0].locked  # user row locked before reset-token replacement
     assert len(db.added) == 1
     stored = db.added[0]
     assert isinstance(stored, PasswordResetToken)
