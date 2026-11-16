@@ -88,6 +88,7 @@ def test_registration_creates_unverified_account_and_emails_single_use_link(monk
     assert token.expires_at - token.created_at == timedelta(hours=24)
     assert queued[0][0:2] == ("person@example.com", "email_verification")
     assert queued[0][2].startswith("https://app.example.com/#verify_email_token=")
+    assert queued[0][3] == token.token_hash
     assert token.token_hash not in queued[0][2]
 
 
