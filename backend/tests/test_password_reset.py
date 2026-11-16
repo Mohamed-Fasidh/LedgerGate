@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from starlette.requests import Request
 
 import app.main as main
@@ -95,7 +95,7 @@ def test_password_reset_confirm_rejects_invalid_or_reused_tokens():
     with pytest.raises(HTTPException) as error:
         main.confirm_password_reset(
             main.PasswordResetConfirmIn(token="x" * 48, new_password="new-password-strong"),
-            _request(), db,
+            _request(), Response(), db,
         )
     assert error.value.status_code == 400
 
@@ -118,14 +118,13 @@ def test_password_reset_confirm_changes_password_revokes_sessions_and_audits(mon
     monkeypatch.setattr(main, "set_database_tenant", lambda *args: None)
     monkeypatch.setattr(main, "record_event", lambda *args: events.append(args))
     payload = main.PasswordResetConfirmIn(token="x" * 48, new_password="new-password-strong")
-    result = main.confirm_password_reset(payload, _request(), db)
+    response = Response()\n    result = main.confirm_password_reset(payload, _request(), response, db)
     assert result == {"status": "password_reset", "revoked_sessions": 3}
     assert user.hashed_password == "new-hash"
     assert user.auth_token_version == 3
     assert reset.used_at is not None
     assert db.commits == 1
-    assert revoked and events
-    assert events[0][4] == "password_reset_completed"
+    assert revoked and events\n    cookies = response.headers.getlist("set-cookie")\n    assert any(value.startswith("ledgergate_refresh=") and "max-age=0" in value.lower() for value in cookies)\n    assert any(value.startswith("ledgergate_csrf=") and "max-age=0" in value.lower() for value in cookies)\n    assert events[0][4] == "password_reset_completed"
 
 
 def test_password_reset_request_rejects_untrusted_origin(monkeypatch):
