@@ -13,7 +13,7 @@
 - Tenant-wide idempotency for supported state-changing operations. Request fingerprints reject mismatched or cross-operation key reuse; successful retries can replay the stored response.
 - Bounded tenant-admin cleanup for expired idempotency records and expired refresh sessions. Cleanup is tenant-filtered, RLS-protected, and audit logged; unexpired sessions are not selected.
 - Private S3-compatible invoice storage adapter, tenant-authorized downloads, upload limits/basic file checks, randomized storage names, and ClamAV INSTREAM scanning before storage. Scanner unavailability fails closed.
-- Persistent login throttling using hashed email/IP identifiers.
+- Persistent login throttling using keyed HMAC-SHA256 email/IP identifiers, PostgreSQL advisory transaction locks to serialize concurrent checks across replicas, and bounded cleanup of stale records. Failed-attempt checks are performed while the relevant identity/IP locks are held through authentication.
 - Pydantic validation for API inputs and agent tool arguments. AI output is advisory; only authorized human reviewers can finalize invoice decisions.
 
 ## Browser deployment constraint
@@ -36,3 +36,8 @@ Never commit production secrets. Do not store card data, bank credentials, or pa
 ## Public registration throttling
 
 Unauthenticated workspace registration is protected by a persistent 15-minute sliding window: at most five attempts per normalized email and twenty attempts per source IP. Email and IP values are stored only as keyed HMAC-SHA256 digests using the application secret, reducing offline dictionary recovery if the throttle table is exposed. PostgreSQL advisory transaction locks serialize concurrent checks across API replicas; stale throttle records are pruned in bounded batches after 24 hours. The application uses the direct peer address (`request.client.host`); deployments behind a reverse proxy must configure trusted proxy handling and should also enforce edge/WAF rate limits. The application limiter is a defense-in-depth control, not a substitute for perimeter abuse protection.
+
+
+## Login throttling details
+
+Login failures are counted in a 15-minute window with a limit of ten failed attempts across the normalized email or source IP. Identifiers are keyed HMAC-SHA256 digests rather than plain hashes. PostgreSQL advisory transaction locks serialize requests sharing either identifier across API replicas, preventing simultaneous requests from bypassing the threshold. Stale login-attempt rows older than 24 hours are pruned in bounded batches. The application uses the direct peer address; configure trusted proxy handling and edge/WAF controls before deployment behind a reverse proxy. Because the HMAC key is the application JWT secret, rotating that secret also changes throttle identifiers and effectively resets outstanding login/registration throttle windows; perform rotations deliberately and retain edge rate limits as an independent control.
