@@ -50,7 +50,11 @@ def extract_file(path: str, suffix: str) -> tuple[str, dict]:
     elif suffix == ".pdf":
         import fitz
         doc = fitz.open(path)
+        if doc.page_count > 50:
+            raise ValueError("PDF exceeds the 50-page processing limit")
         text = "\n".join(page.get_text("text") for page in doc)
+        if len(text) > 2_000_000:
+            raise ValueError("PDF extracted text exceeds the 2 MB processing limit")
         if len(text.strip()) < 20:
             # Optional OCR: requires pytesseract and system tesseract executable.
             try:
