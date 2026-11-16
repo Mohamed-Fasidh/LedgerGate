@@ -182,3 +182,12 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Added migration `0020_auth_session_query_indexes` for tenant/user active-session listing and tenant/family revocation paths.
 - Added model metadata and regression assertions for both composite index column orders.
 - These indexes complement the existing tenant/expiry cleanup index; the migration must pass the latest backend and full CI workflow before being considered verified.
+
+
+## Password lifecycle hardening (2026-11-16)
+
+- Added authenticated self-service password change with current-password verification, minimum 12-character new-password validation, and password-reuse rejection.
+- When MFA is enabled, password change requires a fresh TOTP step or consumes one unused recovery code; the user row is locked while credentials and MFA state are updated.
+- Successful password changes revoke all active refresh sessions, clear refresh/CSRF cookies, and append an audit event. Existing short-lived access tokens remain valid until their configured expiry.
+- Added regression coverage for invalid current password, password reuse, mandatory MFA, TOTP success, recovery-code consumption, refresh-session revocation, audit recording, and cookie clearing.
+- This does not replace email verification, password-reset delivery, SSO/OIDC, or independent production security review.
