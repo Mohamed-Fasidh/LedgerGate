@@ -6,7 +6,7 @@ Last checked: 2026-11-16
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest code CI:** GitHub Actions run [43816875357](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43816875357) completed successfully on application code commit `b6e07246c69d19cbe2e992ab4116942db267ab1e`; backend, frontend, and Docker jobs all passed. A subsequent documentation-only commit is awaiting its own CI run. PR #5 is open and marked ready for review; it has not been merged.
+- **Latest code CI:** GitHub Actions run [43817928322](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43816875357) completed successfully on application code commit `bee2a9d668c8756da18ce76e294e229bff459c4a`; backend, frontend, and Docker jobs all passed. A subsequent documentation-only commit is awaiting its own CI run. PR #5 is open and marked ready for review; it has not been merged.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
@@ -43,7 +43,7 @@ CI validates the repository's automated checks. It does not provision cloud reso
 
 ### Application and identity
 - SSO/OIDC, verified email, password reset/account recovery, and richer session/device management.
-- Registration now has persistent 15-minute limits (5 per normalized email and 20 per source IP), keyed HMAC identifiers, PostgreSQL advisory-lock serialization, bounded stale-row cleanup, and regression/concurrency coverage. Continue reviewing other unauthenticated account lifecycle endpoints and extend idempotency to any remaining or future non-repeatable writes.
+- Registration now has persistent 15-minute limits (5 per normalized email and 20 per source IP), keyed HMAC identifiers, PostgreSQL advisory-lock serialization, bounded stale-row cleanup, and regression/concurrency coverage. Login throttling now uses keyed HMAC identifiers, cross-replica PostgreSQL advisory locks, a 10-failure/15-minute threshold, bounded cleanup, and composite query indexes; PostgreSQL concurrency coverage verifies simultaneous requests are serialized. Continue reviewing other unauthenticated account lifecycle endpoints and extend idempotency to any remaining or future non-repeatable writes.
 - Validate MFA recovery, administrator-assisted recovery procedures, and session revocation behavior with real multi-user scenarios.
 
 ### Cloud and operations
