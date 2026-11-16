@@ -292,3 +292,6 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Existing access tokens without a version claim remain compatible at version zero until they expire.
 - Added regression tests for version claims, stale-token rejection, and legacy-token compatibility.
 - The change is committed to PR #5 and is awaiting its own complete CI run. It has not been merged or deployed.
+
+- Added route-level AST coverage to prevent sensitive account lifecycle handlers from omitting access-token invalidation; expanded endpoint tests for MFA disablement and logout-all.
+- CI run 43859647111 passed backend, frontend, and Docker for the implementation commit before these final regression-test additions; the newest commit has its own CI run pending.
