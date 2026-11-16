@@ -47,6 +47,7 @@ Production startup deliberately fails if required MFA/outbox encryption, audit W
 ## 4. Database release process
 
 - Provision managed PostgreSQL with private networking, encryption, backups, and point-in-time recovery.
+- Run `sh ./scripts/bootstrap_auth_owner_role.sh` once before migrations using a privileged database bootstrap connection. It provisions `ledgergate_auth_owner` as a NOLOGIN/BYPASSRLS role, grants it only the schema privileges needed to own fixed authentication lookup functions, and grants membership to the migration principal so it can `SET ROLE` while creating those functions. The role must never be granted to the application runtime role.
 - Run Alembic migrations once as a controlled release job using the migration-owner connection.
 - Run `./scripts/bootstrap_runtime_role.sh` as a separate one-shot release/bootstrap task using the migration-owner connection, then verify the runtime role grants. The script removes blanket grants, grants only the reviewed current application-table allowlist (with read-only access to `alembic_version`), grants usage on existing application sequences, and revokes default table/sequence privileges for the migration owner.
 - Every future migration that creates a table or sequence used by the API or email worker must add an explicit runtime grant and a privilege regression test. New objects intentionally receive no implicit runtime access.
