@@ -546,7 +546,7 @@ def list_auth_sessions(
         AuthSession.user_id == user.id,
         AuthSession.revoked_at.is_(None),
         AuthSession.expires_at > datetime.now(timezone.utc),
-    ).order_by(AuthSession.created_at.desc(), AuthSession.id.desc()).all()
+    ).order_by(AuthSession.created_at.desc(), AuthSession.id.desc()).limit(100).all()
     return [
         {
             "id": session.id,
