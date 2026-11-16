@@ -10,7 +10,7 @@ depends_on = None
 
 def upgrade():
     inspector = sa.inspect(op.get_bind())
-    existing = set(inspector.get_indexes("login_attempts"))
+    existing = {item["name"] for item in inspector.get_indexes("login_attempts")}
     if "ix_login_attempts_email_failed_time" not in existing:
         op.create_index(
             "ix_login_attempts_email_failed_time",
