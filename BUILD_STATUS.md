@@ -6,7 +6,7 @@ Last checked: 2026-11-16
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest fully passing CI:** run [43837754285](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43837754285) passed backend, frontend, and Docker on PR #5 head `3fe36c4fa2a6b69edbc28e75d6b3e82d8946119e`. PR #5 is open and unmerged.
+- **Latest fully passing CI:** run [43842528416](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43842528416) passed backend, frontend, and Docker on PR #5 head `5cdaf47fe65a657daf3defdb12b0d10931cb774f`. PR #5 is open and unmerged.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
@@ -30,12 +30,14 @@ Last checked: 2026-11-16
 
 ## Latest CI result
 
-The latest fully successful run is **43837754285** on commit `3fe36c4fa2a6b69edbc28e75d6b3e82d8946119e` (backend, frontend, Docker all passed):
+The latest fully successful run is **43842528416** on commit `5cdaf47fe65a657daf3defdb12b0d10931cb774f` (backend, frontend, Docker all passed):
 - Backend: migrations through `0017_login_throttle_indexes`, restricted runtime-role bootstrap, Python compilation, and pytest — passed.
 - Frontend: dependency advisory report, high-severity npm audit gate, and production build — passed.
 - Docker: operational-script syntax and regression checks, Compose configuration validation, and backend/frontend image builds — passed.
 
 Subsequent changes added tenant-member deactivation, audit and approval-policy administration screens, row-locked idempotent approval-policy deactivation, and regression tests for that operation. PR #5 remains unmerged pending independent review and explicit merge approval.
+
+- Refresh-session logout now row-locks the presented session and revokes its entire token family, closing the concurrent refresh-rotation/logout race; regression coverage is included in the passing run above.
 
 CI validates automated repository checks. It does not provision cloud resources, validate production secrets/IAM policies, prove disaster recovery, or replace an independent security assessment.
 
