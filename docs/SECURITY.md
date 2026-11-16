@@ -9,7 +9,9 @@
 - Invoice creator attribution, maker-checker enforcement (creator cannot approve/reject their own invoice), and SQLAlchemy optimistic version checks on concurrent invoice updates.
 - Tenant-authorized invoice file download from local development storage or a private S3-compatible bucket.
 - ClamAV INSTREAM scanning before storage; scanner unavailability fails closed.
-- Production startup requires S3-compatible storage, a bucket, and a configured malware-scanner host.
+- Production startup requires S3-compatible storage, a bucket, a configured malware-scanner host, a strong runtime database password, and the restricted runtime PostgreSQL role.
+- Persistent login throttling by hashed email/IP identifiers (10 failed attempts per 15-minute window).
+- Tenant-scoped idempotency keys for invoice creation; duplicate same-payload requests replay the original invoice.
 - API runtime role bootstrap separates table ownership/migrations from the non-owner, NOBYPASSRLS application connection.
 - Optional `Idempotency-Key` on invoice creation is unique per tenant; repeating the same key and payload returns the existing invoice, while reusing the key with a different payload returns HTTP 409.
 - Upload extension, size, empty-file, and basic PDF-signature checks; randomized server-side upload names.
