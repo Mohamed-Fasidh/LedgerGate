@@ -88,15 +88,15 @@ def test_every_tenant_table_has_forced_rls_and_tenant_policy():
         with engine.connect() as connection:
             rows = connection.execute(text("""
                 SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
-                       EXISTS (
-                           SELECT 1 FROM pg_policies p
-                           WHERE p.schemaname = current_schema()
-                             AND p.tablename = c.relname
-                             AND p.policyname = 'tenant_isolation'
-                             AND p.cmd = 'ALL'
-                       ) AS has_tenant_policy
+                       p.cmd AS policy_command,
+                       p.qual AS policy_using,
+                       p.with_check AS policy_with_check
                 FROM pg_class c
                 JOIN pg_namespace n ON n.oid = c.relnamespace
+                LEFT JOIN pg_policies p
+                  ON p.schemaname = n.nspname
+                 AND p.tablename = c.relname
+                 AND p.policyname = 'tenant_isolation'
                 WHERE n.nspname = current_schema()
                   AND c.relname = ANY(:table_names)
             """), {"table_names": list(expected_tables)}).mappings().all()
@@ -106,7 +106,12 @@ def test_every_tenant_table_has_forced_rls_and_tenant_policy():
         for table in expected_tables:
             assert actual[table]["relrowsecurity"] is True, f"{table} must enable RLS"
             assert actual[table]["relforcerowsecurity"] is True, f"{table} must FORCE RLS"
-            assert actual[table]["has_tenant_policy"] is True, f"{table} must have tenant_isolation policy"
+            policy = actual[table]
+            assert policy["policy_command"] == "ALL", f"{table} policy must cover all commands"
+            for expression_name in ("policy_using", "policy_with_check"):
+                expression = (policy[expression_name] or "").lower()
+                assert "tenant_id" in expression, f"{table} {expression_name} must constrain tenant_id"
+                assert "current_setting" in expression, f"{table} {expression_name} must use the active tenant context"
     finally:
         engine.dispose()
 
