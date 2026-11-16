@@ -221,3 +221,11 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Added regression tests for the shared throttle response and privacy-preserving attempt records. CI run is pending for these changes.
 
 - API examples now document MFA enrollment/enable/disable requests and the shared throttling behavior. Implementation commits: `d0ef0a58`, `3a1b3274`; tests: `bc1a3ea5`; security and API docs: `4c7e53cd`, `62ffae40`.
+
+
+## MFA disable regression-test correction — 2026-11-16
+
+- Corrected the MFA-disable unit test to invoke the FastAPI endpoint with its actual `request` and `response` parameters.
+- Isolated the persistent sensitive-authentication throttle helpers in this unit test; dedicated tests continue to cover the shared throttle behavior.
+- Commit: `76aae99b8adb2978915ff1d2f042ec73e7a24db4`.
+- A new full CI result for this exact commit is required; no green result is claimed yet.
