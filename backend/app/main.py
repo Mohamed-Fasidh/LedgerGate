@@ -415,30 +415,62 @@ def disable_mfa(
 @app.post("/api/v1/auth/change-password")
 def change_password(
     payload: ChangePasswordIn,
+    request: Request,
     response: Response,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Change the signed-in user's password and invalidate every refresh session."""
+    """Change the signed-in user's password and invalidate active sessions."""
+    # Use the same email/IP lock order and 15-minute failure budget as login.
+    # Acquire these locks before the user row lock to avoid lock-order inversion
+    # with /auth/token, which takes the attempt locks before locking the user.
+    normalized_email = user.email.strip().lower()
+    remote_ip = request.client.host if request.client else "unknown"
+    email_hash = _login_attempt_hash(normalized_email)
+    ip_hash = _login_attempt_hash(remote_ip)
+    now = datetime.now(timezone.utc)
+    _lock_login_attempt_keys(db, email_hash, ip_hash)
+    failed_query = db.query(LoginAttempt).filter(
+        LoginAttempt.succeeded.is_(False),
+        LoginAttempt.attempted_at >= now - timedelta(minutes=15),
+        or_(LoginAttempt.email_hash == email_hash, LoginAttempt.ip_hash == ip_hash),
+    )
+    failures = failed_query.count()
+    if failures >= 10:
+        oldest = failed_query.order_by(LoginAttempt.attempted_at.asc()).first()
+        oldest_at = oldest.attempted_at if oldest else now - timedelta(minutes=15)
+        if oldest_at.tzinfo is None:
+            oldest_at = oldest_at.replace(tzinfo=timezone.utc)
+        retry_after = max(1, 900 - int((now - oldest_at).total_seconds()))
+        db.rollback()
+        raise HTTPException(429, "Too many authentication attempts. Try again later.",
+                             headers={"Retry-After": str(retry_after)})
+
     locked_user = db.query(User).filter(
         User.id == user.id,
         User.tenant_id == user.tenant_id,
         User.is_active.is_(True),
     ).with_for_update().first()
     if locked_user is None:
+        db.rollback()
         raise HTTPException(401, "Account is no longer active")
     if not verify_password(payload.current_password, locked_user.hashed_password):
+        db.add(LoginAttempt(email_hash=email_hash, ip_hash=ip_hash, succeeded=False, attempted_at=now))
+        db.commit()
         raise HTTPException(403, "Current password is incorrect")
     if verify_password(payload.new_password, locked_user.hashed_password):
+        db.rollback()
         raise HTTPException(400, "New password must be different from the current password")
 
     consumed_step = None
     if locked_user.mfa_enabled:
         if not locked_user.mfa_secret_encrypted:
+            db.rollback()
             raise HTTPException(503, "MFA configuration is incomplete")
         try:
             secret = decrypt_totp_secret(locked_user.mfa_secret_encrypted)
         except RuntimeError as exc:
+            db.rollback()
             raise HTTPException(503, str(exc))
         consumed_step = matching_totp_step(
             secret, payload.totp_code, last_used_step=locked_user.mfa_last_used_step
@@ -448,14 +480,16 @@ def change_password(
                 locked_user.mfa_recovery_code_hashes, payload.recovery_code
             )
             if remaining_hashes is None:
+                db.add(LoginAttempt(email_hash=email_hash, ip_hash=ip_hash, succeeded=False, attempted_at=now))
+                db.commit()
                 raise HTTPException(400, "A valid authenticator or unused recovery code is required")
             locked_user.mfa_recovery_code_hashes = remaining_hashes
         else:
             locked_user.mfa_last_used_step = consumed_step
 
     locked_user.hashed_password = hash_password(payload.new_password)
-    now = datetime.now(timezone.utc)
     revoked_count = _revoke_refresh_sessions(db, locked_user.tenant_id, locked_user.id, now)
+    db.add(LoginAttempt(email_hash=email_hash, ip_hash=ip_hash, succeeded=True, attempted_at=now))
     record_event(
         db, locked_user, "user", locked_user.id, "password_changed",
         {"revoked_refresh_sessions": revoked_count, "mfa_verified": locked_user.mfa_enabled},
