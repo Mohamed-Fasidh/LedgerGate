@@ -137,3 +137,76 @@ def test_login_and_registration_reject_untrusted_browser_origins():
     with pytest.raises(HTTPException) as blocked:
         _require_allowed_origin(_csrf_request(origin="https://attacker.example"))
     assert blocked.value.status_code == 403
+
+
+
+def test_logout_locks_session_and_revokes_its_entire_refresh_family(monkeypatch):
+    from datetime import datetime, timezone
+    from fastapi import Response
+    from starlette.requests import Request
+    from app import main
+    from app.models import AuthSession
+    from app.security import create_refresh_token
+    import uuid
+
+    family_id = str(uuid.uuid4())
+    token_id = str(uuid.uuid4())
+    user = User(id=9, tenant_id="tenant-test", role=Role.admin)
+    refresh_token, _ = create_refresh_token(user, token_id, family_id)
+    captured = {"queries": []}
+
+    class Query:
+        def __init__(self):
+            self.conditions = ()
+            self.locked = False
+            captured["queries"].append(self)
+
+        def filter(self, *conditions):
+            self.conditions = conditions
+            return self
+
+        def with_for_update(self):
+            self.locked = True
+            return self
+
+        def first(self):
+            return type("SessionRow", (), {"family_id": family_id, "revoked_at": None})()
+
+        def update(self, values, synchronize_session=False):
+            captured["update"] = values
+            captured["synchronize_session"] = synchronize_session
+            return 1
+
+    class DB:
+        def query(self, model):
+            assert model is AuthSession
+            return Query()
+
+        def commit(self):
+            captured["committed"] = True
+
+    monkeypatch.setattr(main, "set_database_tenant", lambda db, tenant_id: None)
+    request = Request({
+        "type": "http", "http_version": "1.1", "method": "POST",
+        "scheme": "http", "path": "/api/v1/auth/logout",
+        "raw_path": b"/api/v1/auth/logout", "query_string": b"",
+        "headers": [
+            (b"origin", b"http://localhost:3000"),
+            (b"cookie", f"ledgergate_csrf=csrf-test; ledgergate_refresh={refresh_token}".encode()),
+            (b"x-csrf-token", b"csrf-test"),
+        ],
+        "server": ("testserver", 80), "client": ("testclient", 123),
+        "root_path": "",
+    })
+    response = Response()
+
+    result = main.logout(request, response, None, DB())
+
+    assert result == {"status": "logged_out"}
+    assert captured["queries"][0].locked is True
+    family_conditions = [str(condition) for condition in captured["queries"][1].conditions]
+    assert any("auth_sessions.tenant_id" in item for item in family_conditions)
+    assert any("auth_sessions.family_id" in item for item in family_conditions)
+    assert any("auth_sessions.revoked_at" in item for item in family_conditions)
+    assert captured["synchronize_session"] is False
+    assert captured["committed"] is True
