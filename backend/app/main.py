@@ -1152,8 +1152,14 @@ def deactivate_approval_policy(policy_id:int,idempotency_key:str|None=Header(def
     if idempotency_key:
         cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
         if cached is not None: return cached
-    policy=db.query(ApprovalPolicy).filter(ApprovalPolicy.id==policy_id,ApprovalPolicy.tenant_id==user.tenant_id).first()
+    policy=db.query(ApprovalPolicy).filter(ApprovalPolicy.id==policy_id,ApprovalPolicy.tenant_id==user.tenant_id).with_for_update().first()
     if not policy: raise HTTPException(404,"Approval policy not found")
+    if not policy.is_active:
+        response={"id":policy.id,"is_active":False}
+        if idempotency_key:
+            _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
+            db.commit()
+        return response
     policy.is_active=False
     response={"id":policy.id,"is_active":False}
     if idempotency_key:
