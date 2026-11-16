@@ -257,10 +257,62 @@ def upgrade() -> None:
             EXECUTE FUNCTION public.ledgergate_prevent_tenant_reassignment()
         """)
 
+    # Composite unique keys and foreign keys make tenant ownership a native
+    # relational invariant. Unlike trigger-only checks, PostgreSQL's FK
+    # machinery enforces these relationships atomically under concurrency and
+    # also prevents a referenced parent from changing tenant_id.
+    for table in ("users", "suppliers", "purchase_orders", "approval_policies", "invoices"):
+        op.create_unique_constraint(
+            f"uq_{table}_tenant_id_id",
+            table,
+            ["tenant_id", "id"],
+        )
+
+    tenant_foreign_keys = (
+        ("purchase_orders", "fk_purchase_orders_tenant_supplier", ["tenant_id", "supplier_id"], "suppliers", ["tenant_id", "id"]),
+        ("invoices", "fk_invoices_tenant_supplier", ["tenant_id", "supplier_id"], "suppliers", ["tenant_id", "id"]),
+        ("invoices", "fk_invoices_tenant_purchase_order", ["tenant_id", "purchase_order_id"], "purchase_orders", ["tenant_id", "id"]),
+        ("invoices", "fk_invoices_tenant_creator", ["tenant_id", "created_by_user_id"], "users", ["tenant_id", "id"]),
+        ("invoices", "fk_invoices_tenant_approval_policy", ["tenant_id", "approval_policy_id"], "approval_policies", ["tenant_id", "id"]),
+        ("approval_policies", "fk_approval_policies_tenant_creator", ["tenant_id", "created_by_user_id"], "users", ["tenant_id", "id"]),
+        ("invoice_approvals", "fk_invoice_approvals_tenant_invoice", ["tenant_id", "invoice_id"], "invoices", ["tenant_id", "id"]),
+        ("invoice_approvals", "fk_invoice_approvals_tenant_approver", ["tenant_id", "approver_user_id"], "users", ["tenant_id", "id"]),
+        ("invoice_approvals", "fk_invoice_approvals_tenant_policy", ["tenant_id", "policy_id"], "approval_policies", ["tenant_id", "id"]),
+        ("auth_sessions", "fk_auth_sessions_tenant_user", ["tenant_id", "user_id"], "users", ["tenant_id", "id"]),
+        ("password_reset_tokens", "fk_password_reset_tokens_tenant_user", ["tenant_id", "user_id"], "users", ["tenant_id", "id"]),
+        ("email_verification_tokens", "fk_email_verification_tokens_tenant_user", ["tenant_id", "user_id"], "users", ["tenant_id", "id"]),
+    )
+    for source_table, constraint_name, source_columns, target_table, target_columns in tenant_foreign_keys:
+        op.create_foreign_key(
+            constraint_name,
+            source_table,
+            target_table,
+            source_columns,
+            target_columns,
+        )
+
 
 def downgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
+    for table, constraint_name in (
+        ("email_verification_tokens", "fk_email_verification_tokens_tenant_user"),
+        ("password_reset_tokens", "fk_password_reset_tokens_tenant_user"),
+        ("auth_sessions", "fk_auth_sessions_tenant_user"),
+        ("invoice_approvals", "fk_invoice_approvals_tenant_policy"),
+        ("invoice_approvals", "fk_invoice_approvals_tenant_approver"),
+        ("invoice_approvals", "fk_invoice_approvals_tenant_invoice"),
+        ("approval_policies", "fk_approval_policies_tenant_creator"),
+        ("invoices", "fk_invoices_tenant_approval_policy"),
+        ("invoices", "fk_invoices_tenant_creator"),
+        ("invoices", "fk_invoices_tenant_purchase_order"),
+        ("invoices", "fk_invoices_tenant_supplier"),
+        ("purchase_orders", "fk_purchase_orders_tenant_supplier"),
+    ):
+        op.drop_constraint(constraint_name, table, type_="foreignkey")
+    for table in ("invoices", "approval_policies", "purchase_orders", "suppliers", "users"):
+        op.drop_constraint(f"uq_{table}_tenant_id_id", table, type_="unique")
+
     for table in (
         "email_verification_tokens",
         "password_reset_tokens",
