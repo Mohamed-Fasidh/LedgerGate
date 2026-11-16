@@ -60,6 +60,7 @@ def test_audit_export_is_signed_and_written_in_compliance_mode(monkeypatch):
     assert args["Bucket"] == "ledgergate-audit-worm"
     assert args["ObjectLockRetainUntilDate"] > datetime.now(timezone.utc)
     assert document["event_count"] == 1
+    assert document["signing_key_id"] == settings.audit_export_signing_key_id
     assert audit_export.verify_audit_export_signature(document, settings.audit_export_signing_key)
     assert not audit_export.verify_audit_export_signature(document, "different-signing-key-which-is-long-enough")
 
@@ -88,3 +89,18 @@ def test_audit_export_rejects_empty_batch(monkeypatch):
     _settings(monkeypatch)
     with pytest.raises(audit_export.AuditExportUnavailable, match="at least one event"):
         audit_export.store_immutable_audit_export("tenant-a", [])
+
+
+def test_audit_export_signature_detects_payload_tampering(monkeypatch):
+    _settings(monkeypatch)
+    payload = {"tenant_id": "tenant-a", "event_count": 1, "signing_key_id": "test-key-v1"}
+    digest, signature = audit_export.sign_audit_payload(payload, settings.audit_export_signing_key)
+    document = {
+        **payload,
+        "payload_sha256": digest,
+        "signature_algorithm": "HMAC-SHA256",
+        "signature": signature,
+    }
+    assert audit_export.verify_audit_export_signature(document, settings.audit_export_signing_key)
+    document["event_count"] = 2
+    assert not audit_export.verify_audit_export_signature(document, settings.audit_export_signing_key)
