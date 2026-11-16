@@ -254,6 +254,7 @@ class OutboundEmail(Base):
     recipient: Mapped[str] = mapped_column(String(255), nullable=False)
     message_type: Mapped[str] = mapped_column(String(40), nullable=False)
     encrypted_payload: Mapped[str] = mapped_column(Text, nullable=False)
+    token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=12, server_default="12")
