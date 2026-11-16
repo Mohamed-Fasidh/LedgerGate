@@ -18,7 +18,8 @@ from app.database import Base, engine, get_db
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, RefreshIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn
 from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code
-from app.audit import record_event, verify_tenant_chain
+from app.audit import record_event, verify_tenant_chain, event_payload
+from app.services.audit_export import store_immutable_audit_export, AuditExportUnavailable
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
 from app.services.retrieval import retrieve_policy, retrieve_business_records
@@ -1145,3 +1146,64 @@ def verify_audit_events(db:Session=Depends(get_db),user:User=Depends(require_rol
     })
     db.commit()
     return result
+
+
+@app.post("/api/v1/audit-events/export")
+def export_audit_events(
+    after_id: int = 0,
+    batch_size: int = 1000,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin")),
+):
+    """Export a verified audit-chain batch to an S3 Object Lock COMPLIANCE bucket."""
+    if after_id < 0:
+        raise HTTPException(400, "after_id must be zero or greater")
+    if batch_size < 1 or batch_size > 10000:
+        raise HTTPException(400, "batch_size must be between 1 and 10000")
+
+    chain = verify_tenant_chain(db, user.tenant_id)
+    if not chain["valid"]:
+        raise HTTPException(409, "Audit chain verification failed; immutable export refused")
+
+    rows = (
+        db.query(AuditEvent)
+        .filter(AuditEvent.tenant_id == user.tenant_id, AuditEvent.id > after_id)
+        .order_by(AuditEvent.id.asc())
+        .limit(batch_size)
+        .all()
+    )
+    if not rows:
+        return {"status": "no_events", "after_id": after_id, "event_count": 0}
+
+    events = []
+    for event in rows:
+        payload = event_payload(
+            tenant_id=event.tenant_id,
+            actor_user_id=event.actor_user_id,
+            entity_type=event.entity_type,
+            entity_id=event.entity_id,
+            action=event.action,
+            details=event.details,
+            created_at=event.created_at,
+        )
+        events.append({
+            "id": event.id,
+            **payload,
+            "previous_hash": event.previous_hash,
+            "event_hash": event.event_hash,
+        })
+
+    try:
+        exported = store_immutable_audit_export(user.tenant_id, events)
+    except AuditExportUnavailable as exc:
+        raise HTTPException(503, str(exc))
+    record_event(db, user, "audit_export", exported["key"], "immutable_export_created", {
+        "event_count": exported["event_count"],
+        "first_event_id": exported["first_event_id"],
+        "last_event_id": exported["last_event_id"],
+        "payload_sha256": exported["payload_sha256"],
+        "object_lock_mode": exported["object_lock_mode"],
+        "retain_until": exported["retain_until"],
+    })
+    db.commit()
+    return {"status": "exported", **exported, "next_after_id": exported["last_event_id"]}
