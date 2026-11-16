@@ -39,6 +39,7 @@ def _issue_token_pair(db: Session, user: User, family_id: str | None = None):
         tenant_id=user.tenant_id, user_id=user.id, token_id=token_id,
         token_hash=_token_hash(refresh_token), family_id=family, expires_at=expires_at,
     ))
+    db.flush()
     return {"access_token": create_access_token(user), "refresh_token": refresh_token}
 
 
@@ -54,6 +55,7 @@ def register(payload:RegisterIn,db:Session=Depends(get_db)):
     try: db.commit()
     except IntegrityError: db.rollback(); raise HTTPException(409,"Account already exists")
     db.refresh(user)
+    set_database_tenant(db, user.tenant_id)
     tokens=_issue_token_pair(db,user); db.commit(); return tokens
 
 @app.post("/api/v1/auth/token",response_model=TokenOut)
@@ -81,6 +83,7 @@ def login(request:Request,username:str=Form(...),password:str=Form(...),db:Sessi
     db.add(LoginAttempt(email_hash=email_hash,ip_hash=ip_hash,succeeded=authenticated,attempted_at=now))
     db.commit()
     if not authenticated: raise HTTPException(401,"Incorrect email or password")
+    set_database_tenant(db, user.tenant_id)
     tokens=_issue_token_pair(db,user); db.commit(); return tokens
 
 
