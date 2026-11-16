@@ -5,8 +5,8 @@
 - Repository: `Mohamed-Fasidh/LedgerGate`
 - Pull request: [#5 — Production readiness V2](https://github.com/Mohamed-Fasidh/LedgerGate/pull/5)
 - Branch: `hardening/production-readiness-v2`
-- Verified head: `04ffe33851e480fff57c749b5fc0d93e8da36511`
-- GitHub Actions run: [43870540064](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43870540064)
+- Verified head: `659bcac187f570fc2e5cf5a9592ece15f6b5c584`
+- GitHub Actions run: [43872087422](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43872087422)
 - Result: **success** — backend, frontend, and Docker jobs all completed successfully.
 
 ## Checks observed
@@ -16,7 +16,7 @@
 - Alembic migrations, including the idempotent password-reset-token migration
 - Restricted PostgreSQL runtime-role bootstrap
 - Python compileall
-- Full pytest suite, including password-reset token, SMTP STARTTLS, production configuration, and public-route origin-guard tests
+- Full pytest suite (**223 passed**), including duplicate-registration anti-enumeration, email-verification lifecycle, consistent user-then-token lock ordering, password-reset token, SMTP STARTTLS, production configuration, and public-route origin-guard tests
 
 ### Frontend
 - Dependency advisory report
@@ -36,8 +36,8 @@
 - New registrations create an unverified account and send a 48-byte random verification token; only its SHA-256 hash is persisted. Verification tokens expire after 24 hours, are single-use, and are carried in a URL fragment so they are not sent in the HTTP request target or ordinary server access logs.
 - Sign-in is blocked until email verification succeeds. A generic resend endpoint shares the persistent per-email/IP throttle and invalidates prior outstanding verification links. Existing accounts are treated as verified by the migration default to avoid locking out current users.
 - Password reset tokens expire after 30 minutes, are single-use, and a new request invalidates prior outstanding links. Password-reset requests are limited to active, verified accounts.
-- Request responses do not disclose whether an account exists; requests share the existing per-email/IP throttle and email is dispatched after the generic response.
-- Confirmation requires a strong password and, when MFA is enabled, a fresh TOTP or unused recovery code.
+- Registration, verification-resend, and password-reset request responses do not disclose whether an account exists; requests share the existing per-email/IP throttle. Existing unverified accounts can be sent a fresh link without changing the response.
+- Confirmation requires a strong password and, when MFA is enabled, a fresh TOTP or unused recovery code. Confirmations and concurrent resends lock the account row before token rows, avoiding lock-order deadlocks.
 - Completion increments the account access-token version, revokes refresh sessions, clears browser auth cookies, and records an audit event.
 - SMTP delivery uses authenticated STARTTLS on port 587. Production startup requires SMTP host/credentials/from-address and an HTTPS public-app URL.
 - CI validates the implementation and SMTP client behavior; it does not prove delivery through a real provider or mailbox receipt. A durable outbox/retry worker and external delivery monitoring remain production follow-ups.
