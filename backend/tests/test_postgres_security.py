@@ -308,4 +308,6 @@ def test_tenant_reference_migration_covers_all_business_relationship_tables():
     assert "USING ERRCODE = '23503'" in migration
     assert "Existing cross-tenant references must be reconciled" in migration
     assert "LEFT JOIN public.suppliers" in migration
-    assert "LEFT JOIN public.invoice_approvals" not in migration
+    assert "LEFT JOIN public.purchase_orders" in migration
+    assert "LEFT JOIN public.users" in migration
+    assert "LEFT JOIN public.approval_policies" in migration
