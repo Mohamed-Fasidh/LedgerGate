@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from fastapi import HTTPException, Response, BackgroundTasks
+from fastapi import HTTPException, Response
 from starlette.requests import Request
 
 import app.main as main
@@ -61,7 +61,7 @@ def test_password_reset_request_response_does_not_disclose_unknown_account(monke
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
     db = _DB(user=None)
     result = main.request_password_reset(
-        main.PasswordResetRequestIn(email="nobody@example.com"), _request(), BackgroundTasks(), db
+        main.PasswordResetRequestIn(email="nobody@example.com"), _request(), db
     )
     assert result["status"] == "accepted"
     assert "If the account exists" in result["message"]
@@ -71,13 +71,12 @@ def test_password_reset_request_response_does_not_disclose_unknown_account(monke
 def test_password_reset_request_stores_only_hash_and_sends_expiring_link(monkeypatch):
     user = SimpleNamespace(id=7, email="person@example.com", is_active=True, email_verified=True)
     db = _DB(user=user)
-    sent = []
+    queued = []
+    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url: queued.append((email, kind, url)))
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
-    monkeypatch.setattr(main, "send_password_reset_email", lambda email, url: sent.append((email, url)))
     monkeypatch.setattr(settings, "public_app_url", "https://app.example.com")
-    tasks = BackgroundTasks()
     result = main.request_password_reset(
-        main.PasswordResetRequestIn(email="person@example.com"), _request(), tasks, db
+        main.PasswordResetRequestIn(email="person@example.com"), _request(), db
     )
     assert result["status"] == "accepted"
     assert db.commits == 1
@@ -86,11 +85,9 @@ def test_password_reset_request_stores_only_hash_and_sends_expiring_link(monkeyp
     stored = db.added[0]
     assert isinstance(stored, PasswordResetToken)
     assert len(stored.token_hash) == 64
-    assert len(tasks.tasks) == 1
-    tasks.tasks[0].func(*tasks.tasks[0].args, **tasks.tasks[0].kwargs)
-    assert stored.token_hash not in sent[0][1]
-    assert sent[0][0] == user.email
-    assert sent[0][1].startswith("https://app.example.com/#reset_token=")
+    assert queued[0][0:2] == (user.email, "password_reset")
+    assert stored.token_hash not in queued[0][2]
+    assert queued[0][2].startswith("https://app.example.com/#reset_token=")
     assert stored.expires_at - stored.created_at == timedelta(minutes=30)
 
 
@@ -141,6 +138,6 @@ def test_password_reset_request_rejects_untrusted_origin(monkeypatch):
     with pytest.raises(HTTPException) as error:
         main.request_password_reset(
             main.PasswordResetRequestIn(email="person@example.com"),
-            _request(origin="https://attacker.example"), BackgroundTasks(), _DB(),
+            _request(origin="https://attacker.example"), _DB(),
         )
     assert error.value.status_code == 403
