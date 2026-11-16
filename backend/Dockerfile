@@ -7,4 +7,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN mkdir -p /app/uploads
 EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+COPY scripts/ ./scripts/\nRUN chmod 0555 ./scripts/bootstrap_runtime_role.sh\nCMD ["sh", "-c", "alembic upgrade head && ./scripts/bootstrap_runtime_role.sh && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
