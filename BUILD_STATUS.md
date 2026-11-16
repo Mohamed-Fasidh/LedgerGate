@@ -175,3 +175,10 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Added migration `0019_idempotency_cleanup_index` and matching model metadata for the tenant/time/ID index used by bounded idempotency-retention cleanup.
 - Added a regression test that asserts the composite index column order matches the cleanup query's tenant filter and oldest-first ordering.
 - CI run [43847150797](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43847150797) passed all jobs on the previous PR head before this migration. The new migration and test require a fresh full CI pass.
+
+
+## Auth-session query indexes — 2026-11-16
+
+- Added migration `0020_auth_session_query_indexes` for tenant/user active-session listing and tenant/family revocation paths.
+- Added model metadata and regression assertions for both composite index column orders.
+- These indexes complement the existing tenant/expiry cleanup index; the migration must pass the latest backend and full CI workflow before being considered verified.
