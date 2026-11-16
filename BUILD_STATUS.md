@@ -201,3 +201,12 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - GitHub Actions run [43850651897](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43850651897) passed all three jobs on commit `e9f381b4b2792fe806ad8a7506b63b42229210b6`: backend migrations through the current Alembic head, restricted runtime-role bootstrap, Python compilation and pytest; frontend dependency audit and production build; Docker operational-script regression checks, Compose validation, and backend/frontend image builds.
 - This passing run includes migration `0020_auth_session_query_indexes`, the password-change backend endpoint and regression tests, and the frontend account-security password-change form.
 - PR #5 remains open and unmerged. This CI result verifies repository automation only; it does not establish production readiness or replace staging, cloud integration, recovery drills, independent security testing, and operational sign-off.
+
+
+## Password-change abuse protection — 2026-11-16
+
+- Password changes now share the persistent login throttle: 10 failed authentication attempts per email/IP pair within 15 minutes, serialized across PostgreSQL-backed API replicas with the existing advisory locks.
+- Incorrect current-password checks and failed MFA challenges are persisted as failed attempts; successful password changes record a successful attempt in the same transaction as the password update and session revocation.
+- The endpoint acquires email/IP attempt locks before the account row lock, matching login's lock order and avoiding a cross-endpoint lock inversion.
+- Added regression coverage for persisted failed attempts, successful attempt recording, and HTTP 429 throttling with Retry-After.
+- This change is on PR #5 and requires the current full CI run before it is considered verified.
