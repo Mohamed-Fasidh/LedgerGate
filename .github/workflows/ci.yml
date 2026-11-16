@@ -1,9 +1,12 @@
 name: LedgerGate CI
 
 on:
-  # PR checks run once per PR update. Avoid duplicate push + pull_request runs.
+  # Verify pull requests before merge and the exact release commit after merge.
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
