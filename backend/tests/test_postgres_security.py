@@ -17,9 +17,9 @@ def test_rls_blocks_cross_tenant_and_audit_is_append_only():
         db.execute(text("SELECT set_config('app.tenant_id', 'tenant-a', false)"))
         db.execute(text("""
             INSERT INTO audit_events
-              (tenant_id, actor_user_id, entity_type, entity_id, action, details, created_at)
+              (tenant_id, actor_user_id, entity_type, entity_id, action, details, created_at, previous_hash, event_hash)
             VALUES
-              ('tenant-a', NULL, 'test', :event_id, 'created', '{}'::json, now())
+              ('tenant-a', NULL, 'test', :event_id, 'created', '{}'::json, now(), :previous_hash, :event_hash)
         """), {"event_id": event_id})
         db.execute(text("""
             INSERT INTO approval_policies
@@ -34,7 +34,7 @@ def test_rls_blocks_cross_tenant_and_audit_is_append_only():
         db.execute(text("SELECT set_config('app.tenant_id', 'tenant-b', false)"))
         visible = db.execute(
             text("SELECT count(*) FROM audit_events WHERE entity_id=:event_id"),
-            {"event_id": event_id},
+            {"event_id": event_id, "previous_hash": "0" * 64, "event_hash": "a" * 64},
         ).scalar_one()
         assert visible == 0
         policy_visible = db.execute(
