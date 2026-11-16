@@ -55,6 +55,20 @@ curl http://localhost:8000/api/v1/invoices/1/approvals \
 
 
 
+## Tenant member administration
+
+A workspace administrator can create analyst or reviewer accounts with an initial password. This endpoint does not send an email invitation; share the initial credential through a separate secure channel and require the member to change it through your organization's onboarding process before using the account for sensitive work.
+
+```bash
+curl -X POST 'http://localhost:8000/api/v1/users?email=reviewer@example.com' \\
+  -H "Authorization: Bearer $ADMIN_TOKEN" \\
+  -H 'Idempotency-Key: create-reviewer-2026-0001' \\
+  -F 'password=replace-with-a-unique-12-character-or-longer-password' \\
+  -F 'role=reviewer'
+```
+
+Administrators can list workspace members with `GET /api/v1/users`, update an active non-admin member's role with `PATCH /api/v1/users/{user_id}/role` and JSON `{"role":"analyst"}` or `{"role":"reviewer"}`, and deactivate a non-admin member with `POST /api/v1/users/{user_id}/deactivate`. Role changes and deactivation revoke that member's active refresh sessions and write audit events. Administrator accounts are protected from these role/deactivation endpoints; self-deactivation is blocked. Deactivation does not invalidate access tokens already issued, which remain usable until their short expiry.
+
 ## Tenant-wide idempotency
 
 The `Idempotency-Key` namespace is shared by invoice creation, invoice uploads, and the other supported state-changing API operations within each tenant. A key already reserved by a different operation or request returns HTTP 409. Invoice creation and upload retain compatibility with historical invoice records while also reserving new keys in the shared `idempotency_records` table. Migration `0012_unified_invoice_idempotency` backfills historical invoice keys; it deliberately stops with an explicit error if a historical key collides with a key already used by another operation, rather than silently changing either record.
