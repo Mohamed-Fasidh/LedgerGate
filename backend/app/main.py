@@ -51,6 +51,12 @@ def _clear_auth_cookies(response: Response):
     response.delete_cookie(key=CSRF_COOKIE_NAME, path="/", secure=secure, httponly=False, samesite="lax")
 
 
+def _require_allowed_origin(request: Request):
+    origin = request.headers.get("origin")
+    if origin and origin not in settings.cors_origin_list:
+        raise HTTPException(403, "Origin is not allowed")
+
+
 def _require_csrf(request: Request):
     origin = request.headers.get("origin")
     cookie_token = request.cookies.get(CSRF_COOKIE_NAME, "")
@@ -79,7 +85,8 @@ def _issue_token_pair(db: Session, user: User, family_id: str | None = None):
 def health(): return {"status":"ok","service":"ledgergate-api"}
 
 @app.post("/api/v1/auth/register",response_model=TokenOut)
-def register(payload:RegisterIn,response:Response,db:Session=Depends(get_db)):
+def register(payload:RegisterIn,request:Request,response:Response,db:Session=Depends(get_db)):
+    _require_allowed_origin(request)
     tenant_id=str(uuid.uuid4())
     user=User(tenant_id=tenant_id,tenant_name=payload.tenant_name,email=payload.email.lower(),hashed_password=hash_password(payload.password),role=Role.admin)
     db.add(user)
@@ -91,6 +98,7 @@ def register(payload:RegisterIn,response:Response,db:Session=Depends(get_db)):
 
 @app.post("/api/v1/auth/token",response_model=TokenOut)
 def login(request:Request,response:Response,username:str=Form(...),password:str=Form(...),db:Session=Depends(get_db)):
+    _require_allowed_origin(request)
     normalized_email=username.strip().lower()
     email_hash=hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
     remote_ip=request.client.host if request.client else "unknown"
