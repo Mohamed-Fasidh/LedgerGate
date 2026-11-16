@@ -32,8 +32,8 @@ def test_rls_blocks_cross_tenant_and_audit_is_append_only():
             INSERT INTO idempotency_records
               (tenant_id, key, operation, request_hash, response_json, created_at)
             VALUES
-              ('tenant-a', :idem_key, 'supplier.create', :request_hash, '{"id":1,"name":"Tenant A"}'::json, now())
-        """), {"idem_key": f"idem-{event_id}", "request_hash": "a" * 64})
+              ('tenant-a', :idem_key, 'supplier.create', :request_hash, CAST(:response_json AS json), now())
+        """), {"idem_key": f"idem-{event_id}", "request_hash": "a" * 64, "response_json": '{"id":1,"name":"Tenant A"}'})
         db.commit()
 
     with Session() as db:
