@@ -5,18 +5,18 @@
 - Repository: `Mohamed-Fasidh/LedgerGate`
 - Pull request: [#5 — Production readiness V2](https://github.com/Mohamed-Fasidh/LedgerGate/pull/5)
 - Branch: `hardening/production-readiness-v2`
-- Verified head: `659bcac187f570fc2e5cf5a9592ece15f6b5c584`
-- GitHub Actions run: [43872087422](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43872087422)
+- Verified head: `c4b87bdcd1bd4a2f757110c6f6ee9c0e41bcfcba`
+- GitHub Actions run: [43876897116](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43876897116)
 - Result: **success** — backend, frontend, and Docker jobs all completed successfully.
 
 ## Checks observed
 
 ### Backend
 - Dependency installation
-- Alembic migrations, including the idempotent password-reset-token migration
+- Alembic migrations through `0024_email_outbox`, including password-reset tokens, email verification, and the durable outbox
 - Restricted PostgreSQL runtime-role bootstrap
 - Python compileall
-- Full pytest suite (**223 passed**), including duplicate-registration anti-enumeration, email-verification lifecycle, consistent user-then-token lock ordering, password-reset token, SMTP STARTTLS, production configuration, and public-route origin-guard tests
+- Full pytest suite (**235 passed**), including duplicate-registration anti-enumeration, email-verification lifecycle, consistent user-then-token lock ordering, password-reset token, SMTP STARTTLS, production configuration, and public-route origin-guard tests
 
 ### Frontend
 - Dependency advisory report
@@ -27,7 +27,7 @@
 - Operational script validation and workflow-run cleanup safety tests
 - Production API startup and one-shot migration guard
 - PostgreSQL backup publication and restore-drill verification tests
-- Non-root container and service-health checks
+- Non-root container and service-health checks, including the separate email-worker service
 - Docker Compose validation
 - Backend and frontend image builds
 
@@ -42,6 +42,14 @@
 - SMTP delivery uses authenticated STARTTLS on port 587. Production startup requires SMTP host/credentials/from-address and an HTTPS public-app URL.
 - CI validates the implementation and SMTP client behavior; it does not prove delivery through a real provider or mailbox receipt. A durable outbox/retry worker and external delivery monitoring remain production follow-ups.
 
+## Durable account email delivery
+
+- Registration, verification resend, and password-reset request insert the encrypted email payload in the same transaction as the one-time token.
+- The dedicated `email-worker` service claims due rows with PostgreSQL `FOR UPDATE SKIP LOCKED`, recovers five-minute abandoned leases, and retries up to 12 times with exponential backoff capped at one hour.
+- The worker cancels messages whose token has been invalidated or expired. Sent/cancelled payloads are scrubbed immediately; terminal metadata is purged after 30 days (sent/cancelled) or 90 days (dead).
+- The outbox uses a dedicated Fernet encryption key and supports previous-key decryption during rotation. Delivery is at-least-once, not exactly-once.
+- CI validates worker behavior and image/Compose integration. It does not prove delivery through a real SMTP provider or mailbox receipt.
+
 ## Workflow-run cleanup
 
 - The canonical workflow is `.github/workflows/cleanup-unsuccessful-runs.yml`.
@@ -54,4 +62,4 @@
 
 This is automated CI evidence for the exact PR head listed above. It does not establish that a live staging or production environment has been deployed or validated. It does not prove cloud IAM, TLS/WAF, S3 Object Lock, key custody/rotation, backup recovery, monitoring, or external email delivery.
 
-SSO/OIDC, real SMTP provider delivery, durable email retries/outbox, cloud provisioning, staging UAT, and real recovery drills remain outstanding. PR #5 remains open and unmerged. No merge or deployment is performed by this verification record; merge still requires explicit authorization and appropriate independent review.
+SSO/OIDC, real SMTP provider delivery and mailbox verification, production outbox monitoring/alerting, cloud provisioning, staging UAT, and real recovery drills remain outstanding. PR #5 remains open and unmerged. No merge or deployment is performed by this verification record; merge still requires explicit authorization and appropriate independent review.
