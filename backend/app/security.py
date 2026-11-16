@@ -53,6 +53,14 @@ def decode_refresh_token(token: str):
         raise JWTError("Invalid refresh token")
     return payload
 
+def _uses_postgres(db: Session) -> bool:
+    """Identify PostgreSQL sessions while keeping lightweight unit-test doubles usable."""
+    try:
+        return db.get_bind().dialect.name == "postgresql"
+    except (AttributeError, TypeError):
+        return False
+
+
 def set_database_tenant(db: Session, tenant_id: str) -> None:
     """Set transaction-connection tenant context consumed by PostgreSQL RLS policies.
 
@@ -61,7 +69,84 @@ def set_database_tenant(db: Session, tenant_id: str) -> None:
     """
     if not tenant_id or len(tenant_id) > 64:
         raise ValueError("Invalid tenant context")
-    db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, false)"), {"tenant_id": tenant_id})
+    if _uses_postgres(db):
+        db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, false)"), {"tenant_id": tenant_id})
+
+
+def find_user_for_authentication(db: Session, email: str, *, for_update: bool = False) -> User | None:
+    """Resolve an email across tenants through a narrow SECURITY DEFINER lookup.
+
+    The returned tenant is immediately installed as the RLS context before the
+    user row is loaded. Non-PostgreSQL test databases use the ORM fallback.
+    """
+    normalized = email.strip().lower()
+    if db.get_bind().dialect.name == "postgresql":
+        row = db.execute(
+            text("SELECT user_id, tenant_id FROM public.auth_lookup_user(:email)"),
+            {"email": normalized},
+        ).mappings().first()
+        if row is None:
+            return None
+        set_database_tenant(db, row["tenant_id"])
+        query = db.query(User).filter(
+            User.id == row["user_id"],
+            User.tenant_id == row["tenant_id"],
+        )
+    else:
+        query = db.query(User).filter(User.email == normalized)
+    if for_update:
+        query = query.with_for_update()
+    return query.first()
+
+
+def find_user_for_auth_token(
+    db: Session,
+    token_hash: str,
+    token_kind: str,
+    token_model,
+    *,
+    for_update: bool = False,
+) -> User | None:
+    """Resolve a one-time auth token to its tenant using a limited database function."""
+    function_names = {
+        "password_reset": "auth_lookup_password_reset",
+        "email_verification": "auth_lookup_email_verification",
+    }
+    if token_kind not in function_names:
+        raise ValueError("Unsupported authentication token kind")
+
+    if db.get_bind().dialect.name == "postgresql":
+        function_name = function_names[token_kind]
+        row = db.execute(
+            text(f"SELECT user_id, tenant_id FROM public.{function_name}(:token_hash)"),
+            {"token_hash": token_hash},
+        ).mappings().first()
+        if row is None:
+            return None
+        set_database_tenant(db, row["tenant_id"])
+        query = db.query(User).filter(
+            User.id == row["user_id"],
+            User.tenant_id == row["tenant_id"],
+        )
+    else:
+        token = db.query(token_model).filter(token_model.token_hash == token_hash).first()
+        if token is None:
+            return None
+        query = db.query(User).filter(User.id == token.user_id)
+    if for_update:
+        query = query.with_for_update()
+    return query.first()
+
+
+def authentication_email_exists(db: Session, email: str) -> bool:
+    normalized = email.strip().lower()
+    if db.get_bind().dialect.name == "postgresql":
+        return bool(db.execute(
+            text("SELECT public.auth_email_exists(:email)"),
+            {"email": normalized},
+        ).scalar())
+    return db.query(User.id).filter(User.email == normalized).first() is not None
+
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     error = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired credentials", headers={"WWW-Authenticate": "Bearer"})
@@ -72,10 +157,17 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         user_id, tenant = int(payload["sub"]), payload["tenant"]
     except (JWTError, KeyError, ValueError, TypeError):
         raise error
-    user = db.query(User).filter(User.id == user_id, User.tenant_id == tenant, User.is_active.is_(True)).first()
+    try:
+        set_database_tenant(db, tenant)
+    except ValueError:
+        raise error
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.tenant_id == tenant,
+        User.is_active.is_(True),
+    ).first()
     if not user or payload.get("ver", 0) != getattr(user, "auth_token_version", 0):
         raise error
-    set_database_tenant(db, user.tenant_id)
     return user
 
 def require_roles(*roles):
