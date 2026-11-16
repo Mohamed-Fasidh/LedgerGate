@@ -595,6 +595,7 @@ def test_runtime_role_cannot_attach_cross_tenant_invoice_and_approval_references
 def test_runtime_role_cannot_reassign_referenced_supplier_to_another_tenant():
     """Changing a parent tenant must not invalidate existing child references."""
     engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    Session = sessionmaker(bind=engine)
     suffix = uuid.uuid4().hex
     tenant_a = "reassign-a-" + suffix
     tenant_b = "reassign-b-" + suffix
