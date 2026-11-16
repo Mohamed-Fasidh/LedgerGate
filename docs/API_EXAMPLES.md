@@ -140,3 +140,25 @@ Authorization: Bearer <admin-access-token>
 The export contains the event IDs, canonical audit payloads, previous/event hashes, batch boundaries, SHA-256 digest, HMAC-SHA256 signature, and signing-key ID. The object key is deterministic for a given event range and payload digest. Objects are written with server-side encryption and S3 Object Lock `COMPLIANCE` retention. The response includes the exact S3 `version_id` and `next_after_id`; pass `next_after_id` as `after_id` to export the next batch. Keep the version ID with the export inventory so auditors can retrieve the precise locked object version. An export is refused if the tenant's full database hash chain does not verify. Each successful export is itself recorded in the database audit chain after the object write.
 
 The bucket must be created and its IAM policy configured outside the application. Grant the API role `s3:GetBucketVersioning`, `s3:GetBucketObjectLockConfiguration`, `s3:PutObject`, and the provider's required object-retention permission; do not grant object deletion or retention-bypass permissions. Keep the signing key in a secrets manager and back it up separately. Rotating it requires a versioned key-management procedure so older exports remain verifiable.
+
+
+## Tenant administrator: deactivate a workspace member
+
+Only an administrator can deactivate a non-admin member in the same tenant. The endpoint refuses self-deactivation and refuses to deactivate another administrator. It marks the member inactive, revokes all of that member's active refresh sessions, and writes an audit event. The action is not a substitute for a full offboarding workflow (for example, reassignment of outstanding approvals or legal retention review).
+
+```http
+POST /api/v1/users/21/deactivate
+Authorization: Bearer <tenant_admin_access_token>
+```
+
+Example response:
+
+```json
+{
+  "status": "deactivated",
+  "user_id": 21,
+  "revoked_sessions": 2
+}
+```
+
+An already inactive member returns `already_deactivated`. Deactivation is tenant-scoped; a user ID from another workspace returns HTTP 404. Deactivated accounts cannot sign in or refresh sessions.
