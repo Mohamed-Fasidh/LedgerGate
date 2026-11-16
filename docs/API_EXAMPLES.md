@@ -222,3 +222,17 @@ Authorization: Bearer <access_token>
 ```
 
 The session ID is scoped to the authenticated user's tenant and account. Revocation prevents further refresh-token use for that session; already-issued short-lived access tokens remain valid until they expire or the account is deactivated.
+
+
+## Immutable audit export
+
+A workspace administrator can export the next ascending batch of audit events to the configured S3-compatible Object Lock bucket. The API verifies the tenant's complete hash chain first and refuses the export with HTTP 409 if verification fails. Storage/configuration failures return HTTP 503; no local or non-immutable fallback is used.
+
+```bash
+curl -X POST 'http://localhost:8000/api/v1/audit-events/export?after_id=0&batch_size=1000' \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+For a successful export, persist the returned `next_after_id` and use it as `after_id` on the next request. `batch_size` is limited to 1–10,000. A response with `status: "no_events"` means there are no newer events at that cursor. Each successful batch records an `immutable_export_created` audit event containing the object key, version ID, event range, payload digest, Object Lock mode, and retention timestamp. Since that audit event is written after the exported batch, a later batch can include it. The dashboard's **Export next immutable batch** button starts at cursor zero for the current browser session and advances the cursor only after a successful export; retain the returned cursor externally if you need a durable multi-session export process.
+
+This endpoint requires the production audit-export settings, a pre-created versioned Object Lock bucket with COMPLIANCE retention, and appropriately scoped storage credentials. The dashboard does not provision the bucket or keys. A successful API response proves the configured storage adapter accepted the object; separately verify bucket policy, retention, IAM, key custody, and retrieval in the target cloud account.
