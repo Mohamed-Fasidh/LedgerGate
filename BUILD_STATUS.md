@@ -210,3 +210,12 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - The endpoint acquires email/IP attempt locks before the account row lock, matching login's lock order and avoiding a cross-endpoint lock inversion.
 - Added regression coverage for persisted failed attempts, successful attempt recording, and HTTP 429 throttling with Retry-After.
 - This change is on PR #5 and requires the current full CI run before it is considered verified.
+
+
+## MFA brute-force protection — 2026-11-16
+
+- MFA setup (current-password confirmation), TOTP enrollment confirmation, and MFA disablement now share the distributed login/password-change failure budget: 10 failures per email/IP within 15 minutes.
+- Failed password, TOTP, and recovery-code checks are persisted in the existing login-attempt table using keyed HMAC email/IP identifiers; successful sensitive authentication checks are also recorded.
+- PostgreSQL advisory locks are acquired before account row locks, preserving a consistent lock order across login, password change, and MFA state changes.
+- MFA setup now locks the active account row before checking/encrypting the pending secret, preventing concurrent setup requests from silently overwriting enrollment state.
+- Added regression tests for the shared throttle response and privacy-preserving attempt records. CI run is pending for these changes.
