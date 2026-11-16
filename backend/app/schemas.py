@@ -87,3 +87,21 @@ class ChangePasswordIn(BaseModel):
         if len(value.encode("utf-8")) > 72:
             raise ValueError("Password must not exceed 72 UTF-8 bytes")
         return value
+
+
+class PasswordResetRequestIn(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmIn(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+    new_password: str = Field(min_length=12, max_length=72)
+    totp_code: Optional[str] = Field(default=None, min_length=6, max_length=6)
+    recovery_code: Optional[str] = Field(default=None, min_length=24, max_length=32)
+
+    @field_validator("new_password")
+    @classmethod
+    def reset_password_fits_bcrypt_byte_limit(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must not exceed 72 UTF-8 bytes")
+        return value
