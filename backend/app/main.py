@@ -1,4 +1,5 @@
 import uuid, hashlib, tempfile, json
+from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from urllib.parse import quote
@@ -295,14 +296,14 @@ def _validate_approval_steps(steps:list):
         raise HTTPException(400,"Each approval stage must contain one or two distinct roles: admin and/or reviewer")
     return steps
 
-def _approval_ranges_overlap(first_min:float,first_max:float|None,second_min:float,second_max:float|None)->bool:
+def _approval_ranges_overlap(first_min:Decimal,first_max:Decimal|None,second_min:Decimal,second_max:Decimal|None)->bool:
     # Ranges are half-open: [minimum, maximum). Adjacent boundaries do not overlap.
     return (first_max is None or second_min<first_max) and (second_max is None or first_min<second_max)
 
 def _resolve_invoice_approval_plan(db:Session,inv:Invoice,user:User):
     if inv.approval_steps_snapshot:
         return inv.approval_steps_snapshot
-    amount=float(inv.amount or 0)
+    amount=inv.amount if inv.amount is not None else Decimal('0.00')
     policy=db.query(ApprovalPolicy).filter(
         ApprovalPolicy.tenant_id==user.tenant_id,
         ApprovalPolicy.is_active.is_(True),
@@ -338,8 +339,8 @@ def create_approval_policy(payload:ApprovalPolicyIn,db:Session=Depends(get_db),u
         raise HTTPException(400,"max_amount must be greater than min_amount")
     existing=db.query(ApprovalPolicy).filter(ApprovalPolicy.tenant_id==user.tenant_id,ApprovalPolicy.is_active.is_(True)).all()
     for policy in existing:
-        old_min=float(policy.min_amount)
-        old_max=float(policy.max_amount) if policy.max_amount is not None else None
+        old_min=policy.min_amount
+        old_max=policy.max_amount
         overlaps=_approval_ranges_overlap(payload.min_amount,payload.max_amount,old_min,old_max)
         if overlaps:
             raise HTTPException(409,f"Amount range overlaps active policy '{policy.name}'")
