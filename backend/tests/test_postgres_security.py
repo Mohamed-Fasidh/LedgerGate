@@ -328,6 +328,25 @@ def test_tenant_reference_migration_covers_all_business_relationship_tables():
     assert "LEFT JOIN public.purchase_orders" in migration
     assert "LEFT JOIN public.users" in migration
     assert "LEFT JOIN public.approval_policies" in migration
+    # Native composite foreign keys close the concurrency gap that trigger-only
+    # SELECT checks cannot guarantee under simultaneous parent/child writes.
+    for constraint_name in (
+        "fk_purchase_orders_tenant_supplier",
+        "fk_invoices_tenant_supplier",
+        "fk_invoices_tenant_purchase_order",
+        "fk_invoices_tenant_creator",
+        "fk_invoices_tenant_approval_policy",
+        "fk_approval_policies_tenant_creator",
+        "fk_invoice_approvals_tenant_invoice",
+        "fk_invoice_approvals_tenant_approver",
+        "fk_invoice_approvals_tenant_policy",
+        "fk_auth_sessions_tenant_user",
+        "fk_password_reset_tokens_tenant_user",
+        "fk_email_verification_tokens_tenant_user",
+    ):
+        assert constraint_name in migration
+    for parent_table in ("users", "suppliers", "purchase_orders", "approval_policies", "invoices"):
+        assert f"uq_{parent_table}_tenant_id_id" in migration
 
 
 @pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
