@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
-from app.models import OutboundEmail
+from app.models import OutboundEmail, EmailVerificationToken
 from app.services.email_outbox import enqueue_email, process_one, _cipher
 
 
@@ -15,6 +15,7 @@ def db_factory(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "email_outbox_encryption_key", Fernet.generate_key().decode())
     engine = create_engine(f"sqlite:///{tmp_path / 'outbox.db'}")
     OutboundEmail.__table__.create(engine)
+    EmailVerificationToken.__table__.create(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     yield factory
     engine.dispose()
@@ -125,3 +126,21 @@ def test_outbox_decrypts_payload_with_previous_rotation_key(db_factory, monkeypa
     monkeypatch.setattr(settings, "email_outbox_decryption_keys", old_key)
     from app.services.email_outbox import _decrypt_payload
     assert _decrypt_payload(encrypted)["url"].endswith("reset_token=old-key")
+
+
+def test_worker_cancels_message_when_verification_token_was_invalidated(db_factory):
+    with db_factory() as db:
+        row = enqueue_email(
+            db, "person@example.com", "email_verification",
+            "https://app.example.com/#verify_email_token=stale", "a" * 64,
+        )
+        db.flush()
+        row_id = row.id
+        db.commit()
+    delivered = []
+    assert process_one(db_factory, sender=lambda message: delivered.append(message))
+    with db_factory() as db:
+        row = db.get(OutboundEmail, row_id)
+        assert row.status == "cancelled"
+        assert row.locked_at is None
+    assert delivered == []
