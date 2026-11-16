@@ -127,7 +127,7 @@ def matching_totp_step(secret: str, code: str | None, *, now: float | None = Non
 def generate_mfa_recovery_codes(count: int = 10) -> list[str]:
     if count < 1 or count > 20:
         raise ValueError("Recovery-code count must be between 1 and 20")
-    return [secrets.token_hex(6).upper() for _ in range(count)]
+    return [secrets.token_hex(12).upper() for _ in range(count)]
 
 
 def hash_mfa_recovery_code(code: str) -> str:
@@ -137,7 +137,7 @@ def hash_mfa_recovery_code(code: str) -> str:
 
 def consume_mfa_recovery_code(hashes: list[str] | None, code: str | None) -> list[str] | None:
     """Return the remaining hashes when one valid code is consumed, else None."""
-    if not code or not re.fullmatch(r"[A-Fa-f0-9\-\s]{12,20}", code):
+    if not code or not re.fullmatch(r"[A-Fa-f0-9\-\s]{24,32}", code):
         return None
     candidate = hash_mfa_recovery_code(code)
     remaining = list(hashes or [])
