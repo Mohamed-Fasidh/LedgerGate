@@ -74,7 +74,14 @@ The application can verify the tenant audit hash chain and write signed export b
 
 The application code does not create the bucket, establish key custody, or independently prove the cloud administrator's controls.
 
-## 7. Edge security and operations
+## 7. Container runtime hardening
+
+- The API image runs as dedicated UID/GID 10001; its upload directory is created with matching ownership so the local named volume can be initialized for the unprivileged process.
+- The frontend image runs as the unprivileged `node` user.
+- Local Compose defines API and frontend health checks. The frontend waits for the API health check before starting; API health currently confirms that the HTTP process responds, not that every downstream dependency is operational.
+- Keep container images pinned to reviewed base-image digests for controlled production releases, and apply resource limits/read-only root filesystems where compatible with the upload and temporary-file paths.
+
+## 8. Edge security and operations
 
 - TLS everywhere; HSTS and secure response headers at the edge.
 - WAF, request/body limits, rate limiting, DDoS protection, and trusted proxy configuration.
@@ -84,7 +91,7 @@ The application code does not create the bucket, establish key custody, or indep
 - Database backups/PITR and periodic restore drills; object versioning/retention and recovery tests.
 - Incident response contacts, escalation, audit retention policy, privacy/legal review, and operational ownership.
 
-## 8. Pre-production acceptance checklist
+## 9. Pre-production acceptance checklist
 
 - [ ] Current PR changes reviewed and merged; default branch CI green.
 - [ ] Staging environment provisioned and deployed from a pinned commit/image digest.
