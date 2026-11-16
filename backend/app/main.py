@@ -206,6 +206,12 @@ def _record_registration_attempt(db: Session, email: str, remote_ip: str, now: d
     return None
 
 
+def _invalidate_access_tokens(user: User) -> int:
+    """Invalidate all previously issued access tokens for this account."""
+    user.auth_token_version = (getattr(user, "auth_token_version", 0) or 0) + 1
+    return user.auth_token_version
+
+
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -463,6 +469,7 @@ def disable_mfa(
         locked_user.mfa_recovery_code_hashes = remaining_recovery_hashes
     else:
         locked_user.mfa_last_used_step = matched_step
+    _invalidate_access_tokens(locked_user)
     locked_user.mfa_enabled = False
     locked_user.mfa_secret_encrypted = None
     locked_user.mfa_enabled_at = None
@@ -556,6 +563,7 @@ def change_password(
             locked_user.mfa_last_used_step = consumed_step
 
     locked_user.hashed_password = hash_password(payload.new_password)
+    _invalidate_access_tokens(locked_user)
     revoked_count = _revoke_refresh_sessions(db, locked_user.tenant_id, locked_user.id, now)
     db.add(LoginAttempt(email_hash=email_hash, ip_hash=ip_hash, succeeded=True, attempted_at=now))
     record_event(
@@ -739,6 +747,7 @@ def revoke_auth_session(
 @app.post("/api/v1/auth/logout-all")
 def logout_all_sessions(response: Response, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     now = datetime.now(timezone.utc)
+    _invalidate_access_tokens(user)
     revoked_count = _revoke_refresh_sessions(db, user.tenant_id, user.id, now)
     record_event(
         db, user, "auth_session", user.id, "all_refresh_sessions_revoked",
@@ -846,6 +855,7 @@ def update_tenant_user_role(
     if previous_role == payload.role:
         return {"status": "unchanged", "user_id": member.id, "role": previous_role, "revoked_sessions": 0}
     member.role = Role(payload.role)
+    _invalidate_access_tokens(member)
     revoked_count = _revoke_refresh_sessions(
         db, member.tenant_id, member.id, datetime.now(timezone.utc)
     )
@@ -885,6 +895,7 @@ def deactivate_tenant_user(
     if not member.is_active:
         return {"status": "already_deactivated", "user_id": member.id, "revoked_sessions": 0}
     member.is_active = False
+    _invalidate_access_tokens(member)
     now = datetime.now(timezone.utc)
     revoked_count = _revoke_refresh_sessions(db, member.tenant_id, member.id, now)
     record_event(
