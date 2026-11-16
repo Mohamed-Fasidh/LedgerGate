@@ -198,7 +198,9 @@ def download_invoice_file(invoice_id:int,db:Session=Depends(get_db),user:User=De
         raise HTTPException(503,str(exc))
     media_type="application/pdf" if suffix==".pdf" else "text/plain"
     safe_filename=quote(Path(inv.file_name or "invoice-document").name)
-    return StreamingResponse(BytesIO(content),media_type=media_type,headers={"Content-Disposition":f"attachment; filename*=UTF-8''{safe_filename}","X-Content-Type-Options":"nosniff"})
+    record_event(db,user,"invoice",inv.id,"file_downloaded",{"file_name":inv.file_name})
+    db.commit()
+    return StreamingResponse(BytesIO(content),media_type=media_type,headers={"Content-Disposition":f"attachment; filename*=UTF-8''{safe_filename}","X-Content-Type-Options":"nosniff","Cache-Control":"private, no-store"})
 
 @app.post("/api/v1/invoices/{invoice_id}/confirm-extraction")
 def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
