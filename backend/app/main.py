@@ -435,6 +435,14 @@ def refresh_session(request: Request, response: Response, payload: RefreshIn | N
         _clear_auth_cookies(response)
         raise unauthorized
     token_hash = _token_hash(refresh_token)
+    # Lock the account before any refresh-session row. Account lifecycle
+    # operations (MFA disable and tenant-admin deactivation) use this same
+    # user -> sessions lock order before revoking refresh sessions. Without
+    # this lock, a refresh can observe an active user while deactivation is
+    # committing and create a replacement session after the revocation query.
+    user = db.query(User).filter(
+        User.id == user_id, User.tenant_id == tenant_id
+    ).with_for_update().first()
     session = db.query(AuthSession).filter(
         AuthSession.tenant_id == tenant_id,
         AuthSession.user_id == user_id,
@@ -463,10 +471,7 @@ def refresh_session(request: Request, response: Response, payload: RefreshIn | N
         db.commit()
         _clear_auth_cookies(response)
         raise unauthorized
-    user = db.query(User).filter(
-        User.id == user_id, User.tenant_id == tenant_id, User.is_active.is_(True)
-    ).first()
-    if not user:
+    if user is None or not user.is_active:
         session.revoked_at = now
         db.commit()
         _clear_auth_cookies(response)
