@@ -4,9 +4,9 @@ Last checked: 2026-11-16
 
 ## Latest full CI verification — 2026-11-16
 
-- GitHub Actions run [43868511911](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43868511911) completed successfully on PR #5 head `00a1ef2baf1b37f671f155348fc08950986e8275`.
+- GitHub Actions run [43869298071](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43869298071) completed successfully on PR #5 head `186eb4ea5ce06f1e62f320009f0ae830e7764da1`.
 - Backend migrations, restricted runtime-role bootstrap, Python compilation, and the full pytest suite passed. Frontend dependency audit and Next.js production build passed. Docker operational checks, Compose validation, and both image builds passed.
-- Password recovery uses hashed single-use reset tokens with a 30-minute expiry, generic responses, request throttling, optional MFA verification, audit logging, and access/refresh session revocation.
+- Password recovery uses hashed single-use reset tokens with a 30-minute expiry, generic responses, request throttling, optional MFA verification, audit logging, access/refresh session revocation, and URL-fragment tokens so secrets are not sent in HTTP request URLs.
 - SMTP delivery uses authenticated STARTTLS on port 587. Production startup requires SMTP and HTTPS public-app configuration; actual provider delivery and mailbox verification remain external deployment checks.
 - Exactly one workflow-run cleanup schedule is retained: `.github/workflows/cleanup-unsuccessful-runs.yml`, every five minutes. It targets completed failed and cancelled runs only. GitHub Actions scheduled workflows do not support a one-minute cadence.
 - PR #5 remains open and unmerged. This CI result verifies repository automation only; it is not staging or production deployment evidence.
@@ -15,7 +15,7 @@ Last checked: 2026-11-16
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest fully passing CI:** run [43868511911](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43868511911) passed backend, frontend, and Docker on PR #5 head `00a1ef2baf1b37f671f155348fc08950986e8275`. PR #5 is open and unmerged.
+- **Latest fully passing CI:** run [43869298071](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43869298071) passed backend, frontend, and Docker on PR #5 head `186eb4ea5ce06f1e62f320009f0ae830e7764da1`. PR #5 is open and unmerged.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
