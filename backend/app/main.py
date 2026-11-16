@@ -1202,6 +1202,7 @@ def export_audit_events(
         "first_event_id": exported["first_event_id"],
         "last_event_id": exported["last_event_id"],
         "payload_sha256": exported["payload_sha256"],
+        "version_id": exported.get("version_id"),
         "object_lock_mode": exported["object_lock_mode"],
         "retain_until": exported["retain_until"],
     })
