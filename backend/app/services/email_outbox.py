@@ -119,6 +119,7 @@ def process_one(session_factory=SessionLocal, sender=_send, now=None) -> bool:
             ).first() if row.token_hash else True
             if not token:
                 row.status = "cancelled"
+                row.encrypted_payload = ""
                 row.locked_at = None
                 db.commit()
                 return True
@@ -138,6 +139,7 @@ def process_one(session_factory=SessionLocal, sender=_send, now=None) -> bool:
                 row.locked_at = None
                 if row.attempts >= row.max_attempts:
                     row.status = "dead"
+                    row.encrypted_payload = ""
                 else:
                     delay = min(3600, 30 * (2 ** max(0, row.attempts - 1)))
                     row.status = "pending"
@@ -150,6 +152,7 @@ def process_one(session_factory=SessionLocal, sender=_send, now=None) -> bool:
         row = db.query(OutboundEmail).filter(OutboundEmail.id == row_id).with_for_update().first()
         if row is not None and row.status == "sending":
             row.status = "sent"
+            row.encrypted_payload = ""
             row.sent_at = _now()
             row.locked_at = None
             row.last_error = None
@@ -157,10 +160,30 @@ def process_one(session_factory=SessionLocal, sender=_send, now=None) -> bool:
     return True
 
 
+def purge_terminal_messages(session_factory=SessionLocal, now=None) -> int:
+    """Apply bounded retention to terminal records and recipient metadata."""
+    now = now or _now()
+    sent_before = now - timedelta(days=30)
+    dead_before = now - timedelta(days=90)
+    with session_factory() as db:
+        deleted = db.query(OutboundEmail).filter(
+            or_(
+                and_(OutboundEmail.status.in_(("sent", "cancelled")), OutboundEmail.created_at < sent_before),
+                and_(OutboundEmail.status == "dead", OutboundEmail.created_at < dead_before),
+            )
+        ).delete(synchronize_session=False)
+        db.commit()
+        return deleted
+
+
 def run_forever(poll_seconds: float = 2.0):
     logger.info("Account email outbox worker started")
+    last_purge = 0.0
     while True:
         try:
+            if time.monotonic() - last_purge >= 3600:
+                purge_terminal_messages()
+                last_purge = time.monotonic()
             processed = process_one()
             if not processed:
                 time.sleep(poll_seconds)
