@@ -273,3 +273,52 @@ def test_refresh_locks_account_before_session_and_rejects_deactivated_user(monke
     assert all(query.locked for query in captured["queries"])
     assert session_row.revoked_at is not None
     assert captured["committed"] is True
+
+
+def test_access_token_carries_account_version():
+    from app.security import create_access_token
+    from app.config import settings
+
+    user = User(id=9, tenant_id="tenant-test", role=Role.admin)
+    user.auth_token_version = 4
+    claims = jwt.decode(
+        create_access_token(user), settings.jwt_secret_key,
+        algorithms=[settings.jwt_algorithm],
+    )
+    assert claims["ver"] == 4
+
+
+def test_access_token_rejects_after_account_version_changes(monkeypatch):
+    from fastapi import HTTPException
+    from unittest.mock import Mock
+    from app.security import create_access_token, get_current_user
+    import pytest
+
+    user = User(id=9, tenant_id="tenant-test", role=Role.admin)
+    user.auth_token_version = 2
+    token = create_access_token(user)
+    user.auth_token_version = 3
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = user
+    monkeypatch.setattr("app.security.set_database_tenant", lambda db, tenant: None)
+
+    with pytest.raises(HTTPException) as error:
+        get_current_user(token=token, db=db)
+    assert error.value.status_code == 401
+
+
+def test_legacy_access_token_without_version_defaults_to_zero(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import Mock
+    from app.security import get_current_user
+
+    user = User(id=9, tenant_id="tenant-test", role=Role.admin)
+    user.auth_token_version = 0
+    token = jwt.encode({
+        "sub": "9", "tenant": "tenant-test", "role": "admin",
+        "token_type": "access", "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+    }, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    db = Mock()
+    db.query.return_value.filter.return_value.first.return_value = user
+    monkeypatch.setattr("app.security.set_database_tenant", lambda db, tenant: None)
+    assert get_current_user(token=token, db=db) is user
