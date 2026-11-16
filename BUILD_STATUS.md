@@ -159,3 +159,12 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Existing invoice, member, and audit pagination remains in place. KPI labels describe page-scoped counts rather than implying tenant-wide totals.
 - Latest complete CI before this selector change: [43846321589](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43846321589) passed backend migrations, restricted runtime-role bootstrap, compileall, pytest, frontend dependency audit/build, Docker operational checks, Compose validation, and both image builds.
 - The selector pagination commit requires its own complete CI run before verification.
+
+
+## Tenant pagination query indexes — 2026-11-16
+
+- Added migration `0018_tenant_pagination_indexes` for composite indexes supporting tenant-scoped ordering on users, suppliers, purchase orders, invoices, audit events, and approval policies.
+- Invoice status-filtered pagination has a matching tenant/status/created-time index; audit history has both timestamp-ordered listing and ID-ordered export indexes.
+- Added matching SQLAlchemy model metadata and regression assertions that verify the composite indexes are declared.
+- Supplier and purchase-order dropdowns now page through 100 records with Previous/Next controls.
+- CI run [43846321589](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43846321589) passed all three jobs before the supplier/PO selector and index changes. The latest migration and index changes require their own complete CI pass.
