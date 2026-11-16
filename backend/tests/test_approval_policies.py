@@ -121,3 +121,32 @@ def test_invoice_reconciliation_is_limited_to_admin_and_analyst_roles():
     with pytest.raises(HTTPException) as exc:
         authorize(user=SimpleNamespace(role=Role.reviewer))
     assert exc.value.status_code == 403
+
+
+def test_approval_policy_mutation_lock_is_tenant_scoped_on_postgres():
+    from types import SimpleNamespace
+    import app.main as main
+
+    captured = {}
+    class DB:
+        bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+        def execute(self, statement, params):
+            captured["sql"] = str(statement)
+            captured["params"] = params
+
+    main._lock_approval_policy_ranges(DB(), "tenant-secure")
+    assert "pg_advisory_xact_lock" in captured["sql"]
+    assert "approval_policy_ranges" in captured["sql"]
+    assert captured["params"] == {"tenant_id": "tenant-secure"}
+
+
+def test_approval_policy_mutation_lock_is_skipped_for_non_postgres():
+    from types import SimpleNamespace
+    import app.main as main
+
+    class DB:
+        bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+        def execute(self, *args, **kwargs):
+            pytest.fail("PostgreSQL advisory locks must not run on SQLite")
+
+    main._lock_approval_policy_ranges(DB(), "tenant-secure")
