@@ -431,3 +431,156 @@ def test_runtime_role_cannot_attach_another_tenants_user_to_identity_records():
                     {"ids": ids},
                 )
         engine.dispose()
+
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_runtime_role_cannot_attach_cross_tenant_invoice_and_approval_references():
+    """Invoice and approval foreign keys must stay inside the row's tenant."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    Session = sessionmaker(bind=engine)
+    suffix = uuid.uuid4().hex
+    tenant_a = "invoice-reference-a-" + suffix
+    tenant_b = "invoice-reference-b-" + suffix
+    user_ids = {}
+    supplier_ids = {}
+    po_ids = {}
+    policy_ids = {}
+    invoice_ids = {}
+
+    try:
+        with engine.begin() as admin:
+            for key, tenant in (("a", tenant_a), ("b", tenant_b)):
+                user_ids[key] = admin.execute(text("""
+                    INSERT INTO public.users
+                        (tenant_id, tenant_name, email, hashed_password, role,
+                         is_active, email_verified, created_at)
+                    VALUES (:tenant, 'Reference Test', :email,
+                            'not-a-real-password-hash', 'analyst', true, true, now())
+                    RETURNING id
+                """), {"tenant": tenant, "email": f"invoice-ref-{key}-{suffix}@example.invalid"}).scalar_one()
+
+                supplier_ids[key] = admin.execute(text("""
+                    INSERT INTO public.suppliers (tenant_id, name, tax_id, created_at)
+                    VALUES (:tenant, :name, NULL, now())
+                    RETURNING id
+                """), {"tenant": tenant, "name": f"invoice-ref-{key}-{suffix}"}).scalar_one()
+
+                po_ids[key] = admin.execute(text("""
+                    INSERT INTO public.purchase_orders
+                        (tenant_id, po_number, supplier_id, currency, total_amount, description, created_at)
+                    VALUES (:tenant, :number, :supplier_id, 'INR', 100.00, NULL, now())
+                    RETURNING id
+                """), {
+                    "tenant": tenant, "number": f"PO-{key}-{suffix}",
+                    "supplier_id": supplier_ids[key],
+                }).scalar_one()
+
+                policy_ids[key] = admin.execute(text("""
+                    INSERT INTO public.approval_policies
+                        (tenant_id, name, min_amount, max_amount, approval_steps,
+                         is_active, created_by_user_id, created_at)
+                    VALUES (:tenant, :name, 0, NULL, '[]'::json, true, :user_id, now())
+                    RETURNING id
+                """), {
+                    "tenant": tenant, "name": f"Policy-{key}-{suffix}",
+                    "user_id": user_ids[key],
+                }).scalar_one()
+
+                invoice_ids[key] = admin.execute(text("""
+                    INSERT INTO public.invoices
+                        (tenant_id, created_by_user_id, invoice_number, supplier_id,
+                         purchase_order_id, currency, amount, invoice_date, status,
+                         extraction_fields, reconciliation, created_at, approval_policy_id)
+                    VALUES (:tenant, :user_id, :number, :supplier_id,
+                            :po_id, 'INR', 100.00, '2026-01-01', 'received',
+                            '{}'::json, '{}'::json, now(), :policy_id)
+                    RETURNING id
+                """), {
+                    "tenant": tenant, "user_id": user_ids[key],
+                    "number": f"INV-{key}-{suffix}", "supplier_id": supplier_ids[key],
+                    "po_id": po_ids[key], "policy_id": policy_ids[key],
+                }).scalar_one()
+
+        invalid_invoice_references = (
+            (supplier_ids["b"], user_ids["a"], po_ids["a"], policy_ids["a"]),
+            (supplier_ids["a"], user_ids["a"], po_ids["b"], policy_ids["a"]),
+            (supplier_ids["a"], user_ids["b"], po_ids["a"], policy_ids["a"]),
+            (supplier_ids["a"], user_ids["a"], po_ids["a"], policy_ids["b"]),
+        )
+        for index, (supplier_id, creator_id, po_id, policy_id) in enumerate(invalid_invoice_references):
+            with Session() as runtime:
+                runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+                runtime.execute(text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": tenant_a})
+                with pytest.raises(Exception, match="cross-tenant or missing"):
+                    runtime.execute(text("""
+                        INSERT INTO public.invoices
+                            (tenant_id, created_by_user_id, invoice_number, supplier_id,
+                             purchase_order_id, currency, amount, invoice_date, status,
+                             extraction_fields, reconciliation, created_at, approval_policy_id)
+                        VALUES (:tenant, :user_id, :number, :supplier_id,
+                                :po_id, 'INR', 100.00, '2026-01-01', 'received',
+                                '{}'::json, '{}'::json, now(), :policy_id)
+                    """), {
+                        "tenant": tenant_a, "user_id": creator_id,
+                        "number": f"INVALID-{index}-{suffix}", "supplier_id": supplier_id,
+                        "po_id": po_id, "policy_id": policy_id,
+                    })
+                runtime.rollback()
+
+        invalid_approval_references = (
+            (invoice_ids["b"], user_ids["a"], policy_ids["a"]),
+            (invoice_ids["a"], user_ids["b"], policy_ids["a"]),
+            (invoice_ids["a"], user_ids["a"], policy_ids["b"]),
+        )
+        for invoice_id, approver_id, policy_id in invalid_approval_references:
+            with Session() as runtime:
+                runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+                runtime.execute(text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": tenant_a})
+                with pytest.raises(Exception, match="cross-tenant or missing"):
+                    runtime.execute(text("""
+                        INSERT INTO public.invoice_approvals
+                            (tenant_id, invoice_id, policy_id, stage, approver_user_id,
+                             decision, comment, created_at)
+                        VALUES (:tenant, :invoice_id, :policy_id, 1, :approver_id,
+                                'approved', NULL, now())
+                    """), {
+                        "tenant": tenant_a, "invoice_id": invoice_id,
+                        "policy_id": policy_id, "approver_id": approver_id,
+                    })
+                runtime.rollback()
+
+        with Session() as runtime:
+            runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            runtime.execute(text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": tenant_a})
+            runtime.execute(text("""
+                INSERT INTO public.invoice_approvals
+                    (tenant_id, invoice_id, policy_id, stage, approver_user_id,
+                     decision, comment, created_at)
+                VALUES (:tenant, :invoice_id, :policy_id, 1, :approver_id,
+                        'approved', NULL, now())
+            """), {
+                "tenant": tenant_a, "invoice_id": invoice_ids["a"],
+                "policy_id": policy_ids["a"], "approver_id": user_ids["a"],
+            })
+            runtime.commit()
+    finally:
+        with engine.begin() as admin:
+            if invoice_ids:
+                admin.execute(text("DELETE FROM public.invoice_approvals WHERE invoice_id = ANY(:ids)"),
+                              {"ids": list(invoice_ids.values())})
+                admin.execute(text("DELETE FROM public.invoices WHERE id = ANY(:ids)"),
+                              {"ids": list(invoice_ids.values())})
+            if po_ids:
+                admin.execute(text("DELETE FROM public.purchase_orders WHERE id = ANY(:ids)"),
+                              {"ids": list(po_ids.values())})
+            if policy_ids:
+                admin.execute(text("DELETE FROM public.approval_policies WHERE id = ANY(:ids)"),
+                              {"ids": list(policy_ids.values())})
+            if supplier_ids:
+                admin.execute(text("DELETE FROM public.suppliers WHERE id = ANY(:ids)"),
+                              {"ids": list(supplier_ids.values())})
+            if user_ids:
+                admin.execute(text("DELETE FROM public.users WHERE id = ANY(:ids)"),
+                              {"ids": list(user_ids.values())})
+        engine.dispose()
