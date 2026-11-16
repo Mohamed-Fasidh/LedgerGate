@@ -1,3 +1,10 @@
+import base64
+import hashlib
+import hmac
+import re
+import struct
+import time
+from cryptography.fernet import Fernet, InvalidToken
 from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from passlib.context import CryptContext
@@ -67,3 +74,50 @@ def require_roles(*roles):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return user
     return checker
+
+
+def _mfa_fernet() -> Fernet:
+    key = settings.mfa_encryption_key.strip()
+    if not key:
+        raise RuntimeError("MFA_ENCRYPTION_KEY must be configured before enabling MFA")
+    try:
+        return Fernet(key.encode("ascii"))
+    except (ValueError, UnicodeEncodeError) as exc:
+        raise RuntimeError("MFA_ENCRYPTION_KEY must be a valid Fernet key") from exc
+
+
+def generate_totp_secret() -> str:
+    return base64.b32encode(__import__("secrets").token_bytes(20)).decode("ascii").rstrip("=")
+
+
+def encrypt_totp_secret(secret: str) -> str:
+    return _mfa_fernet().encrypt(secret.encode("ascii")).decode("ascii")
+
+
+def decrypt_totp_secret(encrypted_secret: str) -> str:
+    try:
+        return _mfa_fernet().decrypt(encrypted_secret.encode("ascii")).decode("ascii")
+    except (InvalidToken, ValueError, UnicodeEncodeError) as exc:
+        raise RuntimeError("Stored MFA secret cannot be decrypted; verify MFA_ENCRYPTION_KEY") from exc
+
+
+def matching_totp_step(secret: str, code: str | None, *, now: float | None = None, last_used_step: int | None = None) -> int | None:
+    """Return the matching RFC 6238 time-step, rejecting replayed steps."""
+    if not code or not re.fullmatch(r"[0-9]{6}", code):
+        return None
+    normalized = secret.strip().upper()
+    try:
+        key = base64.b32decode(normalized + "=" * ((8 - len(normalized) % 8) % 8), casefold=True)
+    except (ValueError, TypeError):
+        return None
+    current_step = int((time.time() if now is None else now) // 30)
+    for step in range(current_step - 1, current_step + 2):
+        if last_used_step is not None and step <= last_used_step:
+            continue
+        digest = hmac.new(key, struct.pack(">Q", step), hashlib.sha1).digest()
+        offset = digest[-1] & 0x0F
+        binary = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF
+        expected = f"{binary % 1_000_000:06d}"
+        if hmac.compare_digest(expected, code):
+            return step
+    return None
