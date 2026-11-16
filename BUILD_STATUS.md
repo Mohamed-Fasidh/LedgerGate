@@ -248,3 +248,11 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - The cleanup workflow is on PR #5's branch and will not become active on `main` until the PR is merged. The latest fully successful CI run before this workflow change is [43856458704](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43856458704); the current head requires a fresh CI result.
 
 - Replaced the obsolete workflow path that was removed from `main` with the new `.github/workflows/cleanup-failed-runs.yml` path so the cleanup automation can be reviewed and merged without restoring the deleted file.
+
+## Workflow cleanup implementation detail — 2026-11-16
+
+- The scheduled workflow now delegates deletion to `scripts/cleanup_workflow_runs.sh`, using the runner's `GH_TOKEN` and GitHub CLI pagination across completed workflow runs.
+- The script selects only `failure` and `cancelled` conclusions; successful and in-progress runs are excluded.
+- Added the cleanup script to the Docker job's `bash -n` validation in `.github/workflows/ci.yml`.
+- GitHub Actions schedule remains every five minutes (one-minute schedules are unsupported).
+- The latest full CI success recorded above predates this workflow/script change; the current branch head must pass CI before this automation is considered verified.
