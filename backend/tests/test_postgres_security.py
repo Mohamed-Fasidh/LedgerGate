@@ -154,3 +154,50 @@ def test_runtime_role_cannot_insert_or_move_rows_into_another_tenant():
             db.rollback()
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_runtime_role_has_delete_only_for_explicit_cleanup_tables():
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    try:
+        with engine.connect() as connection:
+            denied_tables = (
+                "users",
+                "suppliers",
+                "purchase_orders",
+                "invoices",
+                "approval_policies",
+                "invoice_approvals",
+                "audit_events",
+                "password_reset_tokens",
+            )
+            allowed_cleanup_tables = (
+                "registration_attempts",
+                "login_attempts",
+                "email_verification_tokens",
+                "auth_sessions",
+                "idempotency_records",
+                "outbound_emails",
+            )
+            for table in denied_tables:
+                allowed = connection.execute(
+                    text("SELECT has_table_privilege('ledgergate_runtime', :table_name, 'DELETE')"),
+                    {"table_name": f"public.{table}"},
+                ).scalar_one()
+                assert allowed is False, f"ledgergate_runtime must not DELETE from {table}"
+
+            for table in allowed_cleanup_tables:
+                allowed = connection.execute(
+                    text("SELECT has_table_privilege('ledgergate_runtime', :table_name, 'DELETE')"),
+                    {"table_name": f"public.{table}"},
+                ).scalar_one()
+                assert allowed is True, f"ledgergate_runtime needs bounded cleanup DELETE on {table}"
+
+            for privilege in ("UPDATE", "DELETE"):
+                allowed = connection.execute(
+                    text("SELECT has_table_privilege('ledgergate_runtime', 'public.audit_events', :privilege)"),
+                    {"privilege": privilege},
+                ).scalar_one()
+                assert allowed is False, f"ledgergate_runtime must not {privilege} immutable audit events"
+    finally:
+        engine.dispose()
