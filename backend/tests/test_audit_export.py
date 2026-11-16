@@ -108,3 +108,113 @@ def test_audit_export_signature_detects_payload_tampering(monkeypatch):
     assert audit_export.verify_audit_export_signature(document, settings.audit_export_signing_key)
     document["event_count"] = 2
     assert not audit_export.verify_audit_export_signature(document, settings.audit_export_signing_key)
+
+
+def test_audit_export_endpoint_uses_tenant_cursor_and_records_export(monkeypatch):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    import app.main as main
+    from app.models import AuditEvent, Role
+
+    event = SimpleNamespace(
+        id=12,
+        tenant_id="tenant-a",
+        actor_user_id=7,
+        entity_type="invoice",
+        entity_id="99",
+        action="created",
+        details={"amount": "12.00"},
+        created_at=datetime(2026, 11, 16, tzinfo=timezone.utc),
+        previous_hash="0" * 64,
+        event_hash="a" * 64,
+    )
+    captured = {"filters": [], "events": [], "committed": False, "stored": []}
+
+    class Query:
+        def filter(self, *conditions):
+            captured["filters"].extend(str(condition) for condition in conditions)
+            return self
+
+        def order_by(self, *args):
+            return self
+
+        def limit(self, value):
+            captured["limit"] = value
+            return self
+
+        def all(self):
+            return [event]
+
+    class DB:
+        def query(self, model):
+            assert model is AuditEvent
+            return Query()
+
+        def commit(self):
+            captured["committed"] = True
+
+    monkeypatch.setattr(main, "verify_tenant_chain", lambda db, tenant_id: {
+        "valid": True, "verified_events": 12, "head_hash": "a" * 64,
+    })
+
+    def store(tenant_id, events):
+        captured["stored"].append((tenant_id, events))
+        return {
+            "key": "tenants/tenant-a/audit-exports/12-12.json",
+            "event_count": 1,
+            "first_event_id": 12,
+            "last_event_id": 12,
+            "payload_sha256": "b" * 64,
+            "version_id": "version-123",
+            "object_lock_mode": "COMPLIANCE",
+            "retain_until": "2033-11-16T00:00:00+00:00",
+        }
+
+    monkeypatch.setattr(main, "store_immutable_audit_export", store)
+    monkeypatch.setattr(main, "record_event", lambda *args: captured["events"].append(args))
+    actor = SimpleNamespace(id=7, tenant_id="tenant-a", role=Role.admin)
+
+    result = main.export_audit_events(after_id=11, batch_size=25, db=DB(), user=actor)
+
+    assert result["status"] == "exported"
+    assert result["next_after_id"] == 12
+    assert result["version_id"] == "version-123"
+    assert captured["limit"] == 25
+    assert any("audit_events.tenant_id" in item for item in captured["filters"])
+    assert any("audit_events.id > 11" in item for item in captured["filters"])
+    assert captured["stored"][0][0] == "tenant-a"
+    assert captured["stored"][0][1][0]["id"] == 12
+    assert captured["events"][0][4] == "immutable_export_created"
+    assert captured["committed"] is True
+
+
+def test_audit_export_endpoint_refuses_corrupt_chain_before_storage(monkeypatch):
+    from fastapi import HTTPException
+    from types import SimpleNamespace
+
+    import app.main as main
+    from app.models import Role
+
+    captured = {"stored": False, "queried": False}
+
+    class DB:
+        def query(self, model):
+            captured["queried"] = True
+            raise AssertionError("No audit rows should be read after chain verification fails")
+
+    monkeypatch.setattr(main, "verify_tenant_chain", lambda db, tenant_id: {
+        "valid": False, "verified_events": 3, "failed_event_id": 4,
+        "reason": "event_hash_mismatch",
+    })
+    monkeypatch.setattr(
+        main, "store_immutable_audit_export",
+        lambda *args: captured.update(stored=True),
+    )
+    actor = SimpleNamespace(id=7, tenant_id="tenant-a", role=Role.admin)
+
+    with pytest.raises(HTTPException) as exc:
+        main.export_audit_events(after_id=0, batch_size=100, db=DB(), user=actor)
+
+    assert exc.value.status_code == 409
+    assert captured == {"stored": False, "queried": False}
