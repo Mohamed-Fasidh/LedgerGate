@@ -145,7 +145,7 @@ def create_invoice(payload:InvoiceIn,idempotency_key:str|None=Header(default=Non
             return invoice_view(existing)
     if payload.supplier_id and not db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Supplier not found")
     if payload.purchase_order_id:
-        po=db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,Supplier.tenant_id==user.tenant_id).first()
+        po=db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first()
         if not po: raise HTTPException(404,"Purchase order not found")
     obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,idempotency_key=idempotency_key,idempotency_operation="create" if idempotency_key else None,idempotency_request_hash=fingerprint if idempotency_key else None,**payload_data)
     db.add(obj)
