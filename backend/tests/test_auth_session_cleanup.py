@@ -314,6 +314,9 @@ def test_user_session_listing_is_tenant_scoped_and_minimal():
             return self
         def order_by(self, *columns):
             return self
+        def limit(self, value):
+            captured["limit"] = value
+            return self
         def all(self):
             return [session]
 
@@ -324,6 +327,7 @@ def test_user_session_listing_is_tenant_scoped_and_minimal():
 
     actor = SimpleNamespace(id=7, tenant_id="tenant-a")
     result = main.list_auth_sessions(db=DB(), user=actor)
+    assert captured["limit"] == 100
     assert result == [{
         "id": 8,
         "created_at": "2026-11-15T00:00:00+00:00",
