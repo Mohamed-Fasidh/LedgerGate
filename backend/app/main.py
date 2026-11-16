@@ -18,7 +18,7 @@ from app.database import Base, engine, get_db
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, RefreshIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn
 from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code
-from app.audit import record_event, verify_tenant_chain, event_payload
+from app.audit import record_event, verify_tenant_chain, event_payload, lock_tenant_audit_chain
 from app.services.audit_export import store_immutable_audit_export, AuditExportUnavailable
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
@@ -1434,6 +1434,10 @@ def export_audit_events(
     if batch_size < 1 or batch_size > 10000:
         raise HTTPException(400, "batch_size must be between 1 and 10000")
 
+    # Take the same transaction-scoped lock as audit writers before reading
+    # the chain head. This prevents a delayed commit with a lower global ID
+    # from appearing behind an already-exported cursor.
+    lock_tenant_audit_chain(db, user.tenant_id)
     chain = verify_tenant_chain(db, user.tenant_id)
     if not chain["valid"]:
         raise HTTPException(409, "Audit chain verification failed; immutable export refused")
