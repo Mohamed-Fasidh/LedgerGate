@@ -295,3 +295,14 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 
 - Added route-level AST coverage to prevent sensitive account lifecycle handlers from omitting access-token invalidation; expanded endpoint tests for MFA disablement and logout-all.
 - CI run 43859647111 passed backend, frontend, and Docker for the implementation commit before these final regression-test additions; the newest commit has its own CI run pending.
+
+
+## Latest full CI verification — 2026-11-16 (continued)
+
+- GitHub Actions run [43860322756](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43860322756) completed successfully on PR #5 head `7d682fa6ac286dcb350b17c501152f083f5e0131`.
+- Backend passed: dependency installation, Alembic migrations, restricted PostgreSQL runtime-role bootstrap, Python compilation, and the complete pytest suite.
+- Frontend passed: dependency advisory reporting, high-severity dependency audit enforcement, and Next.js production build.
+- Docker passed: operational-script validation, workflow cleanup safety tests, production startup/migration guards, PostgreSQL backup/restore checks, non-root/service-health checks, Compose validation, and backend/frontend image builds.
+- Added `docs/CI_VERIFICATION_2026-11-16.md` to preserve the exact revision, run URL, checks, and production release boundary.
+- This result verifies automated CI only; it does not establish staging or production deployment, cloud security configuration, external email delivery, independent security review, or operational acceptance.
+- PR #5 remains open and unmerged. Workflow cleanup remains branch-only until a separately authorized merge.
