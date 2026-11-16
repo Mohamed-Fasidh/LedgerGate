@@ -37,7 +37,8 @@ def verify_audit_export_signature(document: dict, signing_key: str) -> bool:
     payload = {key: value for key, value in document.items() if key not in ("signature", "payload_sha256", "signature_algorithm")}
     expected_digest, expected_signature = sign_audit_payload(payload, signing_key)
     return (
-        isinstance(signature, str)
+        document.get("signature_algorithm") == "HMAC-SHA256"
+        and isinstance(signature, str)
         and isinstance(digest, str)
         and hmac.compare_digest(digest, expected_digest)
         and hmac.compare_digest(signature, expected_signature)
@@ -98,10 +99,10 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
     body = canonical_json(document)
     key = (
         f"tenants/{tenant_id}/audit-exports/"
-        f"{events[0]['id']}-{events[-1]['id']}-{digest[:16]}.json"
+        f"{events[0]['id']}-{events[-1]['id']}.json"
     )
     try:
-        client.put_object(
+        put_response = client.put_object(
             Bucket=bucket,
             Key=key,
             Body=body,
@@ -122,6 +123,7 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
     return {
         "bucket": bucket,
         "key": key,
+        "version_id": put_response.get("VersionId"),
         "object_uri": f"s3://{bucket}/{key}",
         "payload_sha256": digest,
         "signature": signature,
