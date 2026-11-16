@@ -16,7 +16,14 @@ stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 final="$backup_dir/ledgergate-$stamp.dump"
 tmp="$final.partial"
 checksum_tmp="$final.sha256.partial"
-trap 'rm -f "$tmp" "$checksum_tmp"' EXIT
+published=0
+cleanup() {
+  rm -f "$tmp" "$checksum_tmp"
+  if [[ "$published" != "1" ]]; then
+    rm -f "$final" "$final.sha256"
+  fi
+}
+trap cleanup EXIT
 
 docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner --no-acl' > "$tmp"
 [[ -s "$tmp" ]] || { echo "Backup output is empty" >&2; exit 1; }
@@ -25,9 +32,11 @@ docker compose exec -T db pg_restore --list - < "$tmp" >/dev/null
 mv "$tmp" "$final"
 (
   cd "$(dirname "$final")"
-  sha256sum "$(basename "$final")" > "$(basename "$final").sha256"
+  sha256sum "$(basename "$final")" > "$(basename "$checksum_tmp")"
 )
-chmod 600 "$final" "$final.sha256"
+chmod 600 "$final" "$checksum_tmp"
+mv "$checksum_tmp" "$final.sha256"
+published=1
 
 # Retention only removes completed LedgerGate dumps and their checksum files.
 find "$backup_dir" -maxdepth 1 -type f -name 'ledgergate-*.dump' -mtime "+$retention_days" -print0 |
