@@ -1,5 +1,6 @@
 import os
 import uuid
+import hashlib
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -34,7 +35,7 @@ def test_rls_blocks_cross_tenant_and_audit_is_append_only():
         db.execute(text("SELECT set_config('app.tenant_id', 'tenant-b', false)"))
         visible = db.execute(
             text("SELECT count(*) FROM audit_events WHERE entity_id=:event_id"),
-            {"event_id": event_id, "previous_hash": "0" * 64, "event_hash": "a" * 64},
+            {"event_id": event_id, "previous_hash": "0" * 64, "event_hash": hashlib.sha256(event_id.encode()).hexdigest()},
         ).scalar_one()
         assert visible == 0
         policy_visible = db.execute(
