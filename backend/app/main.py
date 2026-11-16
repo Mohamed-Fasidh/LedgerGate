@@ -138,14 +138,15 @@ def login(
             matched_step = None
         authenticated = matched_step is not None
 
+    if authenticated and matched_step is not None:
+        # Persist the consumed TOTP step in the same transaction as the
+        # login-attempt record while the user row lock is still held.
+        user.mfa_last_used_step = matched_step
     db.add(LoginAttempt(email_hash=email_hash, ip_hash=ip_hash, succeeded=authenticated, attempted_at=now))
     db.commit()
     if not authenticated:
         raise HTTPException(401, "Incorrect email, password, or authenticator code")
 
-    if matched_step is not None:
-        user.mfa_last_used_step = matched_step
-        db.commit()
     set_database_tenant(db, user.tenant_id)
     tokens = _issue_token_pair(db, user)
     db.commit()
