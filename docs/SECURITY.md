@@ -5,13 +5,14 @@ Last reviewed: 2026-11-16
 ## Implemented in the application
 
 - Password hashing, short-lived access JWTs, persisted refresh sessions, single-use refresh-token rotation, reuse detection and token-family revocation, logout, and sign-out-all.
+- Email-based password recovery with 48-byte cryptographic tokens stored only as SHA-256 hashes, 30-minute expiry, single-use consumption, invalidation of prior links, generic request responses, shared per-email/IP throttling, authenticated SMTP STARTTLS, optional MFA verification, audit events, immediate access-token invalidation, refresh-session revocation, and auth-cookie clearing. Actual SMTP provider delivery is not yet verified.
 - Password changes share the login endpoint's persistent 10-failure/15-minute email-and-IP throttle. Incorrect current passwords and failed MFA challenges are recorded using keyed HMAC identifiers; PostgreSQL advisory locks serialize checks across replicas, acquired before the account row lock to preserve a consistent lock order.
 - MFA enrollment, TOTP confirmation, and MFA disablement also share the persistent 10-failure/15-minute email-and-IP authentication budget. Failed password/TOTP/recovery checks are recorded with keyed HMAC identifiers, distributed PostgreSQL advisory locks are acquired before account row locks, and MFA enrollment serializes state changes to prevent concurrent setup races.
 - Host-only HttpOnly refresh cookie, production Secure flag, SameSite=Lax, CSRF cookie/header validation, allowlisted Origin checks, and no refresh tokens in browser storage.
 - Optional authenticator-app TOTP MFA with encrypted secrets, replay prevention, one-time hashed recovery codes, and session revocation when MFA is disabled.
 - Persistent login and registration throttling using keyed HMAC identifiers, bounded retention cleanup, and PostgreSQL advisory locks to serialize limits across API replicas.
-- Static AST regression coverage requires every `/api/v1/*` business route to declare an authenticated-user or role dependency; public registration, token issuance, refresh, and refresh-session logout routes are explicit exceptions and must remain separately reviewed.
-- A second AST regression check requires registration/login routes to call the allowlisted-Origin guard and refresh/logout routes to call the CSRF guard before processing credentials or refresh tokens.
+- Static AST regression coverage requires every `/api/v1/*` business route to declare an authenticated-user or role dependency; public registration, token issuance, refresh, refresh-session logout, and password-reset request/confirmation routes are explicit exceptions and must remain separately reviewed.
+- A second AST regression check requires registration/login and password-reset routes to call the allowlisted-Origin guard and refresh/logout routes to call the CSRF guard before processing credentials or refresh tokens.
 - Scheduled workflow-run retention automation deletes only completed failed/cancelled runs, preserves successful and in-progress runs, and is configured for a five-minute cadence; it is branch-only until PR #5 is merged.
 - Tenant-scoped authorization and PostgreSQL FORCE RLS, with tenant context set per request and cleared before pooled connections are reused. The runtime database role is separate from the migration/table-owner role and must remain non-owner and NOBYPASSRLS.
 - Invoice intake, bounded document extraction, human confirmation of extracted fields, deterministic invoice/PO reconciliation, maker-checker controls, sequential amount-based approval policies, distinct approvers, policy snapshots, and optimistic concurrency protection.
@@ -25,7 +26,7 @@ Last reviewed: 2026-11-16
 
 The repository contains implementation and automated checks, but the following require external provisioning or independent operational evidence:
 
-1. **Identity lifecycle:** SSO/OIDC, verified email, password reset/account recovery, and complete administrator-assisted recovery procedures.
+1. **Identity lifecycle:** SSO/OIDC, verified email, durable email-delivery outbox/retries, and complete administrator-assisted recovery procedures. Password reset/account recovery is implemented, but real SMTP provider delivery and staging mailbox verification remain untested.
 2. **Cloud infrastructure:** provision staging/production, managed PostgreSQL, private networking, TLS/reverse proxy, WAF/rate limiting, managed secrets, workload IAM, monitoring, and alerting.
 3. **Object storage and keys:** provision a private versioned bucket and S3 Object Lock COMPLIANCE retention; validate bucket policy and IAM in the target account; establish independent signing/encryption key custody and rotation. Current storage requests SSE-S3, not customer-managed SSE-KMS.
 4. **Database operations:** run migrations as a one-shot release job for multi-replica deployments; validate grants and cross-tenant negative tests using the exact production runtime role.
