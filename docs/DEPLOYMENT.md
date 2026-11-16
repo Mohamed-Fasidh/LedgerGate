@@ -1,36 +1,99 @@
 # Deployment guide
 
-## Local Docker deployment
-- Configure `.env`.
-- Use unique random secrets and a strong database password.
-- Run `docker compose up --build`.
-- Confirm `/health`, `/docs`, and the dashboard.
+## 1. Local development
 
-## Production topology recommendation
-Internet → managed WAF/load balancer/TLS → frontend and API services → private PostgreSQL and object storage. Keep database and model servers on private networks. Run background extraction/evaluation workers separately when introduced.
+1. Copy `.env.example` to `.env`; replace every sample secret with a unique local value.
+2. Ensure Docker Desktop/Engine is running.
+3. Start the stack with `docker compose up --build -d`.
+4. Follow startup with `docker compose logs -f api`.
+5. Verify API health at `http://localhost:8000/health`, API docs at `http://localhost:8000/docs`, and the dashboard at `http://localhost:3000`.
+6. Register a test workspace and exercise supplier, PO, invoice upload, extraction confirmation, reconciliation, approval, audit verification, and sign-out flows.
+7. Stop with `docker compose down`. Use `docker compose down -v` only when you intentionally want to delete local database and upload volumes.
 
-## Production gates
-- Migrate database in a controlled release job, not concurrently from every replica. The included single-container Compose command migrates as the owner, bootstraps `ledgergate_runtime`, then starts the API with the non-owner role. For multi-replica production, split migration/bootstrap into a one-shot release job and run API replicas with only `DATABASE_URL` for `ledgergate_runtime`.
-- Use managed secrets and non-root containers. Set distinct `POSTGRES_PASSWORD` (migration owner) and `DB_RUNTIME_PASSWORD` (API runtime) values; never use the sample values in production.
-- Set resource limits, health checks, autoscaling policy, and log/metric export.
-- Use a private bucket with encryption and malware scanning.
-- Configure DB backup/PITR and test restore.
-- Set exact CORS origins and trusted proxy configuration.
-- Run dependency, security, and load tests before traffic.
+Never use sample passwords or secrets outside a disposable local environment.
 
-## Invoice storage and malware scanning
-The local Compose profile runs a ClamAV daemon and sends uploaded invoice bytes through its INSTREAM protocol before storage. If the scanner is unavailable, uploads fail closed (HTTP 503). A positive malware result is rejected (HTTP 415).
+## 2. Recommended production topology
 
-For production, set:
+Internet → managed WAF/load balancer with TLS → one public hostname → Next.js frontend and FastAPI API (reverse-proxy `/api`) → private managed PostgreSQL and private object storage.
+
+Keep PostgreSQL, ClamAV, and model servers on private networks. Do not expose database or scanner ports publicly. Use workload identity/IAM roles instead of long-lived cloud access keys wherever possible.
+
+The frontend and API must be served on the **same hostname** for the host-only CSRF cookie design. Configure the frontend API base URL to a same-origin path such as `/api/v1`, and proxy that path to FastAPI. Do not deploy the UI and API on unrelated hostnames without redesigning and retesting the cookie/CSRF model.
+
+## 3. Required environment configuration
+
+Configure all values through the cloud secret manager or protected deployment environment, not source control:
+
 - `APP_ENV=production`
-- `STORAGE_BACKEND=s3`, `S3_BUCKET`, and `S3_REGION`
-- Optional `S3_ENDPOINT_URL` for an S3-compatible private service
-- Workload identity / IAM role where possible; otherwise inject `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` from a secrets manager
-- `CLAMAV_HOST` reachable only on the private application network
+- Strong, unique `JWT_SECRET_KEY` (at least 32 characters of cryptographically random material).
+- Strong, separate `POSTGRES_PASSWORD` and `DB_RUNTIME_PASSWORD`.
+- `MIGRATION_DATABASE_URL` for the migration owner; `DATABASE_URL` for the restricted `ledgergate_runtime` role.
+- Exact `CORS_ORIGINS` containing the public UI origin only.
+- `STORAGE_BACKEND=s3`, `S3_BUCKET`, `S3_REGION`, and workload IAM credentials/identity.
+- Private ClamAV endpoint, signature update process, and scanner resource limits.
+- Valid `MFA_ENCRYPTION_KEY` (Fernet key).
+- `AUDIT_WORM_BUCKET` with S3 versioning and Object Lock enabled.
+- Unique `AUDIT_EXPORT_SIGNING_KEY` and `AUDIT_EXPORT_SIGNING_KEY_ID`, protected and rotated under a documented key-custody process.
+- Approved `AUDIT_WORM_RETENTION_DAYS` within the supported 1–3650 day range.
 
-Grant the API identity only `s3:PutObject` and `s3:GetObject` for the dedicated bucket/prefix. Enable bucket public-access blocking, bucket versioning, lifecycle/retention policies, server-side encryption (prefer a customer-managed KMS key), TLS-only bucket policy, and access logging. The current adapter requests SSE-S3; change it to SSE-KMS and pass a key ID before claiming customer-managed encryption. Do not make the bucket public. Configure the ClamAV service with current signatures and resource limits. Scanner failure rejects the upload.
+Production startup deliberately fails if required encryption, audit WORM, or JWT settings are absent/invalid. Do not disable these checks to make a deployment start.
 
-Local filesystem mode is development-only and production startup refuses it. No cloud bucket or credentials are provisioned by this repository.
+## 4. Database release process
 
-## Database runtime role
-The API process is configured with a dedicated `ledgergate_runtime` role (`NOSUPERUSER`, `NOCREATEDB`, `NOCREATEROLE`, `NOINHERIT`, `NOBYPASSRLS`). Migrations use `MIGRATION_DATABASE_URL`; the API uses `DATABASE_URL`. The bootstrap script grants existing and future table/sequence access to the runtime role. Review the generated grants and reduce them further for your deployment's least-privilege requirements.
+- Provision managed PostgreSQL with private networking, encryption, backups, and point-in-time recovery.
+- Run Alembic migrations once as a controlled release job using the migration-owner connection.
+- Bootstrap/verify the non-owner runtime role and grants. The API role must not own tenant tables, be a superuser, or have BYPASSRLS.
+- Run RLS and cross-tenant negative tests as the exact runtime role.
+- Start API replicas only after the migration job succeeds. Do not run migrations concurrently from every API replica.
+- Validate tenant context is reset between pooled requests and that no tenant can access another tenant's records.
+
+## 5. Invoice storage and malware scanning
+
+The local Compose stack runs ClamAV and sends uploaded bytes through INSTREAM before storage. Scanner unavailability fails closed; malware is rejected.
+
+For production:
+- Use a private, versioned bucket with public access blocked.
+- Grant the API identity only the minimum required object permissions for its application prefix.
+- Enforce TLS-only bucket access, encryption at rest, access logging, and lifecycle/retention rules.
+- Current adapters request AES256/SSE-S3. If customer-managed KMS encryption is required, implement and test SSE-KMS with an explicit key ID and least-privilege KMS grants before claiming that control.
+- Configure ClamAV signature updates, health monitoring, CPU/memory limits, and private-only network access.
+- Test object restore, malware detection, scanner outage, and tenant-authorized download paths.
+
+No cloud bucket, IAM role, KMS key, DNS name, or production credential is provisioned by this repository.
+
+## 6. Immutable audit export
+
+The application can verify the tenant audit hash chain and write signed export batches to an S3 Object Lock bucket. Before enabling it:
+- Create a dedicated bucket with versioning and Object Lock enabled at creation time.
+- Approve retention mode/duration and ensure the bucket is administered separately from the application role.
+- Store the HMAC signing key in a managed secret/KMS-backed custody process; document key ID, access, backup, rotation, and compromise response.
+- Grant only the required bucket/object permissions and test configuration discovery, write, version ID capture, retention, signature verification, and failure handling.
+- Run a restore/independent verification drill and alert on failed exports or invalid audit chains.
+
+The application code does not create the bucket, establish key custody, or independently prove the cloud administrator's controls.
+
+## 7. Edge security and operations
+
+- TLS everywhere; HSTS and secure response headers at the edge.
+- WAF, request/body limits, rate limiting, DDoS protection, and trusted proxy configuration.
+- Managed secrets, key rotation, private service networking, and least-privilege IAM.
+- Centralized structured logs, metrics, traces, dashboards, and actionable alerts.
+- Health/readiness probes, resource limits, autoscaling policy, and documented rollback procedure.
+- Database backups/PITR and periodic restore drills; object versioning/retention and recovery tests.
+- Incident response contacts, escalation, audit retention policy, privacy/legal review, and operational ownership.
+
+## 8. Pre-production acceptance checklist
+
+- [ ] Current PR changes reviewed and merged; default branch CI green.
+- [ ] Staging environment provisioned and deployed from a pinned commit/image digest.
+- [ ] All migrations applied once; runtime role and FORCE RLS verified.
+- [ ] Cross-tenant authorization and negative tests pass.
+- [ ] Login, refresh rotation/reuse detection, logout, logout-all, CSRF, MFA, and recovery flows tested.
+- [ ] Invoice upload, scanner fail-closed behavior, extraction review, reconciliation, maker-checker, and multi-stage approval tested.
+- [ ] Idempotency replay and mismatched-key conflict tests pass for every supported operation.
+- [ ] Audit chain verification and S3 Object Lock signed export verified end-to-end.
+- [ ] TLS, WAF, secrets, IAM, monitoring, alerting, backup and restore configured.
+- [ ] Dependency/security scans, independent penetration test, load test, and privacy/legal review completed.
+- [ ] UAT, rollback, incident-response and disaster-recovery drills signed off.
+
+A successful GitHub Actions build is necessary but not sufficient for production approval. LedgerGate is an invoice verification and human-approval platform; it does not initiate payments or autonomously approve financial transactions.
