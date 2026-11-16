@@ -111,7 +111,10 @@ def list_pos(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     return [po_view(x) for x in db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id==user.tenant_id).all()]
 
 def invoice_view(x):
-    return {"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"approval_stage":x.approval_stage or 1,"approval_total_stages":len(x.approval_steps_snapshot or []),"created_at":x.created_at.isoformat()}
+    steps=x.approval_steps_snapshot or []
+    stage=x.approval_stage or 1
+    required_roles=steps[stage-1] if 1<=stage<=len(steps) else []
+    return {"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"approval_stage":stage,"approval_total_stages":len(steps),"approval_required_roles":required_roles,"created_at":x.created_at.isoformat()}
 
 def _validate_idempotency_key(key: str | None) -> None:
     if key is not None and (len(key)<8 or len(key)>128 or not key.isascii() or any(ord(c)<33 or ord(c)>126 for c in key)):
