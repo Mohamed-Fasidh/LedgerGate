@@ -1413,6 +1413,8 @@ def audit_events(db:Session=Depends(get_db),user:User=Depends(get_current_user))
 @app.get("/api/v1/audit-events/verify")
 def verify_audit_events(db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
     """Verify the tenant's append-only audit hash chain; this does not replace WORM export."""
+    # Share the writer lock so paginated verification observes a stable chain.
+    lock_tenant_audit_chain(db, user.tenant_id)
     result = verify_tenant_chain(db, user.tenant_id)
     record_event(db, user, "audit_chain", user.tenant_id, "verification_performed", {
         "valid": result["valid"], "verified_events": result["verified_events"],
