@@ -370,11 +370,22 @@ def confirm_email_verification(
 ):
     _require_allowed_origin(request)
     token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    # Match resend's user-then-token lock order to avoid deadlocks on concurrent links.
+    candidate = db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.token_hash == token_hash
+    ).first()
+    if candidate is None:
+        raise HTTPException(400, "Verification link is invalid or expired")
+    user = db.query(User).filter(User.id == candidate.user_id).with_for_update().first()
+    if user is None or not user.is_active:
+        db.rollback()
+        raise HTTPException(400, "Verification link is invalid or expired")
     verification = db.query(EmailVerificationToken).filter(
         EmailVerificationToken.token_hash == token_hash
     ).with_for_update().first()
     now = datetime.now(timezone.utc)
-    if verification is None or verification.used_at is not None:
+    if verification is None or verification.user_id != user.id or verification.used_at is not None:
+        db.rollback()
         raise HTTPException(400, "Verification link is invalid or expired")
     expires_at = verification.expires_at
     if expires_at.tzinfo is None:
@@ -382,11 +393,6 @@ def confirm_email_verification(
     if expires_at <= now:
         verification.used_at = now
         db.commit()
-        raise HTTPException(400, "Verification link is invalid or expired")
-
-    user = db.query(User).filter(User.id == verification.user_id).with_for_update().first()
-    if user is None or not user.is_active:
-        db.rollback()
         raise HTTPException(400, "Verification link is invalid or expired")
     verification.used_at = now
     db.query(EmailVerificationToken).filter(
@@ -732,7 +738,7 @@ def request_password_reset(
         return {"status": "accepted", "message": "If the account exists, a reset link will be sent."}
 
     normalized_email = payload.email.strip().lower()
-    user = db.query(User).filter(User.email == normalized_email, User.is_active.is_(True), User.email_verified.is_(True)).first()
+    user = db.query(User).filter(User.email == normalized_email, User.is_active.is_(True), User.email_verified.is_(True)).with_for_update().first()
     if user is not None:
         now = datetime.now(timezone.utc)
         raw_token = secrets.token_urlsafe(48)
@@ -765,11 +771,23 @@ def confirm_password_reset(
     """Consume a one-time reset token, update credentials, and revoke all sessions."""
     _require_allowed_origin(request)
     token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    # Lock in a consistent user-then-token order, matching reset issuance.
+    # This avoids a deadlock between a reset confirmation and a concurrent resend.
+    candidate = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token_hash == token_hash
+    ).first()
+    if candidate is None:
+        raise HTTPException(400, "Reset link is invalid or expired")
+    user = db.query(User).filter(User.id == candidate.user_id).with_for_update().first()
+    if user is None or not user.is_active:
+        db.rollback()
+        raise HTTPException(400, "Reset link is invalid or expired")
     reset = db.query(PasswordResetToken).filter(
         PasswordResetToken.token_hash == token_hash
     ).with_for_update().first()
     now = datetime.now(timezone.utc)
-    if reset is None or reset.used_at is not None:
+    if reset is None or reset.user_id != user.id or reset.used_at is not None:
+        db.rollback()
         raise HTTPException(400, "Reset link is invalid or expired")
     expires_at = reset.expires_at
     if expires_at.tzinfo is None:
@@ -777,11 +795,6 @@ def confirm_password_reset(
     if expires_at <= now:
         reset.used_at = now
         db.commit()
-        raise HTTPException(400, "Reset link is invalid or expired")
-
-    user = db.query(User).filter(User.id == reset.user_id).with_for_update().first()
-    if user is None or not user.is_active:
-        db.rollback()
         raise HTTPException(400, "Reset link is invalid or expired")
     if verify_password(payload.new_password, user.hashed_password):
         db.rollback()
