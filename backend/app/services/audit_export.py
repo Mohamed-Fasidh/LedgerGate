@@ -35,6 +35,8 @@ def sign_audit_payload(payload: dict, signing_key: str) -> tuple[str, str]:
 
 
 def verify_audit_export_signature(document: dict, signing_key: str) -> bool:
+    if not isinstance(document, dict) or not isinstance(signing_key, str):
+        return False
     signature = document.get("signature")
     digest = document.get("payload_sha256")
     payload = {key: value for key, value in document.items() if key not in ("signature", "payload_sha256", "signature_algorithm")}
@@ -55,15 +57,17 @@ def verify_audit_export_signature_with_keyring(document: dict, keyring: dict[str
     of exports signed with them. The keyring is supplied by the caller so key
     custody and secret-manager integration remain outside this module.
     """
+    if not isinstance(document, dict) or not isinstance(keyring, dict):
+        return False
     key_id = document.get("signing_key_id")
-    if not isinstance(key_id, str) or not key_id or not isinstance(keyring, dict):
+    if not isinstance(key_id, str) or not key_id:
         return False
     signing_key = keyring.get(key_id)
     if not isinstance(signing_key, str) or len(signing_key) < 32:
         return False
     try:
         return verify_audit_export_signature(document, signing_key)
-    except (AuditExportUnavailable, TypeError, ValueError):
+    except (AuditExportUnavailable, TypeError, ValueError, AttributeError):
         return False
 
 def verify_audit_export_document(document: dict, keyring: dict[str, str]) -> bool:
