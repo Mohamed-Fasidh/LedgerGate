@@ -219,3 +219,5 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - PostgreSQL advisory locks are acquired before account row locks, preserving a consistent lock order across login, password change, and MFA state changes.
 - MFA setup now locks the active account row before checking/encrypting the pending secret, preventing concurrent setup requests from silently overwriting enrollment state.
 - Added regression tests for the shared throttle response and privacy-preserving attempt records. CI run is pending for these changes.
+
+- API examples now document MFA enrollment/enable/disable requests and the shared throttling behavior. Implementation commits: `d0ef0a58`, `3a1b3274`; tests: `bc1a3ea5`; security and API docs: `4c7e53cd`, `62ffae40`.
