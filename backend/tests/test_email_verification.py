@@ -109,6 +109,7 @@ def test_verification_resend_is_generic_and_queues_new_link(monkeypatch):
 
     assert result["status"] == "accepted"
     assert "If this address is eligible" in result["message"]
+    assert db.queries[0].locked  # user lock serializes verification-link replacement
     assert len(db.added) == 1 and isinstance(db.added[0], EmailVerificationToken)
     assert len(tasks.tasks) == 1
     tasks.tasks[0].func(*tasks.tasks[0].args, **tasks.tasks[0].kwargs)
@@ -144,6 +145,8 @@ def test_email_verification_confirm_activates_account_and_audits(monkeypatch):
     )
 
     assert result["status"] == "email_verified"
+    assert db.queries[1].locked  # lock order is user, then verification token
+    assert db.queries[2].locked
     assert user.email_verified is True
     assert verification.used_at is not None
     assert db.commits == 1
