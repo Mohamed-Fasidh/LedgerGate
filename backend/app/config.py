@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     email_smtp_username: str = ""
     email_smtp_password: str = ""
     email_from_address: str = ""
+    email_outbox_encryption_key: str = ""
     public_app_url: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -103,6 +104,13 @@ def validate_production_settings(config: Settings) -> None:
         raise RuntimeError("ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 60 in production")
     if len(config.db_runtime_password) < 32:
         raise RuntimeError("Production requires DB_RUNTIME_PASSWORD with at least 32 characters")
+    if not config.email_outbox_encryption_key:
+        raise RuntimeError("Production requires EMAIL_OUTBOX_ENCRYPTION_KEY for durable email payload encryption")
+    from cryptography.fernet import Fernet
+    try:
+        Fernet(config.email_outbox_encryption_key.encode("ascii"))
+    except (ValueError, UnicodeEncodeError) as exc:
+        raise RuntimeError("EMAIL_OUTBOX_ENCRYPTION_KEY must be a valid Fernet key") from exc
     if not config.email_smtp_host.strip() or not config.email_smtp_username.strip() or not config.email_smtp_password:
         raise RuntimeError("Production requires authenticated SMTP configuration for account recovery")
     if config.email_smtp_port != 587:
