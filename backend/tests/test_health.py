@@ -21,8 +21,7 @@ class FakeDB:
 def install_db(monkeypatch, db):
     def override_get_db():
         yield db
-    app.dependency_overrides[main.get_db] = override_get_db
-    monkeypatch.addfinalizer(lambda: app.dependency_overrides.pop(main.get_db, None))
+    monkeypatch.setitem(app.dependency_overrides, main.get_db, override_get_db)
 
 
 def test_health():
