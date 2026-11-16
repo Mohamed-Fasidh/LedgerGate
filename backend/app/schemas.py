@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 from typing import Optional, Any
 from decimal import Decimal
 
@@ -6,6 +6,13 @@ class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=12, max_length=72)
     tenant_name: str = Field(min_length=2, max_length=100)
+
+    @field_validator("password")
+    @classmethod
+    def password_fits_bcrypt_byte_limit(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must not exceed 72 UTF-8 bytes")
+        return value
 
 class TokenOut(BaseModel):
     access_token: str
@@ -73,3 +80,10 @@ class ChangePasswordIn(BaseModel):
     new_password: str = Field(min_length=12, max_length=72)
     totp_code: Optional[str] = Field(default=None, min_length=6, max_length=6)
     recovery_code: Optional[str] = Field(default=None, min_length=24, max_length=32)
+
+    @field_validator("current_password", "new_password")
+    @classmethod
+    def passwords_fit_bcrypt_byte_limit(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("Password must not exceed 72 UTF-8 bytes")
+        return value
