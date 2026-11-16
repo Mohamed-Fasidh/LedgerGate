@@ -122,3 +122,23 @@ def test_cli_rejects_symbolic_link_input(tmp_path, capsys):
 
     assert result == 2
     assert "symbolic link" in capsys.readouterr().err
+
+
+
+@pytest.mark.parametrize(
+    "keyring",
+    [
+        {"": "x" * 32},
+        {"x" * 129: "x" * 32},
+        {"valid-key": "x" * 4097},
+        {" valid-key": "x" * 32},
+    ],
+)
+def test_cli_rejects_unbounded_keyring_entries(tmp_path, capsys, keyring):
+    document, _ = _signed_valid_chain_document()
+    document_path, keyring_path = _write_inputs(tmp_path, document, keyring)
+
+    result = main(["--document", str(document_path), "--keyring-file", str(keyring_path)])
+
+    assert result == 2
+    assert "32-4096 characters" in capsys.readouterr().err
