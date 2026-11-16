@@ -37,6 +37,9 @@ class _Query:
     def update(self, values, synchronize_session=False):
         self.updated = values
         return 1
+    def delete(self, synchronize_session=False):
+        self.deleted = True
+        return 1
 
 
 class _DB:
@@ -49,6 +52,10 @@ class _DB:
         return query
     def add(self, row):
         self.added.append(row)
+    def flush(self):
+        for row in self.added:
+            if isinstance(row, User) and not getattr(row, "id", None):
+                row.id = 7
     def commit(self):
         self.commits += 1
     def rollback(self):
@@ -73,8 +80,8 @@ def test_registration_creates_unverified_account_and_emails_single_use_link(monk
     )
 
     user, token = db.added
-    assert result["status"] == "verification_required"
-    assert "access_token" not in result
+    assert result["status"] == "accepted"
+    assert "verification link" in result["message"]
     assert user.email_verified is False
     assert isinstance(token, EmailVerificationToken)
     assert len(token.token_hash) == 64
