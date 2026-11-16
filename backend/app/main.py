@@ -289,6 +289,16 @@ def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_cu
     db.commit()
     return {"invoice_id":inv.id,"status":inv.status.value,"decision":decision,"findings":result.findings,"evidence":evidence,"requires_human_review":decision=="HUMAN_REVIEW"}
 
+def _validate_approval_steps(steps:list):
+    allowed={"admin","reviewer"}
+    if not steps or len(steps)>5 or any(not stage or len(stage)>2 or len(set(stage))!=len(stage) or not set(stage).issubset(allowed) for stage in steps):
+        raise HTTPException(400,"Each approval stage must contain one or two distinct roles: admin and/or reviewer")
+    return steps
+
+def _approval_ranges_overlap(first_min:float,first_max:float|None,second_min:float,second_max:float|None)->bool:
+    # Ranges are half-open: [minimum, maximum). Adjacent boundaries do not overlap.
+    return (first_max is None or second_min<first_max) and (second_max is None or first_min<second_max)
+
 def _resolve_invoice_approval_plan(db:Session,inv:Invoice,user:User):
     if inv.approval_steps_snapshot:
         return inv.approval_steps_snapshot
@@ -323,16 +333,14 @@ def _validate_approval_actor(db:Session,inv:Invoice,user:User,steps:list):
 
 @app.post("/api/v1/approval-policies")
 def create_approval_policy(payload:ApprovalPolicyIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
-    allowed={"admin","reviewer"}
-    if not payload.approval_steps or any(not stage or len(stage)>2 or len(set(stage))!=len(stage) or not set(stage).issubset(allowed) for stage in payload.approval_steps):
-        raise HTTPException(400,"Each approval stage must contain one or two distinct roles: admin and/or reviewer")
+    _validate_approval_steps(payload.approval_steps)
     if payload.max_amount is not None and payload.max_amount<=payload.min_amount:
         raise HTTPException(400,"max_amount must be greater than min_amount")
     existing=db.query(ApprovalPolicy).filter(ApprovalPolicy.tenant_id==user.tenant_id,ApprovalPolicy.is_active.is_(True)).all()
     for policy in existing:
         old_min=float(policy.min_amount)
         old_max=float(policy.max_amount) if policy.max_amount is not None else None
-        overlaps=(payload.max_amount is None or old_min<payload.max_amount) and (old_max is None or payload.min_amount<old_max)
+        overlaps=_approval_ranges_overlap(payload.min_amount,payload.max_amount,old_min,old_max)
         if overlaps:
             raise HTTPException(409,f"Amount range overlaps active policy '{policy.name}'")
     policy=ApprovalPolicy(tenant_id=user.tenant_id,created_by_user_id=user.id,name=payload.name,min_amount=payload.min_amount,max_amount=payload.max_amount,approval_steps=payload.approval_steps)
