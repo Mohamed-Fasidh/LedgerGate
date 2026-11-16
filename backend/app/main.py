@@ -206,6 +206,7 @@ def logout(request: Request, response: Response, payload: RefreshIn | None = Non
         token_id = claims["jti"]
         set_database_tenant(db, tenant_id)
     except Exception:
+        _clear_auth_cookies(response)
         raise unauthorized
     session = db.query(AuthSession).filter(
         AuthSession.tenant_id == tenant_id,
