@@ -131,9 +131,20 @@ def process_one(session_factory=SessionLocal, sender=_send, now=None) -> bool:
                 token_model.expires_at > now,
             ).first() if row.token_hash else True
             if not token:
-                row.status = "cancelled"
-                row.encrypted_payload = ""
-                row.locked_at = None
+                # Cancellation is also lease-owned: an older worker must not
+                # cancel a message after another worker has reclaimed it.
+                db.query(OutboundEmail).filter(
+                    OutboundEmail.id == row_id,
+                    OutboundEmail.status == "sending",
+                    OutboundEmail.locked_at == lease_started_at,
+                ).update(
+                    {
+                        OutboundEmail.status: "cancelled",
+                        OutboundEmail.encrypted_payload: "",
+                        OutboundEmail.locked_at: None,
+                    },
+                    synchronize_session=False,
+                )
                 db.commit()
                 return True
             # Copy only what is needed outside the database session.
