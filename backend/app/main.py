@@ -250,13 +250,55 @@ def logout_all_sessions(response: Response, db: Session = Depends(get_db), user:
 
 
 @app.post("/api/v1/users")
-def create_tenant_user(email:str,password:str=Form(...),role:str=Form("analyst"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
-    if len(password)<12 or len(password)>72: raise HTTPException(400,"Password must be 12-72 characters")
-    if role not in ("analyst","reviewer"): raise HTTPException(400,"Only analyst or reviewer accounts can be created here")
-    if db.query(User).filter(User.email==email.lower()).first(): raise HTTPException(409,"Email already registered")
-    member=User(tenant_id=user.tenant_id,tenant_name=user.tenant_name,email=email.lower(),hashed_password=hash_password(password),role=Role(role))
-    db.add(member); db.flush(); record_event(db,user,"user",member.id,"tenant_user_created",{"email":member.email,"role":role}); db.commit()
-    return {"id":member.id,"email":member.email,"role":member.role.value}
+def create_tenant_user(
+    email: str,
+    password: str = Form(...),
+    role: str = Form("analyst"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin")),
+):
+    _validate_idempotency_key(idempotency_key)
+    normalized_email = email.strip().lower()
+    if len(password) < 12 or len(password) > 72:
+        raise HTTPException(400, "Password must be 12-72 characters")
+    if role not in ("analyst", "reviewer"):
+        raise HTTPException(400, "Only analyst or reviewer accounts can be created here")
+    operation = "tenant_user.create"
+    fingerprint = _tenant_user_request_hash(normalized_email, password, role)
+    if idempotency_key:
+        cached = _get_idempotent_response(db, user.tenant_id, idempotency_key, operation, fingerprint)
+        if cached is not None:
+            return cached
+    if db.query(User).filter(User.email == normalized_email).first():
+        raise HTTPException(409, "Email already registered")
+    member = User(
+        tenant_id=user.tenant_id,
+        tenant_name=user.tenant_name,
+        email=normalized_email,
+        hashed_password=hash_password(password),
+        role=Role(role),
+    )
+    db.add(member)
+    try:
+        db.flush()
+        response = {"id": member.id, "email": member.email, "role": member.role.value}
+        if idempotency_key:
+            _store_idempotency_response(db, user.tenant_id, idempotency_key, operation, fingerprint, response)
+        record_event(db, user, "user", member.id, "tenant_user_created", {
+            "email": member.email,
+            "role": role,
+            "idempotent": bool(idempotency_key),
+        })
+        db.commit()
+        return response
+    except IntegrityError:
+        db.rollback()
+        if idempotency_key:
+            cached = _get_idempotent_response(db, user.tenant_id, idempotency_key, operation, fingerprint)
+            if cached is not None:
+                return cached
+        raise HTTPException(409, "Email already registered")
 
 @app.get("/api/v1/me")
 def me(user:User=Depends(get_current_user)):
@@ -357,6 +399,14 @@ def _store_idempotency_response(db: Session, tenant_id: str, key: str, operation
         tenant_id=tenant_id, key=key, operation=operation,
         request_hash=request_hash, response_json=jsonable_encoder(response),
     ))
+
+def _tenant_user_request_hash(email: str, password: str, role: str) -> str:
+    # Never persist or fingerprint the raw password value.
+    return _request_fingerprint("tenant_user.create", {
+        "email": email.strip().lower(),
+        "role": role,
+        "password_sha256": hashlib.sha256(password.encode("utf-8")).hexdigest(),
+    })
 
 def _delete_expired_idempotency_records(db: Session, tenant_id: str, cutoff: datetime, batch_size: int = 1000) -> int:
     """Delete a bounded batch of expired records for the current tenant only."""
