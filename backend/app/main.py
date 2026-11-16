@@ -557,6 +557,35 @@ def create_tenant_user(
                 return cached
         raise HTTPException(409, "Email already registered")
 
+@app.post("/api/v1/users/{user_id}/deactivate")
+def deactivate_tenant_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin")),
+):
+    if user_id == user.id:
+        raise HTTPException(400, "Administrators cannot deactivate their own account")
+    member = db.query(User).filter(
+        User.id == user_id,
+        User.tenant_id == user.tenant_id,
+    ).with_for_update().first()
+    if member is None:
+        raise HTTPException(404, "User not found")
+    if member.role == Role.admin:
+        raise HTTPException(409, "Administrator accounts cannot be deactivated through this endpoint")
+    if not member.is_active:
+        return {"status": "already_deactivated", "user_id": member.id, "revoked_sessions": 0}
+    member.is_active = False
+    now = datetime.now(timezone.utc)
+    revoked_count = _revoke_refresh_sessions(db, member.tenant_id, member.id, now)
+    record_event(
+        db, user, "user", member.id, "tenant_user_deactivated",
+        {"role": member.role.value, "revoked_refresh_sessions": revoked_count},
+    )
+    db.commit()
+    return {"status": "deactivated", "user_id": member.id, "revoked_sessions": revoked_count}
+
+
 @app.get("/api/v1/me")
 def me(user:User=Depends(get_current_user)):
     return {"id":user.id,"email":user.email,"tenant_id":user.tenant_id,"tenant_name":user.tenant_name,"role":user.role.value}
