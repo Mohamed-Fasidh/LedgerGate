@@ -48,6 +48,8 @@ def scan_with_clamav(content: bytes) -> None:
                     raise StorageUnavailable("Malware scanner response exceeded the allowed size")
     except (OSError, TimeoutError) as exc:
         raise StorageUnavailable("Malware scanner is unavailable; upload rejected") from exc
+    if not response.endswith(b"\0"):
+        raise StorageUnavailable("Malware scanner returned an invalid response; upload rejected")
     result = response.decode("utf-8", errors="replace").strip("\0 ")
     if result.endswith(" FOUND"):
         raise MalwareDetected("Uploaded document was identified as malware")
