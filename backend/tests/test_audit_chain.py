@@ -45,6 +45,8 @@ def test_audit_chain_reports_verified_prefix_before_corruption():
             return self
         def order_by(self, *args, **kwargs):
             return self
+        def limit(self, *args, **kwargs):
+            return self
         def all(self):
             return rows
 
@@ -144,3 +146,67 @@ def test_tenant_audit_chain_lock_is_skipped_for_non_postgres():
             raise AssertionError("PostgreSQL advisory lock must not run on SQLite")
 
     lock_tenant_audit_chain(DB(), "tenant-a")
+
+
+def test_audit_chain_verification_reads_bounded_pages():
+    from types import SimpleNamespace
+    from app.audit import verify_tenant_chain
+    from app.models import AuditEvent
+
+    created = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = []
+    previous = GENESIS_HASH
+    for index in range(5):
+        payload = event_payload(
+            tenant_id="tenant-a", actor_user_id=7, entity_type="invoice",
+            entity_id=index + 1, action="created", details={"index": index},
+            created_at=created,
+        )
+        digest = calculate_event_hash(previous, payload)
+        rows.append(SimpleNamespace(
+            id=(index + 1) * 3, tenant_id="tenant-a", actor_user_id=7,
+            entity_type="invoice", entity_id=str(index + 1), action="created",
+            details={"index": index}, created_at=created,
+            previous_hash=previous, event_hash=digest,
+        ))
+        previous = digest
+
+    class Query:
+        def __init__(self):
+            self.after_id = None
+            self.page_size = None
+        def filter(self, expression):
+            if getattr(expression.left, "key", None) == "id":
+                self.after_id = expression.right.value
+            return self
+        def order_by(self, *args, **kwargs):
+            return self
+        def limit(self, value):
+            self.page_size = value
+            return self
+        def all(self):
+            selected = [row for row in rows if self.after_id is None or row.id > self.after_id]
+            return selected[:self.page_size]
+
+    class DB:
+        def __init__(self):
+            self.queries = []
+        def query(self, model):
+            query = Query()
+            self.queries.append(query)
+            return query
+
+    db = DB()
+    result = verify_tenant_chain(db, "tenant-a", batch_size=2)
+    assert result["valid"] is True
+    assert result["verified_events"] == 5
+    assert result["last_event_id"] == 15
+    assert len(db.queries) == 3
+    assert all(query.page_size == 2 for query in db.queries)
+
+
+def test_audit_chain_verification_rejects_invalid_page_size():
+    from app.audit import verify_tenant_chain
+
+    with pytest.raises(ValueError):
+        verify_tenant_chain(object(), "tenant-a", batch_size=0)
