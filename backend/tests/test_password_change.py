@@ -14,6 +14,13 @@ def _disable_database_advisory_lock_in_unit_tests(monkeypatch):
     monkeypatch.setattr(main, "_lock_login_attempt_keys", lambda *args: None)
 
 
+@pytest.fixture(autouse=True)
+def _disable_database_advisory_lock_in_unit_tests(monkeypatch):
+    # These endpoint unit tests use an in-memory fake DB. PostgreSQL advisory
+    # lock behavior is covered by the dedicated login-throttle integration tests.
+    monkeypatch.setattr(main, "_lock_login_attempt_keys", lambda *args: None)
+
+
 def _account(*, mfa_enabled=False):
     return SimpleNamespace(
         id=12,
