@@ -73,7 +73,13 @@ REGISTRATION_ATTEMPT_RETENTION = timedelta(hours=24)
 
 
 def _registration_hash(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+    # A keyed digest prevents offline dictionary recovery of common emails/IPs
+    # if the throttle table is exposed independently of application secrets.
+    return hmac.new(
+        settings.jwt_secret_key.encode("utf-8"),
+        b"ledgergate:registration-hash:v1:" + value.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def _registration_lock_key(namespace: str, value_hash: str) -> int:
