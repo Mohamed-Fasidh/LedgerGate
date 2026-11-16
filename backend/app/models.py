@@ -199,7 +199,11 @@ class AuthSession(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     replaced_by_token_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    __table_args__ = (Index("ix_auth_sessions_tenant_expires", "tenant_id", "expires_at"),)
+    __table_args__ = (
+        Index("ix_auth_sessions_tenant_expires", "tenant_id", "expires_at"),
+        Index("ix_auth_sessions_tenant_user_active_created", "tenant_id", "user_id", "revoked_at", "created_at", "id"),
+        Index("ix_auth_sessions_tenant_family_active", "tenant_id", "family_id", "revoked_at"),
+    )
 
 
 class IdempotencyRecord(Base):
