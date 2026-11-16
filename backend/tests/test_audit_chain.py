@@ -57,3 +57,56 @@ def test_audit_chain_reports_verified_prefix_before_corruption():
     assert result["verified_events"] == 2
     assert result["failed_event_id"] == 3
     assert result["reason"] == "previous_hash_mismatch"
+
+
+def test_valid_audit_chain_reports_exact_verified_head_id():
+    from types import SimpleNamespace
+    from app.audit import verify_tenant_chain
+
+    created = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    payload = event_payload(
+        tenant_id="tenant-a", actor_user_id=7, entity_type="invoice",
+        entity_id=1, action="created", details={"id": 1}, created_at=created,
+    )
+    digest = calculate_event_hash(GENESIS_HASH, payload)
+    row = SimpleNamespace(
+        id=42, tenant_id="tenant-a", actor_user_id=7, entity_type="invoice",
+        entity_id="1", action="created", details={"id": 1}, created_at=created,
+        previous_hash=GENESIS_HASH, event_hash=digest,
+    )
+
+    class Query:
+        def filter(self, *args, **kwargs):
+            return self
+        def order_by(self, *args, **kwargs):
+            return self
+        def all(self):
+            return [row]
+
+    class DB:
+        def query(self, *args, **kwargs):
+            return Query()
+
+    result = verify_tenant_chain(DB(), "tenant-a")
+    assert result["valid"] is True
+    assert result["last_event_id"] == 42
+
+
+def test_empty_audit_chain_reports_no_verified_head():
+    from app.audit import verify_tenant_chain
+
+    class Query:
+        def filter(self, *args, **kwargs):
+            return self
+        def order_by(self, *args, **kwargs):
+            return self
+        def all(self):
+            return []
+
+    class DB:
+        def query(self, *args, **kwargs):
+            return Query()
+
+    result = verify_tenant_chain(DB(), "tenant-a")
+    assert result["valid"] is True
+    assert result["last_event_id"] is None
