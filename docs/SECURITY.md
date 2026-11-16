@@ -12,7 +12,7 @@
 - ClamAV INSTREAM scanning before storage; scanner unavailability fails closed.
 - Production startup requires S3-compatible storage, a bucket, a configured malware-scanner host, a strong runtime database password, and the restricted runtime PostgreSQL role.
 - Persistent login throttling by hashed email/IP identifiers (10 failed attempts per 15-minute window).
-- Tenant-wide idempotency records reserve keys across supported state-changing operations, including invoice creation and upload. Request fingerprints prevent a key from being replayed with different content or across operations; migration 0012 backfills legacy invoice keys and fails safely on historical collisions.
+- Tenant-wide idempotency records reserve keys across supported state-changing operations, including tenant-user provisioning, invoice creation, and upload. Request fingerprints prevent a key from being replayed with different content or across operations; migration 0012 backfills legacy invoice keys and fails safely on historical collisions.
 - API runtime role bootstrap separates table ownership/migrations from the non-owner, NOBYPASSRLS application connection.
 - Tenant administrators can remove idempotency response records older than a configurable 30-3,650-day retention window in bounded batches. Cleanup is tenant-filtered, respects PostgreSQL RLS, and writes an audit event; the endpoint is designed for a periodic authenticated maintenance process.
 - Optional `Idempotency-Key` on invoice creation and upload is reserved in the same tenant-wide idempotency table used by other write operations; identical retries return the original response, while different payloads or cross-operation reuse return HTTP 409. Concurrent upload races clean up the losing uncommitted object.
