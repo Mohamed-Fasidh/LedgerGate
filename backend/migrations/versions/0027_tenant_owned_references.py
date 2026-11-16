@@ -16,6 +16,61 @@ def upgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
 
+    # Refuse to install the guard over already-corrupt relationships.
+    # Operators must reconcile these rows explicitly rather than silently
+    # carrying cross-tenant references into the protected schema.
+    op.execute("""
+        DO $
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM public.purchase_orders child
+                LEFT JOIN public.suppliers parent ON parent.id = child.supplier_id
+                WHERE parent.id IS NULL OR parent.tenant_id <> child.tenant_id
+            ) OR EXISTS (
+                SELECT 1 FROM public.invoices child
+                LEFT JOIN public.suppliers parent ON parent.id = child.supplier_id
+                WHERE child.supplier_id IS NOT NULL
+                  AND (parent.id IS NULL OR parent.tenant_id <> child.tenant_id)
+            ) OR EXISTS (
+                SELECT 1 FROM public.invoices child
+                LEFT JOIN public.purchase_orders parent ON parent.id = child.purchase_order_id
+                WHERE child.purchase_order_id IS NOT NULL
+                  AND (parent.id IS NULL OR parent.tenant_id <> child.tenant_id)
+            ) OR EXISTS (
+                SELECT 1 FROM public.invoices child
+                LEFT JOIN public.users parent ON parent.id = child.created_by_user_id
+                WHERE child.created_by_user_id IS NOT NULL
+                  AND (parent.id IS NULL OR parent.tenant_id <> child.tenant_id)
+            ) OR EXISTS (
+                SELECT 1 FROM public.invoices child
+                LEFT JOIN public.approval_policies parent ON parent.id = child.approval_policy_id
+                WHERE child.approval_policy_id IS NOT NULL
+                  AND (parent.id IS NULL OR parent.tenant_id <> child.tenant_id)
+            ) OR EXISTS (
+                SELECT 1 FROM public.approval_policies child
+                LEFT JOIN public.users parent ON parent.id = child.created_by_user_id
+                WHERE child.created_by_user_id IS NOT NULL
+                  AND (parent.id IS NULL OR parent.tenant_id <> child.tenant_id)
+            ) OR EXISTS (
+                SELECT 1 FROM public.invoice_approvals child
+                LEFT JOIN public.invoices parent ON parent.id = child.invoice_id
+                WHERE parent.id IS NULL OR parent.tenant_id <> child.tenant_id
+            ) OR EXISTS (
+                SELECT 1 FROM public.invoice_approvals child
+                LEFT JOIN public.users parent ON parent.id = child.approver_user_id
+                WHERE parent.id IS NULL OR parent.tenant_id <> child.tenant_id
+            ) OR EXISTS (
+                SELECT 1 FROM public.invoice_approvals child
+                LEFT JOIN public.approval_policies parent ON parent.id = child.policy_id
+                WHERE child.policy_id IS NOT NULL
+                  AND (parent.id IS NULL OR parent.tenant_id <> child.tenant_id)
+            ) THEN
+                RAISE EXCEPTION 'Existing cross-tenant references must be reconciled before migration 0027';
+            END IF;
+        END;
+        $;
+    """)
+
     op.execute("""
         CREATE OR REPLACE FUNCTION public.ledgergate_enforce_same_tenant_reference()
         RETURNS trigger
