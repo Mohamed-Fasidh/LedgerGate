@@ -132,8 +132,10 @@ def upgrade() -> None:
         ("auth_lookup_email_verification", "character varying"),
     )
     for name, signature in functions:
+        # The runtime role is intentionally provisioned after all migrations.
+        # PUBLIC execution is revoked here; the runtime bootstrap grants the
+        # narrow EXECUTE allowlist once that role exists.
         op.execute(f"REVOKE ALL ON FUNCTION public.{name}({signature}) FROM PUBLIC")
-        op.execute(f"GRANT EXECUTE ON FUNCTION public.{name}({signature}) TO ledgergate_runtime")
 
 
 def downgrade() -> None:
