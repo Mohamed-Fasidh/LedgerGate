@@ -210,3 +210,87 @@ def test_admin_member_directory_rejects_invalid_pagination():
     with pytest.raises(HTTPException) as negative_offset:
         main.list_tenant_users(limit=10, offset=-1, db=DB(), user=actor)
     assert negative_offset.value.status_code == 400
+
+
+def test_admin_role_change_is_tenant_scoped_revokes_sessions_and_audits(monkeypatch):
+    import app.main as main
+    from app.models import Role, User
+    from fastapi import HTTPException
+    import pytest
+
+    member = SimpleNamespace(
+        id=42, tenant_id="tenant-a", role=Role.analyst, is_active=True,
+    )
+    captured = {}
+
+    class Query:
+        def filter(self, *conditions):
+            captured["conditions"] = conditions
+            return self
+        def with_for_update(self):
+            captured["locked"] = True
+            return self
+        def first(self):
+            return member
+
+    class DB:
+        def query(self, model):
+            assert model is User
+            return Query()
+        def commit(self):
+            captured["committed"] = True
+
+    monkeypatch.setattr(main, "_revoke_refresh_sessions", lambda db, tenant, uid, now: 3)
+    monkeypatch.setattr(main, "record_event", lambda *args: captured.setdefault("audit", args))
+    actor = SimpleNamespace(id=7, tenant_id="tenant-a", role=Role.admin)
+    result = main.update_tenant_user_role(
+        user_id=42,
+        payload=main.TenantUserRoleUpdateIn(role="reviewer"),
+        db=DB(),
+        user=actor,
+    )
+
+    assert result == {
+        "status": "updated", "user_id": 42, "role": "reviewer", "revoked_sessions": 3,
+    }
+    assert member.role == Role.reviewer
+    assert captured["locked"] is True
+    assert captured["committed"] is True
+    rendered = [str(condition) for condition in captured["conditions"]]
+    assert any("users.tenant_id" in item for item in rendered)
+    assert captured["audit"][4] == "tenant_user_role_changed"
+    assert captured["audit"][5]["previous_role"] == "analyst"
+    assert captured["audit"][5]["new_role"] == "reviewer"
+
+
+def test_admin_role_change_rejects_admin_and_inactive_members():
+    import app.main as main
+    from app.models import Role, User
+    from fastapi import HTTPException
+    import pytest
+
+    class Query:
+        def __init__(self, member): self.member = member
+        def filter(self, *conditions): return self
+        def with_for_update(self): return self
+        def first(self): return self.member
+
+    class DB:
+        def __init__(self, member): self.member = member
+        def query(self, model):
+            assert model is User
+            return Query(self.member)
+
+    actor = SimpleNamespace(id=7, tenant_id="tenant-a", role=Role.admin)
+    for member, expected in [
+        (SimpleNamespace(id=50, tenant_id="tenant-a", role=Role.admin, is_active=True), 409),
+        (SimpleNamespace(id=51, tenant_id="tenant-a", role=Role.analyst, is_active=False), 409),
+    ]:
+        with pytest.raises(HTTPException) as error:
+            main.update_tenant_user_role(
+                user_id=member.id,
+                payload=main.TenantUserRoleUpdateIn(role="reviewer"),
+                db=DB(member),
+                user=actor,
+            )
+        assert error.value.status_code == expected
