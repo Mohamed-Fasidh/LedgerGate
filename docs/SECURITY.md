@@ -4,7 +4,7 @@
 
 - Password hashing, short-lived JWT access tokens, persisted refresh sessions, 30-day expiry, single-use refresh-token rotation, token reuse detection with family revocation, logout revocation, and sign-out-all-devices.
 - Browser refresh credentials use a host-only `HttpOnly` cookie scoped to `/api/v1/auth`; production enables `Secure` and cookies use `SameSite=Lax`. A separate readable CSRF cookie must match the `X-CSRF-Token` header, and refresh/logout require an allowlisted `Origin`. Login and registration reject untrusted browser origins. The frontend does not store refresh tokens in web storage.
-- Optional authenticator-app TOTP MFA, Fernet-encrypted TOTP secrets, atomic replay prevention, failed-code throttling, and ten one-time recovery codes stored only as hashes. Recovery codes are shown only immediately after enrollment.
+- Optional authenticator-app TOTP MFA, Fernet-encrypted TOTP secrets, atomic replay prevention, failed-code throttling, and ten one-time recovery codes stored only as hashes. Recovery codes are shown only immediately after enrollment. Disabling MFA requires the current password plus a fresh TOTP or unused recovery code, then revokes all active refresh sessions and clears the browser auth cookies.
 - Application tenant filters plus PostgreSQL RLS with FORCE ROW LEVEL SECURITY for tenant-owned tables; tenant context is set on the DB session and reset before pooled connections are released.
 - Separate migration-owner and non-owner `ledgergate_runtime` database connections; the runtime role is provisioned without superuser or BYPASSRLS privileges.
 - Append-only PostgreSQL audit mutation protection and per-tenant SHA-256 event chaining with an admin verification endpoint.
