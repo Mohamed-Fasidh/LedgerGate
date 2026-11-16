@@ -118,3 +118,32 @@ def test_public_auth_routes_enforce_origin_or_csrf_guards():
         "Public auth endpoints must enforce their explicit browser-origin/CSRF "
         "guard before processing credentials or refresh tokens: " + "; ".join(missing)
     )
+
+
+ACCESS_TOKEN_REVOCATION_FUNCTIONS = {
+    "change_password",
+    "disable_mfa",
+    "logout_all_sessions",
+    "update_tenant_user_role",
+    "deactivate_tenant_user",
+}
+
+
+def test_sensitive_account_lifecycle_handlers_invalidate_access_tokens():
+    tree = ast.parse(MAIN.read_text(encoding="utf-8"), filename=str(MAIN))
+    handlers = {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    missing = []
+    for name in sorted(ACCESS_TOKEN_REVOCATION_FUNCTIONS):
+        handler = handlers.get(name)
+        if handler is None:
+            missing.append(f"{name} (handler missing)")
+        elif "_invalidate_access_tokens" not in _called_names(handler):
+            missing.append(f"{name} (revocation call missing)")
+    assert not missing, (
+        "Sensitive account lifecycle operations must invalidate existing access tokens: "
+        + "; ".join(missing)
+    )
