@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from urllib.parse import quote
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, Request
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, Request, BackgroundTasks
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from fastapi import Response
@@ -583,10 +583,19 @@ def change_password(
 PASSWORD_RESET_TTL = timedelta(minutes=30)
 
 
+def _deliver_password_reset_email(recipient: str, reset_url: str) -> None:
+    try:
+        send_password_reset_email(recipient, reset_url)
+    except Exception:
+        # Never log the one-time token or disclose delivery state to the caller.
+        logger.exception("Password reset email delivery failed")
+
+
 @app.post("/api/v1/auth/password-reset/request", status_code=202)
 def request_password_reset(
     payload: PasswordResetRequestIn,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Always return the same response to avoid disclosing registered accounts."""
@@ -616,12 +625,8 @@ def request_password_reset(
         ))
         db.commit()
         reset_url = f"{settings.public_app_url.rstrip('/')}/?reset_token={quote(raw_token, safe='')}"
-        try:
-            send_password_reset_email(user.email, reset_url)
-        except Exception:
-            # Keep the response indistinguishable for unknown accounts. The
-            # exception is logged server-side without including the token or URL.
-            logger.exception("Password reset email delivery failed")
+        # Deliver after the generic 202 response to reduce account-enumeration timing.
+        background_tasks.add_task(_deliver_password_reset_email, user.email, reset_url)
     return {"status": "accepted", "message": "If the account exists, a reset link will be sent."}
 
 
