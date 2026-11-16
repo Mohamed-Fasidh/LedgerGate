@@ -140,3 +140,13 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - CI run [43845374167](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43845374167) on frontend pagination commit `23da5bc0a58b0cdda7ab2a9f54b8b65a915376e5`: backend and frontend jobs passed; Docker image build was still running at last check.
 - Subsequent approval-policy changes are on PR #5 and require a fresh successful full CI run. PR #5 remains open and unmerged.
 - Passing CI does not validate a live cloud deployment. Staging, cloud IAM/Object Lock/KMS validation, real restore drills, identity lifecycle completion, independent security/load testing, and operational sign-off remain release gates.
+
+
+## Workspace and audit pagination update — 2026-11-16
+
+- Audit event listing now accepts bounded `limit` (default 100, maximum 200) and non-negative `offset`, uses tenant scoping, and orders by creation time plus ID for stable pagination.
+- Frontend workspace-member and audit-history tables now page through 100 records at a time; member API requests remain administrator-only and tenant-scoped.
+- Added audit endpoint pagination coverage to the bounded collection regression tests and documented the audit pagination parameters and examples.
+- Dashboard KPI labels now explicitly say "on page" / "loaded" because these figures describe the currently fetched page, not global tenant totals.
+- Earlier CI run [43845791004](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43845791004) passed backend, frontend, and Docker on commit `f54d2fb7a427e532fbf19aa06114c54f9c73806f`.
+- New pagination and dashboard-label changes require a fresh complete CI pass before being treated as verified.
