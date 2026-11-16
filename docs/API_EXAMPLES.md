@@ -48,7 +48,7 @@ curl 'http://localhost:8000/api/v1/audit-events?limit=100&offset=100' \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Invalid limits (outside 1–200) or negative offsets return HTTP 400. Responses remain JSON arrays for compatibility with existing clients. Migration `0018_tenant_pagination_indexes` adds composite tenant/order indexes for these collection queries so page scans can use tenant-scoped index paths as data grows. Migration `0019_idempotency_cleanup_index` adds a tenant/created-time/ID index for bounded, oldest-first idempotency retention cleanup.
+Invalid limits (outside 1–200) or negative offsets return HTTP 400. Responses remain JSON arrays for compatibility with existing clients. Migration `0018_tenant_pagination_indexes` adds composite tenant/order indexes for these collection queries so page scans can use tenant-scoped index paths as data grows. Migration `0019_idempotency_cleanup_index` adds a tenant/created-time/ID index for bounded, oldest-first idempotency retention cleanup. Migration `0020_auth_session_query_indexes` adds composite indexes for a user's active-session listing and tenant-wide refresh-token family revocation.
 
 Upload an invoice with an idempotency key (retry with the same key, filename, and file bytes if the response is lost):
 ```bash
