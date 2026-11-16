@@ -4,9 +4,9 @@ Last checked: 2026-11-16
 
 ## Latest full CI verification — 2026-11-16
 
-- GitHub Actions run [43870540064](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43870540064) completed successfully on PR #5 head `04ffe33851e480fff57c749b5fc0d93e8da36511`.
-- Backend migrations, restricted runtime-role bootstrap, Python compilation, and the full pytest suite passed. Frontend dependency audit and Next.js production build passed. Docker operational checks, Compose validation, and both image builds passed.
-- Identity lifecycle now includes mandatory email verification for new registrations and email-based password recovery. Verification links are single-use and expire after 24 hours; reset links are single-use and expire after 30 minutes. Both use SHA-256 token hashes, generic resend/reset responses, shared email/IP throttling, authenticated SMTP STARTTLS, and URL-fragment tokens. Password reset additionally requires MFA when enabled and revokes all sessions.
+- GitHub Actions run [43872087422](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43872087422) completed successfully on PR #5 head `659bcac187f570fc2e5cf5a9592ece15f6b5c584`.
+- Backend migrations, restricted runtime-role bootstrap, Python compilation, and the full pytest suite passed (**223 tests**). Frontend dependency audit and Next.js production build passed. Docker operational checks, Compose validation, and both image builds passed.
+- Registration now returns a generic response for both new and existing addresses; unverified existing accounts can receive a fresh link without account enumeration. Verification and password-reset confirmation use consistent user-then-token row locking to avoid deadlocks with concurrent resend requests. Identity lifecycle includes mandatory email verification for new registrations and email-based password recovery. Verification links are single-use and expire after 24 hours; reset links are single-use and expire after 30 minutes. Both use SHA-256 token hashes, generic resend/reset responses, shared email/IP throttling, authenticated SMTP STARTTLS, and URL-fragment tokens. Password reset additionally requires MFA when enabled and revokes all sessions.
 - SMTP delivery uses authenticated STARTTLS on port 587. Production startup requires SMTP and HTTPS public-app configuration; actual provider delivery and mailbox verification remain external deployment checks.
 - Exactly one workflow-run cleanup schedule is retained: `.github/workflows/cleanup-unsuccessful-runs.yml`, every five minutes. It targets completed failed and cancelled runs only. GitHub Actions scheduled workflows do not support a one-minute cadence.
 - PR #5 remains open and unmerged. This CI result verifies repository automation only; it is not staging or production deployment evidence.
@@ -15,7 +15,7 @@ Last checked: 2026-11-16
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest fully passing CI:** run [43870540064](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43870540064) passed backend, frontend, and Docker on PR #5 head `04ffe33851e480fff57c749b5fc0d93e8da36511`. PR #5 is open and unmerged.
+- **Latest fully passing CI:** run [43872087422](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43872087422) passed backend, frontend, and Docker on PR #5 head `659bcac187f570fc2e5cf5a9592ece15f6b5c584`. PR #5 is open and unmerged.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
