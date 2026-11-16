@@ -1,7 +1,8 @@
-import uuid, hashlib, os
+import uuid, hashlib, os, tempfile
+from io import BytesIO
 from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +19,7 @@ from app.services.retrieval import retrieve_policy, retrieve_business_records
 from app.services.evaluation import run_evaluation
 from app.services.model_router import explain_findings, ModelUnavailable
 from app.services.memory import remember, recall
+from app.services.storage import store_invoice, read_invoice, MalwareDetected, StorageUnavailable
 
 app=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
 app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type"])
@@ -120,17 +122,23 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
     if not content: raise HTTPException(400,"Empty file")
     # Basic signature validation; production should additionally scan with AV and use private object storage.
     if suffix==".pdf" and not content.startswith(b"%PDF"): raise HTTPException(415,"File content is not a valid PDF")
-    upload_dir=Path(settings.upload_dir)/user.tenant_id; upload_dir.mkdir(parents=True,exist_ok=True,mode=0o700)
-    try: upload_dir.chmod(0o700)
-    except OSError: pass
-    safe_name=f"{uuid.uuid4().hex}{suffix}"; path=upload_dir/safe_name
-    fd=os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "wb") as stored_file: stored_file.write(content)
-    try: extracted,fields=extract_file(str(path),suffix)
+    temp_path=None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False,suffix=suffix) as tmp:
+            tmp.write(content); temp_path=tmp.name
+        extracted,fields=extract_file(temp_path,suffix)
+        stored_location=store_invoice(user.tenant_id,suffix,content)
+    except MalwareDetected as exc:
+        raise HTTPException(415,str(exc))
+    except StorageUnavailable as exc:
+        raise HTTPException(503,str(exc))
     except Exception as exc:
-        path.unlink(missing_ok=True); raise HTTPException(422,f"Document extraction failed: {type(exc).__name__}")
+        raise HTTPException(422,f"Document processing failed: {type(exc).__name__}")
+    finally:
+        if temp_path:
+            Path(temp_path).unlink(missing_ok=True)
     candidate=fields.get("invoice_number") or f"UNCONFIRMED-{uuid.uuid4().hex[:10].upper()}"
-    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.EXTRACTION_REVIEW,file_name=Path(file.filename or "document").name,file_path=str(path),extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
+    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.EXTRACTION_REVIEW,file_name=Path(file.filename or "document").name,file_path=stored_location,extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
     db.add(obj); db.flush(); record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":hashlib.sha256(content).hexdigest(),"bytes":len(content)}); db.commit(); db.refresh(obj)
     return invoice_view(obj)
 
@@ -138,11 +146,14 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
 def download_invoice_file(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv or not inv.file_path: raise HTTPException(404,"Invoice file not found")
-    tenant_dir=(Path(settings.upload_dir)/user.tenant_id).resolve()
-    file_path=Path(inv.file_path).resolve()
-    if file_path.parent != tenant_dir or not file_path.is_file():
+    try:
+        content,suffix=read_invoice(user.tenant_id,inv.file_path)
+    except FileNotFoundError:
         raise HTTPException(404,"Invoice file not found")
-    return FileResponse(path=file_path,media_type="application/pdf" if file_path.suffix.lower()==".pdf" else "text/plain",filename=Path(inv.file_name or "invoice-document").name)
+    except StorageUnavailable as exc:
+        raise HTTPException(503,str(exc))
+    media_type="application/pdf" if suffix==".pdf" else "text/plain"
+    return StreamingResponse(BytesIO(content),media_type=media_type,headers={"Content-Disposition":f'attachment; filename="{Path(inv.file_name or "invoice-document").name}"',"X-Content-Type-Options":"nosniff"})
 
 @app.post("/api/v1/invoices/{invoice_id}/confirm-extraction")
 def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
