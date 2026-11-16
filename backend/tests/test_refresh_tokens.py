@@ -66,3 +66,63 @@ def test_revoke_refresh_sessions_is_scoped_to_tenant_and_user():
     assert any("auth_sessions.expires_at" in item for item in rendered)
     assert captured["values"][AuthSession.revoked_at] == now
     assert captured["synchronize_session"] is False
+
+
+def _csrf_request(origin="http://localhost:3000", cookie="csrf-test", header="csrf-test"):
+    from starlette.requests import Request
+    headers = [
+        (b"origin", origin.encode()),
+        (b"cookie", f"ledgergate_csrf={cookie}".encode()),
+        (b"x-csrf-token", header.encode()),
+    ]
+    scope = {
+        "type": "http", "http_version": "1.1", "method": "POST",
+        "scheme": "http", "path": "/api/v1/auth/refresh", "raw_path": b"/api/v1/auth/refresh",
+        "query_string": b"", "headers": headers, "server": ("testserver", 80),
+        "client": ("testclient", 123), "root_path": "",
+    }
+    return Request(scope)
+
+
+def test_refresh_cookie_is_httponly_and_csrf_cookie_is_separate(monkeypatch):
+    from fastapi import Response
+    from app.config import settings
+    from app.main import _set_auth_cookies
+
+    monkeypatch.setattr(settings, "app_env", "production")
+    response = Response()
+    _set_auth_cookies(response, "secret-refresh", csrf_token="csrf-value")
+    cookies = response.headers.getlist("set-cookie")
+    refresh_cookie = next(value for value in cookies if value.startswith("ledgergate_refresh="))
+    csrf_cookie = next(value for value in cookies if value.startswith("ledgergate_csrf="))
+    assert "httponly" in refresh_cookie.lower()
+    assert "secure" in refresh_cookie.lower()
+    assert "samesite=lax" in refresh_cookie.lower()
+    assert "path=/api/v1/auth" in refresh_cookie.lower()
+    assert "httponly" not in csrf_cookie.lower()
+    assert "secure" in csrf_cookie.lower()
+
+
+def test_refresh_and_logout_csrf_validation_requires_allowed_origin_and_matching_token():
+    from fastapi import HTTPException
+    from app.main import _require_csrf
+    import pytest
+
+    _require_csrf(_csrf_request())
+    with pytest.raises(HTTPException) as mismatch:
+        _require_csrf(_csrf_request(header="wrong"))
+    assert mismatch.value.status_code == 403
+    with pytest.raises(HTTPException) as bad_origin:
+        _require_csrf(_csrf_request(origin="https://attacker.example"))
+    assert bad_origin.value.status_code == 403
+
+
+def test_logout_clears_refresh_and_csrf_cookies():
+    from fastapi import Response
+    from app.main import _clear_auth_cookies
+
+    response = Response()
+    _clear_auth_cookies(response)
+    cookies = response.headers.getlist("set-cookie")
+    assert any(value.startswith("ledgergate_refresh=") and "max-age=0" in value.lower() for value in cookies)
+    assert any(value.startswith("ledgergate_csrf=") and "max-age=0" in value.lower() for value in cookies)
