@@ -4,7 +4,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.main import _record_registration_attempt
+from app.config import settings
+from app.main import _record_registration_attempt, _registration_hash, _registration_lock_key
 from app.models import RegistrationAttempt
 
 
@@ -58,3 +59,21 @@ def test_registration_attempts_store_only_hashes_and_prune_old_rows(db):
     assert len(rows) == 1
     assert rows[0].email_hash != "private@example.com"
     assert rows[0].ip_hash != "198.51.100.4"
+
+
+
+def test_registration_identifiers_use_a_keyed_digest(monkeypatch):
+    monkeypatch.setattr(settings, "jwt_secret_key", "first-application-secret")
+    first = _registration_hash("private@example.com")
+    assert len(first) == 64
+    assert first != "private@example.com"
+
+    monkeypatch.setattr(settings, "jwt_secret_key", "rotated-application-secret")
+    assert _registration_hash("private@example.com") != first
+
+
+def test_registration_advisory_lock_keys_are_stable_signed_bigints():
+    first = _registration_lock_key("email", "a" * 64)
+    assert first == _registration_lock_key("email", "a" * 64)
+    assert -(2**63) <= first < 2**63
+    assert first != _registration_lock_key("ip", "a" * 64)
