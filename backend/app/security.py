@@ -80,7 +80,7 @@ def find_user_for_authentication(db: Session, email: str, *, for_update: bool = 
     user row is loaded. Non-PostgreSQL test databases use the ORM fallback.
     """
     normalized = email.strip().lower()
-    if db.get_bind().dialect.name == "postgresql":
+    if _uses_postgres(db):
         row = db.execute(
             text("SELECT user_id, tenant_id FROM public.auth_lookup_user(:email)"),
             {"email": normalized},
@@ -115,7 +115,7 @@ def find_user_for_auth_token(
     if token_kind not in function_names:
         raise ValueError("Unsupported authentication token kind")
 
-    if db.get_bind().dialect.name == "postgresql":
+    if _uses_postgres(db):
         function_name = function_names[token_kind]
         row = db.execute(
             text(f"SELECT user_id, tenant_id FROM public.{function_name}(:token_hash)"),
@@ -140,7 +140,7 @@ def find_user_for_auth_token(
 
 def authentication_email_exists(db: Session, email: str) -> bool:
     normalized = email.strip().lower()
-    if db.get_bind().dialect.name == "postgresql":
+    if _uses_postgres(db):
         return bool(db.execute(
             text("SELECT public.auth_email_exists(:email)"),
             {"email": normalized},
