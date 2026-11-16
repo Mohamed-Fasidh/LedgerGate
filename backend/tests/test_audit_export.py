@@ -42,6 +42,7 @@ def _events():
 def _settings(monkeypatch):
     monkeypatch.setattr(settings, "audit_worm_bucket", "ledgergate-audit-worm")
     monkeypatch.setattr(settings, "audit_export_signing_key", "test-signing-key-with-more-than-32-bytes")
+    monkeypatch.setattr(settings, "audit_export_signing_key_id", "test-key-v1")
     monkeypatch.setattr(settings, "audit_worm_retention_days", 365)
 
 
