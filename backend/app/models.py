@@ -72,7 +72,7 @@ class Invoice(Base):
     extraction_fields: Mapped[dict] = mapped_column(JSON, default=dict)
     reconciliation: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    __table_args__ = (Index("ix_invoice_tenant_number_supplier", "tenant_id", "invoice_number", "supplier_id"),)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)\n    __table_args__ = (Index("ix_invoice_tenant_number_supplier", "tenant_id", "invoice_number", "supplier_id"), UniqueConstraint("tenant_id", "idempotency_key", name="uq_invoice_tenant_idempotency"))
     __mapper_args__ = {"version_id_col": version}
 
 class PolicyDocument(Base):
