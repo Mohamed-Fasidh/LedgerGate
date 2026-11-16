@@ -1,34 +1,63 @@
-# Build and verification status
+# LedgerGate build and production-readiness status
 
-## Implemented in repository
-- FastAPI API, PostgreSQL, Alembic migrations, Next.js dashboard, and Docker Compose.
-- JWT authentication, role checks, tenant-scoped queries, PostgreSQL FORCE RLS, and pooled-connection tenant-context cleanup.
-- Separate migration-owner and non-owner `ledgergate_runtime` database connections; runtime role is provisioned without superuser or BYPASSRLS privileges.
-- Append-only PostgreSQL audit mutation trigger and audit events for invoice file downloads.
-- Invoice creator attribution, maker-checker approval/rejection, optimistic concurrency versioning, and tenant-scoped invoice-create idempotency.
-- Persistent login throttling using hashed email/IP identifiers (10 failures per 15-minute window).
-- S3-compatible private invoice storage adapter, server-side encryption, tenant-prefixed object keys, tenant-authorized downloads, and no-store download responses.
-- ClamAV INSTREAM scanning before document parsing and storage; scanner failures fail closed.
-- PDF page-count and extracted-text size limits; human confirmation of extracted invoice fields.
-- Deterministic invoice/PO reconciliation, approval/rejection, agent tool allowlists, MCP adapter, lexical/fuzzy retrieval, and advisory-only model integrations.
-- GitHub Actions for PostgreSQL migrations, runtime-role bootstrap, backend tests, frontend build, Compose validation, and Docker image builds.
+Last checked: 2026-11-16
 
-## Latest verification
-- Latest GitHub Actions run 421: backend migrations passed; runtime-role bootstrap passed; Python compilation passed; pytest passed; frontend production build passed.
-- Compose configuration validation passed.
-- Backend/frontend Docker image build was still running at the last status check; do not mark it passed until the workflow reports success.
-- Earlier completed workflow run passed Docker image builds, but it predates the latest code changes.
-- PostgreSQL security tests run against a disposable PostgreSQL service with a restricted non-owner role.
+## Current delivery state
 
-## Remaining production gates
-- SSO/OIDC, MFA, verified email, password reset, refresh-token rotation/revocation, and session/device management.
-- External WORM audit export, cryptographic event chaining/signing, and independent audit retention.
-- Idempotency for remaining state-changing endpoints (supplier/PO creation, extraction confirmation, reconciliation, approval/rejection, policy and memory writes).
-- Policy lifecycle/version governance, configurable approval notifications, and stronger operational reporting for approval stages.
-- Customer-managed KMS encryption, bucket lifecycle/retention/access logging, and cloud IAM review.
-- Production bucket, ClamAV signature updates, secrets manager, TLS/WAF, monitoring, backup/PITR and restore drills.
-- Benchmark-backed embedding/vector retrieval if semantic RAG is required; current retrieval remains lexical/fuzzy.
-- MCP runtime and model-provider integration verification.
-- Load testing, independent penetration testing, privacy/legal review, and incident-response procedures.
+- **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
+- **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
+- **CI for the current PR #5 head:** GitHub Actions run [43810434996](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43810434996) completed successfully. Backend, frontend, and Docker jobs all passed.
+- **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
+- **Stage 4 — public production deployment:** not yet deployed.
+- **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
 
-LedgerGate remains an invoice verification and human-approval workflow. It does not initiate payments, and passing CI does not certify the platform for regulated financial production use.
+## Implemented in PR #4 and PR #5
+
+### Platform and invoice workflow
+- FastAPI API, PostgreSQL, Alembic migrations, Next.js dashboard, Docker Compose, and GitHub Actions.
+- Multi-tenant data model, role checks, PostgreSQL FORCE RLS, tenant context setup and pooled-connection cleanup, and a restricted non-owner runtime database role.
+- Invoice intake, PDF/text extraction, human confirmation of extracted fields, deterministic invoice/PO reconciliation, review and rejection, and sequential amount-based approval policies.
+- Maker-checker controls, approver attribution, invoice policy snapshots, and optimistic concurrency protection.
+- Private S3-compatible invoice storage adapter, server-side encryption, tenant-authorized downloads, upload size/type checks, and ClamAV scanning that fails closed when the scanner is unavailable.
+- Advisory-only AI/agent explanations and tool allowlists; AI does not approve invoices or initiate payments.
+
+### Security and audit
+- Password hashing, short-lived access JWTs, persisted refresh sessions, 30-day refresh expiry, single-use rotation, reuse detection/family revocation, logout, and sign-out-all.
+- Host-only HttpOnly refresh cookie, production Secure flag, SameSite=Lax, CSRF cookie/header comparison, allowlisted Origin checks, and frontend removal of refresh tokens from web storage.
+- Optional authenticator-app TOTP MFA, encrypted TOTP secrets, replay prevention, failed-code throttling, and one-time hashed recovery codes.
+- Tenant-wide idempotency for supported write operations, request fingerprint conflict protection, replayed response handling, and bounded tenant-admin retention maintenance.
+- Append-only audit mutation protection, per-tenant SHA-256 event chains, admin chain verification, and signed audit export to a separately provisioned S3 Object Lock bucket with COMPLIANCE retention and AES256 server-side encryption.
+
+## Latest CI result
+
+Run **43810434996** on the current PR #5 head:
+- Backend: migrations, restricted runtime-role bootstrap, Python compilation, and pytest — passed.
+- Frontend: dependency advisory report, high-severity npm audit gate, and production build — passed.
+- Docker: Compose configuration validation and backend/frontend image builds — passed.
+
+CI validates the repository's automated checks. It does not provision cloud resources, validate production secrets/IAM policies, prove disaster recovery, or replace an independent security assessment.
+
+## Remaining work before production
+
+### Application and identity
+- SSO/OIDC, verified email, password reset/account recovery, and richer session/device management.
+- Review unauthenticated registration and account lifecycle abuse controls; extend idempotency to any remaining or future non-repeatable writes.
+- Validate MFA recovery, administrator-assisted recovery procedures, and session revocation behavior with real multi-user scenarios.
+
+### Cloud and operations
+- Provision staging and production infrastructure; configure managed PostgreSQL, private networking, TLS/reverse proxy, WAF/rate limits, secret manager, workload IAM, and alerting.
+- Provision a versioned S3 Object Lock bucket and independently managed signing/encryption keys. The export implementation is present, but bucket creation, IAM, key custody/rotation, retention policy approval, and an end-to-end cloud export must be verified in the target account.
+- Configure customer-managed KMS encryption if required; current adapters request AES256/SSE-S3, not SSE-KMS.
+- Configure ClamAV signature updates and resource limits, object lifecycle/access logging, backups/PITR, and tested restore procedures.
+- Run migrations as a one-shot release job for multi-replica deployments; do not let every API replica race to migrate.
+- Configure the frontend and API on the same public hostname (for example, route `/api` through the reverse proxy) so host-only CSRF cookies work as designed.
+
+### Assurance and launch
+- Independent threat-model review, SAST/DAST, penetration testing, load testing, privacy/legal review, and incident-response tabletop.
+- Verify tenant isolation using the exact production runtime role and cross-tenant negative tests.
+- Run backup restore, audit export verification, key rotation, alert delivery, and incident response drills.
+- Complete staging UAT and obtain explicit operational/security sign-off before production traffic.
+
+## Scope boundary
+
+LedgerGate is an invoice verification and human-approval workflow platform. It does **not** initiate payments, hold funds, or autonomously approve financial transactions. A successful CI run is not a production certification.
