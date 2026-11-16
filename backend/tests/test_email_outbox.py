@@ -199,3 +199,27 @@ def test_worker_does_not_exceed_attempt_limit_after_crash(db_factory):
         assert row.last_error == "WorkerLeaseExpired"
         assert row.encrypted_payload == ""
     assert delivered == []
+
+
+def test_worker_delivers_message_when_bound_token_is_still_valid(db_factory):
+    now = datetime.now(timezone.utc)
+    token_hash = "b" * 64
+    with db_factory() as db:
+        db.add(EmailVerificationToken(
+            user_id=1, token_hash=token_hash,
+            expires_at=now + timedelta(hours=1), created_at=now,
+        ))
+        row = enqueue_email(
+            db, "person@example.com", "email_verification",
+            "https://app.example.com/#verify_email_token=valid", token_hash,
+        )
+        db.flush()
+        row_id = row.id
+        db.commit()
+
+    delivered = []
+    assert process_one(db_factory, sender=lambda message: delivered.append(message.token_hash), now=now)
+    with db_factory() as db:
+        row = db.get(OutboundEmail, row_id)
+        assert row.status == "sent"
+    assert delivered == [token_hash]
