@@ -48,3 +48,21 @@ def test_idempotency_replays_only_matching_operation_and_fingerprint():
     with pytest.raises(HTTPException) as exc:
         _get_idempotent_response(DB(), "tenant-a", "request-0001", "supplier.create", "b" * 64)
     assert exc.value.status_code == 409
+
+
+def test_idempotency_response_is_normalized_for_json_storage():
+    from datetime import date
+    from app.main import _store_idempotency_response
+
+    class DB:
+        def __init__(self):
+            self.added = []
+        def add(self, value):
+            self.added.append(value)
+
+    db = DB()
+    _store_idempotency_response(
+        db, "tenant-a", "request-0002", "invoice.confirm_extraction",
+        "c" * 64, {"invoice_date": date(2026, 11, 16)},
+    )
+    assert db.added[0].response_json == {"invoice_date": "2026-11-16"}
