@@ -34,6 +34,7 @@ class User(Base):
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     mfa_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     mfa_last_used_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mfa_recovery_code_hashes: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     __table_args__ = (UniqueConstraint("email", name="uq_user_email"),)
 
