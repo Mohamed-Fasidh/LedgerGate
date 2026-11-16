@@ -68,3 +68,53 @@ def test_all_business_api_routes_require_an_authenticated_role():
         "Business API routes must depend on get_current_user or require_roles; "
         "public exceptions must be explicitly reviewed: " + ", ".join(sorted(unprotected))
     )
+
+
+PUBLIC_ROUTE_GUARDS = {
+    "/api/v1/auth/register": {"_require_allowed_origin"},
+    "/api/v1/auth/token": {"_require_allowed_origin"},
+    "/api/v1/auth/refresh": {"_require_csrf"},
+    "/api/v1/auth/logout": {"_require_csrf"},
+}
+
+
+def _called_names(function):
+    names = set()
+    for node in ast.walk(function):
+        if isinstance(node, ast.Call):
+            name = _call_name(node.func)
+            if name:
+                names.add(name)
+    return names
+
+
+def test_public_auth_routes_enforce_origin_or_csrf_guards():
+    tree = ast.parse(MAIN.read_text(encoding="utf-8"), filename=str(MAIN))
+    route_functions = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call) or not isinstance(decorator.func, ast.Attribute):
+                continue
+            if not isinstance(decorator.func.value, ast.Name) or decorator.func.value.id != "app":
+                continue
+            if decorator.args and isinstance(decorator.args[0], ast.Constant):
+                path = decorator.args[0].value
+                if path in PUBLIC_ROUTE_GUARDS:
+                    route_functions[path] = node
+
+    missing = []
+    for path, required_guards in PUBLIC_ROUTE_GUARDS.items():
+        function = route_functions.get(path)
+        if function is None:
+            missing.append(f"{path} (route missing)")
+            continue
+        absent = required_guards - _called_names(function)
+        if absent:
+            missing.append(f"{path} (missing {', '.join(sorted(absent))})")
+
+    assert not missing, (
+        "Public auth endpoints must enforce their explicit browser-origin/CSRF "
+        "guard before processing credentials or refresh tokens: " + "; ".join(missing)
+    )
