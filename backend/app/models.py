@@ -1,4 +1,5 @@
 import enum
+from decimal import Decimal
 from datetime import datetime, timezone
 from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Boolean, Enum, JSON, Integer, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column
@@ -122,8 +123,8 @@ class ApprovalPolicy(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     name: Mapped[str] = mapped_column(String(120))
-    min_amount: Mapped[float] = mapped_column(Numeric(14,2), default=0)
-    max_amount: Mapped[float | None] = mapped_column(Numeric(14,2), nullable=True)
+    min_amount: Mapped[Decimal] = mapped_column(Numeric(14,2), default=Decimal('0.00'))
+    max_amount: Mapped[Decimal | None] = mapped_column(Numeric(14,2), nullable=True)
     approval_steps: Mapped[list] = mapped_column(JSON, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
