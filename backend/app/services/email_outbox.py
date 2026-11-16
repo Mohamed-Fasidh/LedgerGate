@@ -111,12 +111,17 @@ def process_one(session_factory=SessionLocal, sender=_send, now=None) -> bool:
         row.locked_at = now
         row.last_error = None
         row_id = row.id
+        lease_started_at = now
         db.commit()
 
     try:
         with session_factory() as db:
-            row = db.get(OutboundEmail, row_id)
-            if row is None or row.status != "sending":
+            row = db.query(OutboundEmail).filter(
+                OutboundEmail.id == row_id,
+                OutboundEmail.status == "sending",
+                OutboundEmail.locked_at == lease_started_at,
+            ).first()
+            if row is None:
                 return True
             # Do not send a link that was invalidated by a resend or has expired.
             token_model = EmailVerificationToken if row.message_type == "email_verification" else PasswordResetToken
@@ -126,9 +131,20 @@ def process_one(session_factory=SessionLocal, sender=_send, now=None) -> bool:
                 token_model.expires_at > now,
             ).first() if row.token_hash else True
             if not token:
-                row.status = "cancelled"
-                row.encrypted_payload = ""
-                row.locked_at = None
+                # Cancellation is also lease-owned: an older worker must not
+                # cancel a message after another worker has reclaimed it.
+                db.query(OutboundEmail).filter(
+                    OutboundEmail.id == row_id,
+                    OutboundEmail.status == "sending",
+                    OutboundEmail.locked_at == lease_started_at,
+                ).update(
+                    {
+                        OutboundEmail.status: "cancelled",
+                        OutboundEmail.encrypted_payload: "",
+                        OutboundEmail.locked_at: None,
+                    },
+                    synchronize_session=False,
+                )
                 db.commit()
                 return True
             # Copy only what is needed outside the database session.
@@ -141,8 +157,12 @@ def process_one(session_factory=SessionLocal, sender=_send, now=None) -> bool:
         sender(message)
     except Exception as exc:
         with session_factory() as db:
-            row = db.query(OutboundEmail).filter(OutboundEmail.id == row_id).with_for_update().first()
-            if row is not None and row.status == "sending":
+            row = db.query(OutboundEmail).filter(
+                OutboundEmail.id == row_id,
+                OutboundEmail.status == "sending",
+                OutboundEmail.locked_at == lease_started_at,
+            ).with_for_update().first()
+            if row is not None:
                 row.last_error = type(exc).__name__[:120]
                 row.locked_at = None
                 if row.attempts >= row.max_attempts:
@@ -157,8 +177,12 @@ def process_one(session_factory=SessionLocal, sender=_send, now=None) -> bool:
         return True
 
     with session_factory() as db:
-        row = db.query(OutboundEmail).filter(OutboundEmail.id == row_id).with_for_update().first()
-        if row is not None and row.status == "sending":
+        row = db.query(OutboundEmail).filter(
+            OutboundEmail.id == row_id,
+            OutboundEmail.status == "sending",
+            OutboundEmail.locked_at == lease_started_at,
+        ).with_for_update().first()
+        if row is not None:
             row.status = "sent"
             row.encrypted_payload = ""
             row.sent_at = _now()

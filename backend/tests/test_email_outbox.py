@@ -223,3 +223,35 @@ def test_worker_delivers_message_when_bound_token_is_still_valid(db_factory):
         row = db.get(OutboundEmail, row_id)
         assert row.status == "sent"
     assert delivered == [token_hash]
+
+
+
+@pytest.mark.parametrize("fail_after_reclaim", [False, True])
+def test_stale_worker_cannot_overwrite_reclaimed_lease(db_factory, fail_after_reclaim):
+    row_id = _enqueue(db_factory)
+    now = datetime.now(timezone.utc)
+    newer_lease = now + timedelta(seconds=301)
+
+    def reclaim_then_finish(_message):
+        # Simulate another worker reclaiming the expired lease while the first
+        # worker is still waiting on SMTP.
+        with db_factory() as db:
+            row = db.get(OutboundEmail, row_id)
+            row.status = "sending"
+            row.attempts = 2
+            row.locked_at = newer_lease
+            db.commit()
+        if fail_after_reclaim:
+            raise TimeoutError("old worker timed out")
+
+    assert process_one(
+        db_factory, sender=reclaim_then_finish, now=now,
+    )
+
+    with db_factory() as db:
+        row = db.get(OutboundEmail, row_id)
+        assert row.status == "sending"
+        assert row.attempts == 2
+        assert row.locked_at.replace(tzinfo=timezone.utc) == newer_lease
+        assert row.encrypted_payload
+        assert row.last_error is None
