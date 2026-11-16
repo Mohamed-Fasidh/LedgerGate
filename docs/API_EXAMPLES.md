@@ -54,6 +54,18 @@ curl http://localhost:8000/api/v1/invoices/1/approvals \
 ```
 
 
+
+## Idempotency-key retention
+
+Idempotency responses are retained for 90 days by default. A tenant administrator can remove older records in bounded batches; cleanup is scoped to the authenticated tenant by both the query and PostgreSQL row-level security. The operation is audited. Use the same access token and repeat while `has_more` is true:
+
+```http
+POST /api/v1/maintenance/idempotency/cleanup?retention_days=90&batch_size=1000
+Authorization: Bearer <tenant_admin_access_token>
+```
+
+The retention window must be between 30 and 3,650 days, and each batch is limited to 10,000 records. The endpoint only deletes idempotency response records; it does not delete invoices, supplier records, audit events, or uploaded files. After the retention window expires and records are cleaned up, an old key may be accepted as a new request, so clients should not retry business operations indefinitely. This endpoint is not a scheduler: run it periodically from an authenticated tenant maintenance process.
+
 ## Refresh-token lifecycle
 
 Authentication responses return a short-lived access token and set a 30-day refresh credential in a host-only `HttpOnly` cookie (`ledgergate_refresh`). The cookie is scoped to `/api/v1/auth`, uses `SameSite=Lax`, and is marked `Secure` in production. The API also sets a separate readable `ledgergate_csrf` cookie. Browser clients must send its value in the `X-CSRF-Token` header for refresh and logout requests; the API also validates the request `Origin` against `CORS_ORIGINS`. Do not copy the refresh cookie into JavaScript storage. Successful refresh rotates the cookie automatically. Reuse of a previously rotated refresh token revokes the entire token family. `POST /api/v1/auth/logout` revokes the current refresh session and clears both cookies. Access tokens remain valid until their short expiry; logout does not immediately revoke already-issued access tokens. Use HTTPS in deployed environments. Since the CSRF cookie is host-only and read by the browser client, serve the frontend and API on the same hostname (a reverse proxy for `/api` is recommended); configure that exact frontend origin in `CORS_ORIGINS`.
