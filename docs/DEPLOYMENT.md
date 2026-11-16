@@ -37,10 +37,11 @@ Configure all values through the cloud secret manager or protected deployment en
 - Approved `AUDIT_WORM_RETENTION_DAYS` within the supported 1–3650 day range.
 - Authenticated SMTP account-recovery delivery: `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT=587`, `EMAIL_SMTP_USERNAME`, `EMAIL_SMTP_PASSWORD`, and `EMAIL_FROM_ADDRESS`.
 - `PUBLIC_APP_URL` set to the HTTPS public application origin used to construct password-reset and email-verification links.
+- Dedicated `EMAIL_OUTBOX_ENCRYPTION_KEY` (valid Fernet key) for encrypting bearer-token URLs stored in the durable email outbox. Generate it with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` and store it in the secret manager; do not reuse the JWT or MFA key.
 
-New registrations are created as unverified and cannot sign in until the email-verification link is confirmed. Existing accounts are preserved as verified by migration default. Provide a real SMTP provider and validate both verification and reset messages in staging before launch.
+New registrations are created as unverified and cannot sign in until the email-verification link is confirmed. Existing accounts are preserved as verified by migration default. Account-security messages are inserted into `outbound_emails` in the same transaction as the verification/reset token; encrypted payloads are delivered by the separate `email-worker` Compose service. The worker retries transient failures with exponential backoff (30 seconds up to one hour), reclaims abandoned five-minute leases, and moves exhausted messages to `dead`. Provide a real SMTP provider and validate both verification and reset messages in staging before launch.
 
-Production startup deliberately fails if required encryption, audit WORM, SMTP account-recovery, HTTPS public-app URL, or JWT settings are absent/invalid. Do not disable these checks to make a deployment start.
+Production startup deliberately fails if required MFA/outbox encryption, audit WORM, SMTP account-recovery, HTTPS public-app URL, or JWT settings are absent/invalid. Do not disable these checks to make a deployment start.
 
 ## 4. Database release process
 
