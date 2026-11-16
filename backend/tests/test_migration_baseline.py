@@ -73,8 +73,9 @@ def test_postgresql_schema_matches_frozen_baseline_and_all_following_revisions()
             "tenant_id", "token_hash", "expires_at", "used_at",
         },
         "outbound_emails": {
-            "recipient", "message_type", "encrypted_payload", "status",
-            "attempts", "locked_at", "lease_id",
+            "recipient", "message_type", "encrypted_payload", "token_hash",
+            "status", "attempts", "max_attempts", "next_attempt_at",
+            "locked_at", "sent_at", "last_error",
         },
     }
     for table, columns in expected_columns.items():
