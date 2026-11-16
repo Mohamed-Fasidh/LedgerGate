@@ -148,8 +148,12 @@ def downgrade() -> None:
         ("auth_email_exists", "text"),
         ("auth_lookup_user", "text"),
     )
+    # The functions are owned by the dedicated NOLOGIN role. The migration
+    # principal is a member of that role and must assume it to drop them.
+    op.execute("SET LOCAL ROLE ledgergate_auth_owner")
     for name, signature in functions:
         op.execute(f"DROP FUNCTION IF EXISTS public.{name}({signature})")
+    op.execute("RESET ROLE")
     op.execute("""
         REVOKE SELECT ON public.users,
                         public.password_reset_tokens,
