@@ -103,9 +103,17 @@ def verify_audit_export_document(document: dict, keyring: dict[str, str]) -> boo
             return False
         if not isinstance(retention_days, int) or isinstance(retention_days, bool) or not 1 <= retention_days <= 3650:
             return False
-        if not isinstance(document.get("export_id"), str) or not document["export_id"]:
+        export_id = document.get("export_id")
+        if not isinstance(export_id, str):
             return False
-        if not isinstance(document.get("signing_key_id"), str) or not document["signing_key_id"]:
+        try:
+            # Export IDs are generated as UUIDs and are part of the immutable
+            # object identity; accept only their canonical lowercase form.
+            if str(uuid.UUID(export_id)) != export_id:
+                return False
+        except (ValueError, AttributeError):
+            return False
+        if not _is_bounded_text(document.get("signing_key_id"), 128):
             return False
         exported_at = document.get("exported_at")
         if not isinstance(exported_at, str):
