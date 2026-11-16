@@ -539,3 +539,23 @@ def test_immutable_export_rejects_oversized_document_before_s3_write(monkeypatch
         audit_export.store_immutable_audit_export("tenant-a", events)
 
     assert client.put_args is None
+
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), object()])
+def test_audit_export_canonical_json_rejects_non_json_values(value):
+    with pytest.raises(audit_export.AuditExportUnavailable, match="strict JSON"):
+        audit_export.canonical_json({"details": {"untrusted": value}})
+
+
+def test_audit_export_signature_verifier_returns_false_for_non_json_document():
+    document = {
+        "format": "ledgergate-audit-export-v1",
+        "details": {"untrusted": float("nan")},
+        "signature_algorithm": "HMAC-SHA256",
+        "payload_sha256": "0" * 64,
+        "signature": "0" * 64,
+    }
+    assert not audit_export.verify_audit_export_signature(
+        document, "test-signing-key-with-more-than-32-bytes"
+    )
