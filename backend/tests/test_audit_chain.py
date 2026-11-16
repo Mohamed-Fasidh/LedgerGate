@@ -82,6 +82,8 @@ def test_valid_audit_chain_reports_exact_verified_head_id():
             return self
         def order_by(self, *args, **kwargs):
             return self
+        def limit(self, *args, **kwargs):
+            return self
         def all(self):
             return [row]
 
@@ -101,6 +103,8 @@ def test_empty_audit_chain_reports_no_verified_head():
         def filter(self, *args, **kwargs):
             return self
         def order_by(self, *args, **kwargs):
+            return self
+        def limit(self, *args, **kwargs):
             return self
         def all(self):
             return []
