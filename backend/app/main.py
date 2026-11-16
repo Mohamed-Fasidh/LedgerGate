@@ -1,5 +1,6 @@
-import uuid, hashlib, os, tempfile
+import uuid, hashlib, tempfile
 from io import BytesIO
+from urllib.parse import quote
 from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
@@ -153,7 +154,8 @@ def download_invoice_file(invoice_id:int,db:Session=Depends(get_db),user:User=De
     except StorageUnavailable as exc:
         raise HTTPException(503,str(exc))
     media_type="application/pdf" if suffix==".pdf" else "text/plain"
-    return StreamingResponse(BytesIO(content),media_type=media_type,headers={"Content-Disposition":f'attachment; filename="{Path(inv.file_name or "invoice-document").name}"',"X-Content-Type-Options":"nosniff"})
+    safe_filename=quote(Path(inv.file_name or "invoice-document").name)
+    return StreamingResponse(BytesIO(content),media_type=media_type,headers={"Content-Disposition":f"attachment; filename*=UTF-8''{safe_filename}","X-Content-Type-Options":"nosniff"})
 
 @app.post("/api/v1/invoices/{invoice_id}/confirm-extraction")
 def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
