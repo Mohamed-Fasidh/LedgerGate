@@ -23,7 +23,7 @@
 ## Remaining production gates
 - SSO/OIDC, MFA, verified email, password reset, refresh-token rotation/revocation, and session/device management.
 - External WORM audit export, cryptographic event chaining/signing, and independent audit retention.
-- Idempotency for invoice uploads and all other state-changing endpoints.
+- Idempotency for remaining state-changing endpoints (supplier/PO creation, extraction confirmation, reconciliation, approval/rejection, policy and memory writes).
 - Configurable multi-stage approval policies and thresholds.
 - Customer-managed KMS encryption, bucket lifecycle/retention/access logging, and cloud IAM review.
 - Production bucket, ClamAV signature updates, secrets manager, TLS/WAF, monitoring, backup/PITR and restore drills.
