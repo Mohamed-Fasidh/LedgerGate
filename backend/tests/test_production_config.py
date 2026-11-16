@@ -17,7 +17,7 @@ def production_settings(**overrides):
         "storage_backend": "s3",
         "s3_bucket": "ledgergate-private",
         "clamav_host": "clamav.internal",
-        "db_runtime_password": "r" * 48,
+        "db_runtime_password": "r" * 48,\n        "email_smtp_host": "smtp.example.com",\n        "email_smtp_port": 587,\n        "email_smtp_username": "ledgergate@example.com",\n        "email_smtp_password": "smtp-secret",\n        "email_from_address": "LedgerGate <no-reply@example.com>",\n        "public_app_url": "https://app.example.com",
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)
@@ -87,3 +87,19 @@ def test_production_rejects_unapproved_jwt_algorithms(algorithm):
 def test_production_rejects_unsafe_resource_and_token_limits(overrides, message):
     with pytest.raises(RuntimeError, match=message):
         validate_production_settings(production_settings(**overrides))
+
+
+
+def test_production_requires_authenticated_smtp_for_account_recovery():
+    with pytest.raises(RuntimeError, match="authenticated SMTP"):
+        validate_production_settings(production_settings(email_smtp_password=""))
+
+
+def test_production_requires_starttls_smtp_port():
+    with pytest.raises(RuntimeError, match="port 587"):
+        validate_production_settings(production_settings(email_smtp_port=25))
+
+
+def test_production_requires_https_public_app_origin():
+    with pytest.raises(RuntimeError, match="PUBLIC_APP_URL"):
+        validate_production_settings(production_settings(public_app_url="http://app.example.com"))
