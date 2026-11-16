@@ -73,6 +73,8 @@ class Invoice(Base):
     reconciliation: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    idempotency_operation: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    idempotency_request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     __table_args__ = (Index("ix_invoice_tenant_number_supplier", "tenant_id", "invoice_number", "supplier_id"), UniqueConstraint("tenant_id", "idempotency_key", name="uq_invoice_tenant_idempotency"))
     __mapper_args__ = {"version_id_col": version}
 
