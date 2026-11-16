@@ -2,7 +2,7 @@
 
 ## Implemented
 - Short-lived JWT access tokens, persisted 30-day refresh sessions, single-use refresh-token rotation, reuse detection with token-family revocation, logout revocation, and bcrypt password hashing.
-- Browser refresh credentials are held in host-only `HttpOnly` cookies scoped to `/api/v1/auth`, with `Secure` enabled in production and `SameSite=Lax`. A separate readable CSRF cookie must match the `X-CSRF-Token` header, and refresh/logout require an allowlisted `Origin`. Login and registration reject untrusted browser origins. The frontend sends cookies with credentialed requests and does not store refresh tokens in web storage.
+- Browser refresh credentials are held in host-only `HttpOnly` cookies scoped to `/api/v1/auth`, with `Secure` enabled in production and `SameSite=Lax`. A separate readable CSRF cookie must match the `X-CSRF-Token` header, and refresh/logout require an allowlisted `Origin`. Login and registration reject untrusted browser origins. The frontend sends cookies with credentialed requests and does not store refresh tokens in web storage. Because the CSRF cookie is host-only and read by the browser client, production should serve the UI and API on the same hostname (for example, reverse-proxy `/api` to the backend); do not weaken cookie attributes to work around a cross-site deployment.
 - Admin, analyst, and reviewer role checks.
 - Application tenant filters plus PostgreSQL RLS with FORCE ROW LEVEL SECURITY for tenant-owned tables.
 - Authenticated tenant context set on the DB session and reset before pooled connections are released.
