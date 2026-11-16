@@ -14,6 +14,7 @@
 - Persistent login throttling by hashed email/IP identifiers (10 failed attempts per 15-minute window).
 - Tenant-scoped invoice idempotency for both JSON invoice creation and file uploads; request fingerprints prevent a key from being replayed with different content or across operations.
 - API runtime role bootstrap separates table ownership/migrations from the non-owner, NOBYPASSRLS application connection.
+- Tenant administrators can remove idempotency response records older than a configurable 30-3,650-day retention window in bounded batches. Cleanup is tenant-filtered, respects PostgreSQL RLS, and writes an audit event; the endpoint is designed for a periodic authenticated maintenance process.
 - Optional `Idempotency-Key` on invoice creation and upload is unique per tenant; identical retries return the existing invoice, while different payloads or cross-operation reuse return HTTP 409. Concurrent upload races clean up the losing uncommitted object.
 - Configurable approval policies select by invoice amount and define sequential role-based stages; each invoice snapshots its approval plan, requires distinct approvers, and is only marked approved after every stage succeeds.
 - Upload extension, size, empty-file, and basic PDF-signature checks; randomized server-side upload names.
