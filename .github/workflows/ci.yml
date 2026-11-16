@@ -32,6 +32,8 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg://ledgergate:ledgergate_ci_password@localhost:5432/ledgergate
       TEST_POSTGRES_URL: postgresql+psycopg://ledgergate:ledgergate_ci_password@localhost:5432/ledgergate
+      MIGRATION_DATABASE_URL: postgresql+psycopg://ledgergate:ledgergate_ci_password@localhost:5432/ledgergate
+      DB_RUNTIME_PASSWORD: runtime_ci_password
       JWT_SECRET_KEY: ci-only-secret-key-at-least-32-characters-long
     steps:
       - uses: actions/checkout@v4
@@ -42,15 +44,7 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
       - run: alembic upgrade head
-      - name: Create restricted runtime role for RLS tests
-        run: |
-          PGPASSWORD=ledgergate_ci_password psql -h localhost -U ledgergate -d ledgergate -v ON_ERROR_STOP=1 <<'SQL'
-          CREATE ROLE ledgergate_runtime LOGIN PASSWORD 'runtime_ci_password' NOSUPERUSER NOBYPASSRLS;
-          GRANT CONNECT ON DATABASE ledgergate TO ledgergate_runtime;
-          GRANT USAGE ON SCHEMA public TO ledgergate_runtime;
-          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ledgergate_runtime;
-          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ledgergate_runtime;
-          SQL
+      - name: Bootstrap restricted runtime role\n        run: ./scripts/bootstrap_runtime_role.sh
       - run: python -m compileall -q app migrations
       - run: pytest -q
 
