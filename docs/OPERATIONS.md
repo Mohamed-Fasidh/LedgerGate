@@ -32,6 +32,8 @@ bash scripts/restore_drill_postgres.sh ./backups/ledgergate-YYYYMMDDTHHMMSSZ-uni
 - The restore drill checks the checksum, restores into a uniquely named disposable database, and confirms that the Alembic version table contains a version and the core users and invoices tables exist. It never restores over the configured application database. Set `RESTORE_DRILL_KEEP_DB=1` only when you intentionally want to inspect the temporary database; remove it manually afterwards.
 - These scripts do not back up PostgreSQL roles/globals, object-storage invoice files, secrets, or cloud configuration. Back up and test those separately. Production backups should use managed encrypted backups/PITR and an independently secured off-site copy.
 - Run restore drills against an isolated recovery environment, not a busy production database. Record duration, backup age, row counts, and recovery-point/recovery-time results.
+- CI exercises backup publication with a fake Docker/PostgreSQL command boundary, including overlapping runs and failure cleanup. It also exercises restore checksum rejection, restore failure cleanup, required schema checks, and the explicit keep-database option. These tests validate script behavior; they do not replace a real restore drill against a separately provisioned PostgreSQL recovery instance.
+
 
 
 ### Offline audit-export verification CLI
