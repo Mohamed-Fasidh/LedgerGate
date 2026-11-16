@@ -111,3 +111,17 @@ def test_outbox_rejects_unknown_message_type(db_factory):
     with db_factory() as db:
         with pytest.raises(ValueError, match="Unsupported"):
             enqueue_email(db, "person@example.com", "arbitrary", "https://example.com")
+
+
+def test_outbox_decrypts_payload_with_previous_rotation_key(db_factory, monkeypatch):
+    old_key = Fernet.generate_key().decode()
+    new_key = Fernet.generate_key().decode()
+    monkeypatch.setattr(settings, "email_outbox_encryption_key", old_key)
+    with db_factory() as db:
+        row = enqueue_email(db, "person@example.com", "password_reset", "https://app.example.com/#reset_token=old-key")
+        db.commit()
+        encrypted = row.encrypted_payload
+    monkeypatch.setattr(settings, "email_outbox_encryption_key", new_key)
+    monkeypatch.setattr(settings, "email_outbox_decryption_keys", old_key)
+    from app.services.email_outbox import _decrypt_payload
+    assert _decrypt_payload(encrypted)["url"].endswith("reset_token=old-key")
