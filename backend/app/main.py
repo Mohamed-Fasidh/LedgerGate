@@ -564,13 +564,29 @@ def list_approval_policies(db:Session=Depends(get_db),user:User=Depends(require_
     return [{"id":p.id,"name":p.name,"min_amount":float(p.min_amount),"max_amount":float(p.max_amount) if p.max_amount is not None else None,"approval_steps":p.approval_steps,"is_active":p.is_active} for p in rows]
 
 @app.post("/api/v1/approval-policies/{policy_id}/deactivate")
-def deactivate_approval_policy(policy_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+def deactivate_approval_policy(policy_id:int,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+    _validate_idempotency_key(idempotency_key)
+    operation=f"approval_policy.deactivate:{policy_id}:{user.id}"
+    fingerprint=_request_fingerprint(operation,{})
+    if idempotency_key:
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+        if cached is not None: return cached
     policy=db.query(ApprovalPolicy).filter(ApprovalPolicy.id==policy_id,ApprovalPolicy.tenant_id==user.tenant_id).first()
     if not policy: raise HTTPException(404,"Approval policy not found")
     policy.is_active=False
-    record_event(db,user,"approval_policy",policy.id,"deactivated",{"name":policy.name})
-    db.commit()
-    return {"id":policy.id,"is_active":False}
+    response={"id":policy.id,"is_active":False}
+    if idempotency_key:
+        _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
+    record_event(db,user,"approval_policy",policy.id,"deactivated",{"name":policy.name,"idempotent":bool(idempotency_key)})
+    try:
+        db.commit()
+        return response
+    except (IntegrityError,StaleDataError):
+        db.rollback()
+        if idempotency_key:
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+            if cached is not None: return cached
+        raise HTTPException(409,"Approval policy deactivation conflicted with another request")
 
 @app.post("/api/v1/invoices/{invoice_id}/approve")
 def approve(invoice_id:int,payload:ApprovalDecisionIn|None=None,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
