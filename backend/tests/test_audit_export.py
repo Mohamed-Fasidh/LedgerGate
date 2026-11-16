@@ -405,6 +405,7 @@ def test_audit_export_locks_tenant_writers_before_verifying_chain(monkeypatch):
         "naive_event_timestamp",
         "naive_export_timestamp",
         "empty_export_id",
+        "noncanonical_export_id",
         "empty_signing_key_id",
         "non_dict_event",
     ],
@@ -431,6 +432,8 @@ def test_export_document_verifier_rejects_noncanonical_signed_metadata(mutation)
         tampered["exported_at"] = "2026-11-16T00:00:00"
     elif mutation == "empty_export_id":
         tampered["export_id"] = ""
+    elif mutation == "noncanonical_export_id":
+        tampered["export_id"] = "not-a-uuid"
     elif mutation == "empty_signing_key_id":
         tampered["signing_key_id"] = ""
     else:
@@ -496,3 +499,22 @@ def test_immutable_export_rejects_unsafe_or_invalid_input_before_write(
         )
 
     assert client.put_args is None
+
+
+
+@pytest.mark.parametrize("export_id", ["", "not-a-uuid", "A0B1C2D3-E4F5-4678-9012-123456789ABC"])
+def test_immutable_export_requires_canonical_uuid_export_id(monkeypatch, export_id):
+    _settings(monkeypatch)
+    client = FakeS3()
+    monkeypatch.setattr(audit_export, "_s3_client", lambda: client)
+    monkeypatch.setattr(audit_export.uuid, "uuid4", lambda: __import__("uuid").UUID(export_id) if export_id else None)
+
+    if not export_id:
+        with pytest.raises(audit_export.AuditExportUnavailable):
+            audit_export.store_immutable_audit_export("tenant-a", _events())
+    else:
+        # The writer emits canonical UUID text even when uuid4 is patched with
+        # an uppercase textual representation, so the stored object remains valid.
+        result = audit_export.store_immutable_audit_export("tenant-a", _events())
+        assert result["export_id"] == export_id.lower()
+    assert client.put_args is not None if export_id else client.put_args is None
