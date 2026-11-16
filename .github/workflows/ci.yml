@@ -44,7 +44,7 @@ jobs:
       - run: alembic upgrade head
       - name: Create restricted runtime role for RLS tests
         run: |
-          PGPASSWORD=ledgergate_ci_password psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          PGPASSWORD=ledgergate_ci_password psql -h localhost -U ledgergate -d ledgergate -v ON_ERROR_STOP=1 <<'SQL'
           CREATE ROLE ledgergate_runtime LOGIN PASSWORD 'runtime_ci_password' NOSUPERUSER NOBYPASSRLS;
           GRANT CONNECT ON DATABASE ledgergate TO ledgergate_runtime;
           GRANT USAGE ON SCHEMA public TO ledgergate_runtime;
