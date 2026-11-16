@@ -256,3 +256,11 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Added the cleanup script to the Docker job's `bash -n` validation in `.github/workflows/ci.yml`.
 - GitHub Actions schedule remains every five minutes (one-minute schedules are unsupported).
 - The latest full CI success recorded above predates this workflow/script change; the current branch head must pass CI before this automation is considered verified.
+
+## Workflow cleanup regression coverage — 2026-11-16
+
+- Added `scripts/test_cleanup_workflow_runs.py` with a fake GitHub CLI to verify that only completed `failure` and `cancelled` runs are selected for deletion; successful and timed-out runs are preserved.
+- Added checks that the workflow script refuses to run without its repository/token environment.
+- Added this regression test to the Docker CI job and included the cleanup script in shell syntax validation.
+- A local smoke test of the cleanup script with a fake CLI passed for the deletion filter and required-environment guards.
+- The latest full GitHub Actions success remains run [43856458704](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43856458704), which predates these latest workflow changes. CI for the current head is still required.
