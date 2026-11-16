@@ -6,7 +6,7 @@ Last checked: 2026-11-16
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest code CI:** GitHub Actions run [43816875357](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43816875357) completed successfully on the current PR head; backend, frontend, and Docker jobs all passed. PR #5 is open and marked ready for review; it has not been merged.
+- **Latest code CI:** GitHub Actions run [43816875357](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43816875357) completed successfully on application code commit `b6e07246c69d19cbe2e992ab4116942db267ab1e`; backend, frontend, and Docker jobs all passed. A subsequent documentation-only commit is awaiting its own CI run. PR #5 is open and marked ready for review; it has not been merged.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
@@ -30,7 +30,7 @@ Last checked: 2026-11-16
 
 ## Latest CI result
 
-Run **43816875357** on the current PR head (commit `b6e07246c69d19cbe2e992ab4116942db267ab1e`):
+Run **43816875357** on application code commit `b6e07246c69d19cbe2e992ab4116942db267ab1e`):
 - Backend: migrations, restricted runtime-role bootstrap, Python compilation, and pytest — passed.
 - Frontend: dependency advisory report, high-severity npm audit gate, and production build — passed.
 - Docker: Compose configuration validation and backend/frontend image builds — passed.
