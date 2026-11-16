@@ -387,6 +387,7 @@ def confirm_email_verification(
     verification.used_at = now
     db.query(EmailVerificationToken).filter(
         EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.tenant_id == user.tenant_id,
         EmailVerificationToken.used_at.is_(None),
     ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
     user.email_verified = True
