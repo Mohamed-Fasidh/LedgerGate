@@ -6,10 +6,10 @@ from app.security import hash_password, verify_password
 
 
 def test_registration_rejects_password_over_bcrypt_utf8_byte_limit():
-    # 24 characters but 72 UTF-8 bytes: accepted at the exact boundary.
-    RegisterIn(email="person@example.com", password="é" * 24, tenant_name="Example")
+    # 36 characters but 72 UTF-8 bytes: accepted at the exact boundary.
+    RegisterIn(email="person@example.com", password="é" * 36, tenant_name="Example")
     with pytest.raises(ValidationError, match="72 UTF-8 bytes"):
-        RegisterIn(email="person@example.com", password="é" * 25, tenant_name="Example")
+        RegisterIn(email="person@example.com", password="é" * 37, tenant_name="Example")
 
 
 def test_password_change_rejects_oversized_utf8_passwords():
