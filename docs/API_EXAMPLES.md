@@ -264,3 +264,16 @@ curl -X POST 'http://localhost:8000/api/v1/audit-events/export?after_id=0&batch_
 For a successful export, persist the returned `next_after_id` and use it as `after_id` on the next request. `batch_size` is limited to 1–10,000. A response with `status: "no_events"` means there are no newer events at that cursor. Each successful batch records an `immutable_export_created` audit event containing the object key, version ID, event range, payload digest, Object Lock mode, and retention timestamp. Since that audit event is written after the exported batch, a later batch can include it. The dashboard's **Export next immutable batch** button starts at cursor zero for the current browser session and advances the cursor only after a successful export; retain the returned cursor externally if you need a durable multi-session export process.
 
 This endpoint requires the production audit-export settings, a pre-created versioned Object Lock bucket with COMPLIANCE retention, and appropriately scoped storage credentials. The dashboard does not provision the bucket or keys. A successful API response proves the configured storage adapter accepted the object; separately verify bucket policy, retention, IAM, key custody, and retrieval in the target cloud account.
+
+
+## Change account password
+
+Authenticated users can change their password with `POST /api/v1/auth/change-password`. Supply the current password and a new password of 12–72 characters. If authenticator-app MFA is enabled, also supply a fresh `totp_code` or an unused `recovery_code`. The API locks the account row, rejects an incorrect current password and password reuse, updates the password hash, consumes any recovery code used, revokes all active refresh sessions, records an audit event, and clears the refresh/CSRF cookies. The current short-lived access token remains valid until it expires; sign in again after the change.
+
+```json
+{
+  "current_password": "current-password",
+  "new_password": "a-new-unique-password",
+  "totp_code": "123456"
+}
+```
