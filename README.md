@@ -37,13 +37,14 @@ For local development without Docker:
 ## Security notes
 - Account verification and password-reset emails are transactionally queued in an encrypted PostgreSQL outbox and delivered by a separate worker with bounded retries and crash recovery.
 - Set a dedicated `EMAIL_OUTBOX_ENCRYPTION_KEY` (Fernet key) and protect it separately from JWT and MFA keys. The worker provides at-least-once delivery; a crash after SMTP accepts a message but before the sent-state commit can cause a duplicate.
-- Set unique high-entropy `JWT_SECRET_KEY` and `APP_ENCRYPTION_KEY` values.
+- Set unique high-entropy `JWT_SECRET_KEY` and `MFA_ENCRYPTION_KEY` values.
 - Use HTTPS behind a trusted reverse proxy.
 - Use managed PostgreSQL, encrypted object storage, managed secrets, backups, and restricted network access in production.
 - Configure CORS to exact trusted origins.
 - Uploads are type/size validated and scanned through ClamAV; scanner unavailability fails closed. Production still requires a private scanner deployment and staging verification.
 - PostgreSQL FORCE RLS, a restricted non-owner runtime role, same-tenant triggers, and composite tenant-aware foreign keys protect tenant boundaries. Run the migration preflight and verify the exact production runtime role before launch.
 - SSO/OIDC is not implemented yet. Configure an identity provider only after that integration is built and independently tested; also provision rate limiting/WAF, alerting, retention policies, and disaster recovery.
+- Complete independent security testing, staging UAT, backup/restore drills, and operational sign-off before production.
 - Do not store card data, bank credentials, or payment secrets in LedgerGate.
 - AI output is advisory. Human authorization is required for financial decisions.
 
