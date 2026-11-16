@@ -40,7 +40,20 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    
+      clamav:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
   email-worker:
     build: ./backend
     env_file: .env
@@ -51,20 +64,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    restart: unless-stopped
-
-  clamav:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
     security_opt:
       - no-new-privileges:true
     cap_drop:
