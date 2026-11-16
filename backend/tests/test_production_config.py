@@ -58,3 +58,8 @@ def test_production_requires_https_for_custom_s3_endpoint():
 def test_development_keeps_localhost_http_origin_supported():
     config = Settings(_env_file=None, app_env="development", cors_origins="http://localhost:3000")
     validate_production_settings(config)
+
+
+def test_production_requires_explicit_audit_signing_key_id():
+    with pytest.raises(RuntimeError, match="AUDIT_EXPORT_SIGNING_KEY_ID"):
+        validate_production_settings(production_settings(audit_export_signing_key_id=""))
