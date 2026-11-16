@@ -85,8 +85,16 @@ def validate_production_settings(config: Settings) -> None:
         endpoint = urlparse(config.s3_endpoint_url)
         if endpoint.scheme != "https" or not endpoint.netloc or endpoint.username or endpoint.password:
             raise RuntimeError("Production S3_ENDPOINT_URL must use HTTPS without embedded credentials")
-    if not config.clamav_host:
+    if not config.clamav_host.strip():
         raise RuntimeError("Production requires CLAMAV_HOST for malware scanning")
+    if not 1 <= config.clamav_port <= 65535:
+        raise RuntimeError("CLAMAV_PORT must be between 1 and 65535")
+    if not 1 <= config.clamav_timeout_seconds <= 120:
+        raise RuntimeError("CLAMAV_TIMEOUT_SECONDS must be between 1 and 120")
+    if not 1 <= config.max_upload_mb <= 100:
+        raise RuntimeError("MAX_UPLOAD_MB must be between 1 and 100 in production")
+    if not 1 <= config.access_token_expire_minutes <= 60:
+        raise RuntimeError("ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 60 in production")
     if len(config.db_runtime_password) < 32:
         raise RuntimeError("Production requires DB_RUNTIME_PASSWORD with at least 32 characters")
     database_url = config.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
