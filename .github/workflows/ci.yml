@@ -42,6 +42,15 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
       - run: alembic upgrade head
+      - name: Create restricted runtime role for RLS tests
+        run: |
+          PGPASSWORD=ledgergate_ci_password psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE ledgergate_runtime LOGIN PASSWORD 'runtime_ci_password' NOSUPERUSER NOBYPASSRLS;
+          GRANT CONNECT ON DATABASE ledgergate TO ledgergate_runtime;
+          GRANT USAGE ON SCHEMA public TO ledgergate_runtime;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ledgergate_runtime;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ledgergate_runtime;
+          SQL
       - run: python -m compileall -q app migrations
       - run: pytest -q
 
