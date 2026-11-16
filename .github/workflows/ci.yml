@@ -69,6 +69,8 @@ jobs:
         run: |
           npm audit --json > /tmp/npm-audit.json || true
           node -e 'const a=require("/tmp/npm-audit.json"); for (const [name,v] of Object.entries(a.vulnerabilities||{})) console.log(JSON.stringify({name,severity:v.severity,isDirect:v.isDirect,range:v.range,fixAvailable:v.fixAvailable,via:(v.via||[]).map(x=>typeof x==="string"?x:{name:x.name,title:x.title,url:x.url,range:x.range})}));'
+      - name: Enforce high-severity dependency audit
+        run: npm audit --audit-level=high
       - run: npm run build
 
   docker:
