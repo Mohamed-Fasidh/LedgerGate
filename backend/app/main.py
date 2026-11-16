@@ -17,7 +17,7 @@ from app.config import settings
 from app.database import Base, engine, get_db
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, RefreshIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn
-from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles
+from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step
 from app.audit import record_event, verify_tenant_chain
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
@@ -97,33 +97,142 @@ def register(payload:RegisterIn,request:Request,response:Response,db:Session=Dep
     tokens=_issue_token_pair(db,user); db.commit(); _set_auth_cookies(response,tokens["refresh_token"]); return {"access_token":tokens["access_token"]}
 
 @app.post("/api/v1/auth/token",response_model=TokenOut)
-def login(request:Request,response:Response,username:str=Form(...),password:str=Form(...),db:Session=Depends(get_db)):
+def login(
+    request: Request,
+    response: Response,
+    username: str = Form(...),
+    password: str = Form(...),
+    totp_code: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
     _require_allowed_origin(request)
-    normalized_email=username.strip().lower()
-    email_hash=hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
-    remote_ip=request.client.host if request.client else "unknown"
-    ip_hash=hashlib.sha256(remote_ip.encode("utf-8")).hexdigest()
-    now=datetime.now(timezone.utc)
-    window_start=now-timedelta(minutes=15)
-    failed_query=db.query(LoginAttempt).filter(
+    normalized_email = username.strip().lower()
+    email_hash = hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
+    remote_ip = request.client.host if request.client else "unknown"
+    ip_hash = hashlib.sha256(remote_ip.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(minutes=15)
+    failed_query = db.query(LoginAttempt).filter(
         LoginAttempt.succeeded.is_(False),
-        LoginAttempt.attempted_at>=window_start,
-        or_(LoginAttempt.email_hash==email_hash,LoginAttempt.ip_hash==ip_hash)
+        LoginAttempt.attempted_at >= window_start,
+        or_(LoginAttempt.email_hash == email_hash, LoginAttempt.ip_hash == ip_hash),
     )
-    failures=failed_query.count()
-    if failures>=10:
-        oldest=failed_query.order_by(LoginAttempt.attempted_at.asc()).first()
-        oldest_at=oldest.attempted_at if oldest else now-timedelta(minutes=15)
-        if oldest_at.tzinfo is None: oldest_at=oldest_at.replace(tzinfo=timezone.utc)
-        retry_after=max(1,900-int((now-oldest_at).total_seconds()))
-        raise HTTPException(429,"Too many login attempts. Try again later.",headers={"Retry-After":str(retry_after)})
-    user=db.query(User).filter(User.email==normalized_email).first()
-    authenticated=bool(user and verify_password(password,user.hashed_password))
-    db.add(LoginAttempt(email_hash=email_hash,ip_hash=ip_hash,succeeded=authenticated,attempted_at=now))
+    failures = failed_query.count()
+    if failures >= 10:
+        oldest = failed_query.order_by(LoginAttempt.attempted_at.asc()).first()
+        oldest_at = oldest.attempted_at if oldest else window_start
+        if oldest_at.tzinfo is None:
+            oldest_at = oldest_at.replace(tzinfo=timezone.utc)
+        retry_after = max(1, 900 - int((now - oldest_at).total_seconds()))
+        raise HTTPException(429, "Too many login attempts. Try again later.", headers={"Retry-After": str(retry_after)})
+
+    user = db.query(User).filter(User.email == normalized_email).with_for_update().first()
+    password_valid = bool(user and verify_password(password, user.hashed_password))
+    matched_step = None
+    authenticated = password_valid
+    if password_valid and user.mfa_enabled:
+        try:
+            secret = decrypt_totp_secret(user.mfa_secret_encrypted or "")
+            matched_step = matching_totp_step(secret, totp_code, last_used_step=user.mfa_last_used_step)
+        except RuntimeError:
+            matched_step = None
+        authenticated = matched_step is not None
+
+    db.add(LoginAttempt(email_hash=email_hash, ip_hash=ip_hash, succeeded=authenticated, attempted_at=now))
     db.commit()
-    if not authenticated: raise HTTPException(401,"Incorrect email or password")
+    if not authenticated:
+        raise HTTPException(401, "Incorrect email, password, or authenticator code")
+
+    if matched_step is not None:
+        user.mfa_last_used_step = matched_step
+        db.commit()
     set_database_tenant(db, user.tenant_id)
-    tokens=_issue_token_pair(db,user); db.commit(); _set_auth_cookies(response,tokens["refresh_token"]); return {"access_token":tokens["access_token"]}
+    tokens = _issue_token_pair(db, user)
+    db.commit()
+    _set_auth_cookies(response, tokens["refresh_token"])
+    return {"access_token": tokens["access_token"]}
+
+
+@app.get("/api/v1/auth/mfa/status")
+def mfa_status(user: User = Depends(get_current_user)):
+    return {"enabled": bool(user.mfa_enabled), "method": "totp" if user.mfa_enabled else None}
+
+
+@app.post("/api/v1/auth/mfa/setup")
+def setup_mfa(
+    current_password: str = Form(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not verify_password(current_password, user.hashed_password):
+        raise HTTPException(403, "Current password is incorrect")
+    if user.mfa_enabled:
+        raise HTTPException(409, "MFA is already enabled; disable it before re-enrolling")
+    try:
+        secret = generate_totp_secret()
+        user.mfa_secret_encrypted = encrypt_totp_secret(secret)
+        db.commit()
+    except RuntimeError as exc:
+        db.rollback()
+        raise HTTPException(503, str(exc))
+    label = quote(f"LedgerGate:{user.email}")
+    issuer = quote("LedgerGate")
+    otpauth_url = f"otpauth://totp/{label}?secret={secret}&issuer={issuer}&algorithm=SHA1&digits=6&period=30"
+    return {"secret": secret, "otpauth_url": otpauth_url, "issuer": "LedgerGate", "account": user.email}
+
+
+@app.post("/api/v1/auth/mfa/enable")
+def enable_mfa(
+    totp_code: str = Form(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    locked_user = db.query(User).filter(User.id == user.id, User.tenant_id == user.tenant_id).with_for_update().first()
+    if not locked_user or not locked_user.mfa_secret_encrypted:
+        raise HTTPException(409, "Start MFA setup before enabling it")
+    if locked_user.mfa_enabled:
+        raise HTTPException(409, "MFA is already enabled")
+    try:
+        secret = decrypt_totp_secret(locked_user.mfa_secret_encrypted)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    matched_step = matching_totp_step(secret, totp_code, last_used_step=locked_user.mfa_last_used_step)
+    if matched_step is None:
+        raise HTTPException(400, "Invalid or expired authenticator code")
+    locked_user.mfa_enabled = True
+    locked_user.mfa_enabled_at = datetime.now(timezone.utc)
+    locked_user.mfa_last_used_step = matched_step
+    record_event(db, locked_user, "user", locked_user.id, "mfa_enabled", {"method": "totp"})
+    db.commit()
+    return {"status": "enabled", "method": "totp"}
+
+
+@app.post("/api/v1/auth/mfa/disable")
+def disable_mfa(
+    current_password: str = Form(...),
+    totp_code: str = Form(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    locked_user = db.query(User).filter(User.id == user.id, User.tenant_id == user.tenant_id).with_for_update().first()
+    if not locked_user or not locked_user.mfa_enabled or not locked_user.mfa_secret_encrypted:
+        raise HTTPException(409, "MFA is not enabled")
+    if not verify_password(current_password, locked_user.hashed_password):
+        raise HTTPException(403, "Current password is incorrect")
+    try:
+        secret = decrypt_totp_secret(locked_user.mfa_secret_encrypted)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    matched_step = matching_totp_step(secret, totp_code, last_used_step=locked_user.mfa_last_used_step)
+    if matched_step is None:
+        raise HTTPException(400, "Invalid or expired authenticator code")
+    locked_user.mfa_enabled = False
+    locked_user.mfa_secret_encrypted = None
+    locked_user.mfa_enabled_at = None
+    locked_user.mfa_last_used_step = None
+    record_event(db, locked_user, "user", locked_user.id, "mfa_disabled", {"method": "totp"})
+    db.commit()
+    return {"status": "disabled"}
 
 
 
