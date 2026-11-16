@@ -28,6 +28,7 @@ Configure all values through the cloud secret manager or protected deployment en
 - Strong, unique `JWT_SECRET_KEY` (at least 32 characters of cryptographically random material).
 - Strong, separate `POSTGRES_PASSWORD` and `DB_RUNTIME_PASSWORD`.
 - `MIGRATION_DATABASE_URL` for the migration owner; `DATABASE_URL` for the restricted `ledgergate_runtime` role.
+- Production `DATABASE_URL` must use `sslmode=verify-full` and an explicit mounted `sslrootcert` CA bundle; do not downgrade to `require`, `prefer`, or plaintext. Mount the CA certificate read-only and include its path in the connection URL.
 - Exact `CORS_ORIGINS` containing the public UI origin only.
 - `STORAGE_BACKEND=s3`, `S3_BUCKET`, `S3_REGION`, and workload IAM credentials/identity.
 - Private ClamAV endpoint, signature update process, and scanner resource limits.

@@ -7,7 +7,7 @@ from app.config import Settings, validate_production_settings
 def production_settings(**overrides):
     values = {
         "app_env": "production",
-        "database_url": "postgresql+psycopg://ledgergate_runtime:runtime-password@db.internal:5432/ledgergate",
+        "database_url": "postgresql+psycopg://ledgergate_runtime:runtime-password@db.internal:5432/ledgergate?sslmode=verify-full&sslrootcert=%2Frun%2Fsecrets%2Fpostgres-ca.crt",
         "jwt_secret_key": "j" * 48,
         "mfa_encryption_key": Fernet.generate_key().decode("ascii"),
         "email_outbox_encryption_key": Fernet.generate_key().decode("ascii"),
@@ -118,3 +118,14 @@ def test_production_requires_dedicated_valid_email_outbox_encryption_key():
         validate_production_settings(production_settings(email_outbox_encryption_key=""))
     with pytest.raises(RuntimeError, match="valid Fernet key"):
         validate_production_settings(production_settings(email_outbox_encryption_key="not-a-fernet-key"))
+
+
+def test_production_requires_verified_postgresql_tls():
+    with pytest.raises(RuntimeError, match="sslmode=verify-full"):
+        validate_production_settings(
+            production_settings(database_url="postgresql+psycopg://ledgergate_runtime:runtime-password@db.internal:5432/ledgergate?sslmode=require&sslrootcert=/run/secrets/postgres-ca.crt")
+        )
+    with pytest.raises(RuntimeError, match="sslrootcert"):
+        validate_production_settings(
+            production_settings(database_url="postgresql+psycopg://ledgergate_runtime:runtime-password@db.internal:5432/ledgergate?sslmode=verify-full")
+        )
