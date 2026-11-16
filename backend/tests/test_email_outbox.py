@@ -23,6 +23,7 @@ def db_factory(tmp_path, monkeypatch):
 def _enqueue(factory, url="https://app.example.com/#verify_email_token=one-time-secret"):
     with factory() as db:
         row = enqueue_email(db, "person@example.com", "email_verification", url)
+        db.flush()
         row_id = row.id
         db.commit()
         return row_id
