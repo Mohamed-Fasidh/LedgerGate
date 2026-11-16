@@ -69,7 +69,7 @@ class _DB:
 def test_registration_creates_unverified_account_and_emails_single_use_link(monkeypatch):
     db = _DB()
     queued = []
-    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url: queued.append((email, kind, url)))
+    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url, token_hash: queued.append((email, kind, url, token_hash)))
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
     monkeypatch.setattr(main, "hash_password", lambda value: "hashed-password")
     monkeypatch.setattr(settings, "public_app_url", "https://app.example.com")
