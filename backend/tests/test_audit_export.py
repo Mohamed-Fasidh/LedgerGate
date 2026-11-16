@@ -358,3 +358,34 @@ def test_audit_export_does_not_query_past_verified_chain_head(monkeypatch):
     actor = SimpleNamespace(id=7, tenant_id="tenant-a", role=Role.admin)
     result = main.export_audit_events(after_id=12, batch_size=100, db=DB(), user=actor)
     assert result == {"status": "no_events", "after_id": 12, "event_count": 0}
+
+
+def test_audit_export_locks_tenant_writers_before_verifying_chain(monkeypatch):
+    import app.main as main
+    from types import SimpleNamespace
+    from app.models import Role
+
+    calls = []
+    monkeypatch.setattr(main, "verify_tenant_chain", lambda db, tenant_id: (
+        calls.append("verify") or {
+            "valid": True, "verified_events": 12, "head_hash": "a" * 64,
+            "last_event_id": 12,
+        }
+    ))
+
+    class DB:
+        bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        def execute(self, statement, params):
+            calls.append("lock")
+            assert "pg_advisory_xact_lock" in str(statement)
+            assert params == {"tenant_id": "tenant-a"}
+
+        def query(self, model):
+            raise AssertionError("Cursor at verified head should not need an event query")
+
+    actor = SimpleNamespace(id=7, tenant_id="tenant-a", role=Role.admin)
+    result = main.export_audit_events(after_id=12, batch_size=100, db=DB(), user=actor)
+
+    assert result == {"status": "no_events", "after_id": 12, "event_count": 0}
+    assert calls == ["lock", "verify"]
