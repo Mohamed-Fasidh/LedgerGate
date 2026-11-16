@@ -168,7 +168,8 @@ def logout(payload: RefreshIn, db: Session = Depends(get_db)):
         session.revoked_at = datetime.now(timezone.utc)
         db.commit()
     return {"status": "logged_out"}
-\n@app.post("/api/v1/users")
+
+@app.post("/api/v1/users")
 def create_tenant_user(email:str,password:str=Form(...),role:str=Form("analyst"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
     if len(password)<12 or len(password)>72: raise HTTPException(400,"Password must be 12-72 characters")
     if role not in ("analyst","reviewer"): raise HTTPException(400,"Only analyst or reviewer accounts can be created here")
