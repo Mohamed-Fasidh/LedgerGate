@@ -132,9 +132,15 @@ def _record_registration_attempt(db: Session, email: str, remote_ip: str, now: d
     if stale_ids:
         db.query(RegistrationAttempt).filter(RegistrationAttempt.id.in_(stale_ids)).delete(synchronize_session=False)
 
+    # Do not persist repeated blocked requests: otherwise an attacker can turn
+    # the throttle table itself into an unbounded write-amplification target.
+    if retry_after is not None:
+        db.commit()
+        return retry_after
+
     db.add(RegistrationAttempt(email_hash=email_hash, ip_hash=ip_hash, attempted_at=attempted_at))
     db.commit()
-    return retry_after
+    return None
 
 
 def _token_hash(token: str) -> str:
