@@ -101,8 +101,6 @@ def upgrade() -> None:
               ON account.id = token.user_id
              AND account.tenant_id = token.tenant_id
             WHERE token.token_hash = p_token_hash
-              AND token.used_at IS NULL
-              AND token.expires_at > now()
               AND account.is_active = TRUE
               AND account.email_verified = TRUE
             LIMIT 1
@@ -120,8 +118,6 @@ def upgrade() -> None:
               ON account.id = token.user_id
              AND account.tenant_id = token.tenant_id
             WHERE token.token_hash = p_token_hash
-              AND token.used_at IS NULL
-              AND token.expires_at > now()
               AND account.is_active = TRUE
               AND account.email_verified = FALSE
             LIMIT 1
