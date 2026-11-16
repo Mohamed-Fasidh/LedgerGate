@@ -30,6 +30,9 @@ services:
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       CLAMAV_HOST: clamav
       CLAMAV_PORT: 3310
+    # Local Compose bootstraps schema/role for developer convenience. Production
+    # deployments should run these as a one-shot release job before API rollout.
+    command: ["sh", "-c", "alembic upgrade head && ./scripts/bootstrap_runtime_role.sh && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
     volumes:
