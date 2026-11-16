@@ -229,3 +229,12 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Isolated the persistent sensitive-authentication throttle helpers in this unit test; dedicated tests continue to cover the shared throttle behavior.
 - Commit: `76aae99b8adb2978915ff1d2f042ec73e7a24db4`.
 - A new full CI result for this exact commit is required; no green result is claimed yet.
+
+## MFA regression correction — verified by full CI (2026-11-16)
+
+- Corrected the MFA-disable regression test to call the endpoint with its actual `request` and `response` parameters.
+- Isolated the shared sensitive-authentication throttle helpers in this unit test; dedicated throttle tests remain responsible for exercising the persistent throttle behavior.
+- GitHub Actions run [43856458704](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43856458704) completed successfully on PR head `87638a9c81ead24c799dd7ca53ffd1793e9d9c8e`.
+- Verified job results: backend (Alembic migrations, restricted runtime-role bootstrap, Python compilation, and pytest), frontend (dependency audit and production build), and Docker (operational-script tests, backup/restore checks, container hardening, Compose validation, and image builds) all passed.
+- This is repository CI evidence only. It does not replace staging/UAT, provisioned cloud validation, independent security testing, real backup/restore drills, or production sign-off.
+- PR #5 remains open and unmerged pending review and production acceptance.
