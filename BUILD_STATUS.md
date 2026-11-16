@@ -4,9 +4,9 @@ Last checked: 2026-11-16
 
 ## Latest full CI verification — 2026-11-16
 
-- GitHub Actions run [43869298071](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43869298071) completed successfully on PR #5 head `186eb4ea5ce06f1e62f320009f0ae830e7764da1`.
+- GitHub Actions run [43870540064](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43870540064) completed successfully on PR #5 head `04ffe33851e480fff57c749b5fc0d93e8da36511`.
 - Backend migrations, restricted runtime-role bootstrap, Python compilation, and the full pytest suite passed. Frontend dependency audit and Next.js production build passed. Docker operational checks, Compose validation, and both image builds passed.
-- Password recovery uses hashed single-use reset tokens with a 30-minute expiry, generic responses, request throttling, optional MFA verification, audit logging, access/refresh session revocation, and URL-fragment tokens so secrets are not sent in HTTP request URLs.
+- Identity lifecycle now includes mandatory email verification for new registrations and email-based password recovery. Verification links are single-use and expire after 24 hours; reset links are single-use and expire after 30 minutes. Both use SHA-256 token hashes, generic resend/reset responses, shared email/IP throttling, authenticated SMTP STARTTLS, and URL-fragment tokens. Password reset additionally requires MFA when enabled and revokes all sessions.
 - SMTP delivery uses authenticated STARTTLS on port 587. Production startup requires SMTP and HTTPS public-app configuration; actual provider delivery and mailbox verification remain external deployment checks.
 - Exactly one workflow-run cleanup schedule is retained: `.github/workflows/cleanup-unsuccessful-runs.yml`, every five minutes. It targets completed failed and cancelled runs only. GitHub Actions scheduled workflows do not support a one-minute cadence.
 - PR #5 remains open and unmerged. This CI result verifies repository automation only; it is not staging or production deployment evidence.
@@ -15,7 +15,7 @@ Last checked: 2026-11-16
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest fully passing CI:** run [43869298071](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43869298071) passed backend, frontend, and Docker on PR #5 head `186eb4ea5ce06f1e62f320009f0ae830e7764da1`. PR #5 is open and unmerged.
+- **Latest fully passing CI:** run [43870540064](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43870540064) passed backend, frontend, and Docker on PR #5 head `04ffe33851e480fff57c749b5fc0d93e8da36511`. PR #5 is open and unmerged.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
@@ -33,7 +33,7 @@ Last checked: 2026-11-16
 ### Security and audit
 - Password hashing, short-lived access JWTs, persisted refresh sessions, 30-day refresh expiry, single-use rotation, reuse detection/family revocation, logout, and sign-out-all.
 - Host-only HttpOnly refresh cookie, production Secure flag, SameSite=Lax, CSRF cookie/header comparison, allowlisted Origin checks, and frontend removal of refresh tokens from web storage.
-- Email-based password recovery with a 48-byte random single-use token stored only as SHA-256, 30-minute expiry, generic 202 responses, shared email/IP throttling, authenticated SMTP STARTTLS, MFA verification when enabled, password-change audit event, and revocation of access/refresh sessions. The frontend supports reset requests and token confirmation.
+- Email verification and password recovery with cryptographically random single-use tokens stored only as SHA-256 hashes. New registrations remain unable to sign in until their email is verified; verification links expire after 24 hours, reset links after 30 minutes. Generic responses, per-email/IP throttling, SMTP STARTTLS, frontend verification/resend/reset screens, MFA challenge on reset, audit logging, and immediate session revocation are implemented.
 - Optional authenticator-app TOTP MFA, encrypted TOTP secrets, replay prevention, failed-code throttling, and one-time hashed recovery codes. Disabling MFA requires the current password plus fresh TOTP or an unused recovery code, revokes all active refresh sessions, clears auth cookies, and records the revoked-session count in the audit event.
 - Tenant-wide idempotency for supported write operations, request fingerprint conflict protection, replayed response handling, and bounded tenant-admin retention maintenance.
 - Append-only audit mutation protection, per-tenant SHA-256 event chains, admin chain verification, and signed audit export to a separately provisioned S3 Object Lock bucket with COMPLIANCE retention and AES256 server-side encryption.
@@ -50,7 +50,7 @@ The passing run verifies this exact PR #5 head. It does not certify cloud config
 ## Remaining work before production
 
 ### Application and identity
-- SSO/OIDC, verified email, durable email-delivery retries/outbox, and richer session/device management. Password reset/account recovery is implemented; external SMTP delivery and mailbox verification must still be validated in staging.
+- SSO/OIDC, durable email-delivery outbox/retries, and richer session/device management. Email verification and password reset are implemented; external SMTP delivery, real mailbox receipt, and full recovery scenarios must still be validated in staging.
 - Registration now has persistent 15-minute limits (5 per normalized email and 20 per source IP), keyed HMAC identifiers, PostgreSQL advisory-lock serialization, bounded stale-row cleanup, and regression/concurrency coverage. Login throttling now uses keyed HMAC identifiers, cross-replica PostgreSQL advisory locks, a 10-failure/15-minute threshold, bounded cleanup, and composite query indexes; PostgreSQL concurrency coverage verifies simultaneous requests are serialized. Continue reviewing other unauthenticated account lifecycle endpoints and extend idempotency to any remaining or future non-repeatable writes.
 - Validate MFA recovery, administrator-assisted recovery procedures, and MFA-disable/session-revocation behavior with real multi-user scenarios.
 
