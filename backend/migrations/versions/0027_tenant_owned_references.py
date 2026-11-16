@@ -244,7 +244,7 @@ def upgrade() -> None:
             END IF;
             RETURN NEW;
         END;
-        $$;;
+        $$;
     """)
 
     for table in ("users", "suppliers", "purchase_orders", "approval_policies", "invoices"):
