@@ -142,3 +142,18 @@ def test_cli_rejects_unbounded_keyring_entries(tmp_path, capsys, keyring):
 
     assert result == 2
     assert "32-4096 characters" in capsys.readouterr().err
+
+
+def test_cli_rejects_non_regular_export_input(tmp_path, capsys):
+    document, keyring = _signed_valid_chain_document()
+    keyring_path = tmp_path / "keyring.json"
+    keyring_path.write_text(json.dumps(keyring), encoding="utf-8")
+    if os.name == "posix":
+        keyring_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    directory_path = tmp_path / "export-directory"
+    directory_path.mkdir()
+
+    result = main(["--document", str(directory_path), "--keyring-file", str(keyring_path)])
+
+    assert result == 2
+    assert "regular file" in capsys.readouterr().err
