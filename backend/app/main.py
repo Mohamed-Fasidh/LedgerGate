@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, Role, InvoiceStatus
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, RefreshIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn
 from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles
 from app.audit import record_event, verify_tenant_chain
@@ -183,26 +183,60 @@ def me(user:User=Depends(get_current_user)):
     return {"id":user.id,"email":user.email,"tenant_id":user.tenant_id,"tenant_name":user.tenant_name,"role":user.role.value}
 
 @app.post("/api/v1/suppliers")
-def create_supplier(payload:SupplierIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
-    obj=Supplier(tenant_id=user.tenant_id,**payload.model_dump()); db.add(obj)
+def create_supplier(payload:SupplierIn,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    _validate_idempotency_key(idempotency_key)
+    payload_data=payload.model_dump()
+    operation="supplier.create"
+    fingerprint=_request_fingerprint(operation,payload_data)
+    if idempotency_key:
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+        if cached is not None: return cached
+    obj=Supplier(tenant_id=user.tenant_id,**payload_data); db.add(obj)
     try:
-        db.flush(); record_event(db,user,"supplier",obj.id,"created",{"name":obj.name}); db.commit(); db.refresh(obj)
-    except IntegrityError: db.rollback(); raise HTTPException(409,"Supplier already exists")
-    return {"id":obj.id,"name":obj.name,"tax_id":obj.tax_id}
+        db.flush()
+        response={"id":obj.id,"name":obj.name,"tax_id":obj.tax_id}
+        if idempotency_key:
+            _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
+        record_event(db,user,"supplier",obj.id,"created",{"name":obj.name,"idempotent":bool(idempotency_key)})
+        db.commit()
+        return response
+    except IntegrityError:
+        db.rollback()
+        if idempotency_key:
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+            if cached is not None: return cached
+        raise HTTPException(409,"Supplier already exists")
 
 @app.get("/api/v1/suppliers")
 def list_suppliers(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     return [{"id":x.id,"name":x.name,"tax_id":x.tax_id} for x in db.query(Supplier).filter(Supplier.tenant_id==user.tenant_id).all()]
 
 @app.post("/api/v1/purchase-orders")
-def create_po(payload:POIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+def create_po(payload:POIn,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    _validate_idempotency_key(idempotency_key)
+    payload_data=payload.model_dump()
+    operation="purchase_order.create"
+    fingerprint=_request_fingerprint(operation,payload_data)
+    if idempotency_key:
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+        if cached is not None: return cached
     supplier=db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first()
     if not supplier: raise HTTPException(404,"Supplier not found")
-    obj=PurchaseOrder(tenant_id=user.tenant_id,**payload.model_dump()); db.add(obj)
+    obj=PurchaseOrder(tenant_id=user.tenant_id,**payload_data); db.add(obj)
     try:
-        db.flush(); record_event(db,user,"purchase_order",obj.id,"created",{"po_number":obj.po_number}); db.commit(); db.refresh(obj)
-    except IntegrityError: db.rollback(); raise HTTPException(409,"Purchase order number already exists")
-    return po_view(obj)
+        db.flush()
+        response=po_view(obj)
+        if idempotency_key:
+            _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
+        record_event(db,user,"purchase_order",obj.id,"created",{"po_number":obj.po_number,"idempotent":bool(idempotency_key)})
+        db.commit()
+        return response
+    except IntegrityError:
+        db.rollback()
+        if idempotency_key:
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+            if cached is not None: return cached
+        raise HTTPException(409,"Purchase order number already exists")
 
 def po_view(x):
     return {"id":x.id,"po_number":x.po_number,"supplier_id":x.supplier_id,"currency":x.currency,"total_amount":float(x.total_amount),"description":x.description}
@@ -224,6 +258,25 @@ def _validate_idempotency_key(key: str | None) -> None:
 def _request_fingerprint(operation: str, payload: dict) -> str:
     canonical = json.dumps({"operation":operation,"payload":payload},sort_keys=True,separators=(",",":"),ensure_ascii=True,default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _get_idempotent_response(db: Session, tenant_id: str, key: str, operation: str, request_hash: str):
+    record = db.query(IdempotencyRecord).filter(
+        IdempotencyRecord.tenant_id == tenant_id,
+        IdempotencyRecord.key == key,
+    ).first()
+    if record is None:
+        return None
+    if record.operation != operation or record.request_hash != request_hash:
+        raise HTTPException(409, "Idempotency key was already used with a different operation or request")
+    return record.response_json
+
+
+def _store_idempotency_response(db: Session, tenant_id: str, key: str, operation: str, request_hash: str, response: dict):
+    db.add(IdempotencyRecord(
+        tenant_id=tenant_id, key=key, operation=operation,
+        request_hash=request_hash, response_json=response,
+    ))
 
 def _same_idempotent_request(existing: Invoice, operation: str, fingerprint: str) -> bool:
     # Older create-invoice keys predate operation/fingerprint columns; retain
