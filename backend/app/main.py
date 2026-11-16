@@ -1,16 +1,18 @@
 import uuid, hashlib, tempfile
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from urllib.parse import quote
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, Role, InvoiceStatus
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn
 from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
 from app.audit import record_event
@@ -39,9 +41,28 @@ def register(payload:RegisterIn,db:Session=Depends(get_db)):
     return {"access_token":create_access_token(user)}
 
 @app.post("/api/v1/auth/token",response_model=TokenOut)
-def login(username:str=Form(...),password:str=Form(...),db:Session=Depends(get_db)):
-    user=db.query(User).filter(User.email==username.lower()).first()
-    if not user or not verify_password(password,user.hashed_password): raise HTTPException(401,"Incorrect email or password")
+def login(request:Request,username:str=Form(...),password:str=Form(...),db:Session=Depends(get_db)):
+    normalized_email=username.strip().lower()
+    email_hash=hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
+    remote_ip=request.client.host if request.client else "unknown"
+    ip_hash=hashlib.sha256(remote_ip.encode("utf-8")).hexdigest()
+    now=datetime.now(timezone.utc)
+    window_start=now-timedelta(minutes=15)
+    failed_query=db.query(LoginAttempt).filter(
+        LoginAttempt.succeeded.is_(False),
+        LoginAttempt.attempted_at>=window_start,
+        or_(LoginAttempt.email_hash==email_hash,LoginAttempt.ip_hash==ip_hash)
+    )
+    failures=failed_query.count()
+    if failures>=10:
+        oldest=failed_query.order_by(LoginAttempt.attempted_at.asc()).first()
+        retry_after=max(1,900-int((now-oldest.attempted_at).total_seconds())) if oldest else 900
+        raise HTTPException(429,"Too many login attempts. Try again later.",headers={"Retry-After":str(retry_after)})
+    user=db.query(User).filter(User.email==normalized_email).first()
+    authenticated=bool(user and verify_password(password,user.hashed_password))
+    db.add(LoginAttempt(email_hash=email_hash,ip_hash=ip_hash,succeeded=authenticated,attempted_at=now))
+    db.commit()
+    if not authenticated: raise HTTPException(401,"Incorrect email or password")
     return {"access_token":create_access_token(user)}
 
 @app.post("/api/v1/users")
