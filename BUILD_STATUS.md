@@ -191,3 +191,6 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Successful password changes revoke all active refresh sessions, clear refresh/CSRF cookies, and append an audit event. Existing short-lived access tokens remain valid until their configured expiry.
 - Added regression coverage for invalid current password, password reuse, mandatory MFA, TOTP success, recovery-code consumption, refresh-session revocation, audit recording, and cookie clearing.
 - This does not replace email verification, password-reset delivery, SSO/OIDC, or independent production security review.
+
+
+- Frontend account-security settings now expose the password-change workflow with current/new password fields and conditional TOTP/recovery-code inputs when MFA is enabled. Successful changes return the user to sign-in with a clear confirmation message.
