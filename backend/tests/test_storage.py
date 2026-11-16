@@ -66,13 +66,13 @@ class FakeClamAVSocket:
 
 
 def test_clamav_scanner_accepts_bounded_ok_response(monkeypatch):
-    fake = FakeClamAVSocket(b"stream: OK\\0")
+    fake = FakeClamAVSocket(b"stream: OK\0")
     monkeypatch.setattr(storage.settings, "clamav_host", "clamav.test")
     monkeypatch.setattr(storage.settings, "clamav_port", 3310)
     monkeypatch.setattr(storage, "socket", type("SocketModule", (), {"create_connection": lambda *_args, **_kwargs: fake})())
 
     storage.scan_with_clamav(b"invoice bytes")
-    assert fake.sent.startswith(b"zINSTREAM\\0")
+    assert fake.sent.startswith(b"zINSTREAM\0")
     assert fake.timeout == storage.settings.clamav_timeout_seconds
 
 
