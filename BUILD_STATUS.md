@@ -272,3 +272,13 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - New business routes that omit an authentication/role dependency will fail the backend pytest suite.
 - This is a static dependency-presence guard; it complements, but does not replace, endpoint-level authorization, tenant-isolation, and penetration tests.
 - Added as `backend/tests/test_route_authentication.py`; current PR CI must execute it before the guard is considered verified.
+
+
+## Latest full CI verification — 2026-11-16
+
+- GitHub Actions run [43858350393](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43858350393) completed successfully on the current PR #5 head `38e07400e81e9d31aa7205bb67961cbb1939a130`.
+- Backend job passed: Alembic migrations, restricted runtime-role bootstrap, Python compilation, and the complete pytest suite (including the AST API-route authentication guard).
+- Frontend job passed: dependency advisory reporting, high-severity audit enforcement, and Next.js production build.
+- Docker job passed: operational-script validation, workflow-run cleanup safety regression test, production startup/migration guards, PostgreSQL backup/restore checks, non-root container and health-check checks, Compose validation, and backend/frontend image builds.
+- This verifies the repository CI pipeline at this commit only. It is not evidence of cloud provisioning, staging UAT, production deployment, independent security review, or a real disaster-recovery exercise.
+- PR #5 remains open and unmerged. The workflow-run cleanup schedule is every five minutes (GitHub Actions scheduled workflows do not support one-minute intervals) and will only become active on `main` after the PR is merged.
