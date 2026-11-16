@@ -101,7 +101,7 @@ Authorization: Bearer <access_token>
 
 ## Authenticator-app MFA
 
-Users can enroll a TOTP authenticator after signing in. The setup response returns the shared secret and an `otpauth://` URI once; display it only to the account owner and never log it. The secret is encrypted before being stored. Enabling MFA also returns ten one-time recovery codes; store them securely because only their hashes are retained and the raw codes are shown once.
+Users can enroll a TOTP authenticator after signing in. The setup response returns the shared secret and an `otpauth://` URI once; display it only to the account owner and never log it. The secret is encrypted before being stored. Enabling MFA also returns ten one-time 24-character recovery codes; store them securely because only their hashes are retained and the raw codes are shown once. Each code is single-use and can replace the authenticator code at login or when disabling MFA.
 
 1. Start enrollment with the current password:
 
