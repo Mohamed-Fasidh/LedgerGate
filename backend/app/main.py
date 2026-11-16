@@ -92,7 +92,7 @@ def _registration_lock_key(namespace: str, value_hash: str) -> int:
 
 def _login_credentials_are_valid(user: User | None, password_valid: bool) -> bool:
     """Require a valid password and an active account before issuing a session."""
-    return bool(password_valid and user is not None and user.is_active)
+    return bool(password_valid and user is not None and user.is_active and getattr(user, "email_verified", True))
 
 
 def _login_attempt_hash(value: str) -> str:
