@@ -113,6 +113,43 @@ def _lock_login_attempt_keys(db: Session, email_hash: str, ip_hash: str) -> None
         db.execute(sql_text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
 
 
+def _begin_sensitive_auth_attempt(
+    db: Session, user: User, request: Request, now: datetime | None = None
+) -> tuple[str, str, datetime]:
+    """Apply the shared distributed login budget before acquiring a user row lock."""
+    attempted_at = now or datetime.now(timezone.utc)
+    email_hash = _login_attempt_hash(user.email.strip().lower())
+    remote_ip = request.client.host if request.client else "unknown"
+    ip_hash = _login_attempt_hash(remote_ip)
+    _lock_login_attempt_keys(db, email_hash, ip_hash)
+    failed_query = db.query(LoginAttempt).filter(
+        LoginAttempt.succeeded.is_(False),
+        LoginAttempt.attempted_at >= attempted_at - timedelta(minutes=15),
+        or_(LoginAttempt.email_hash == email_hash, LoginAttempt.ip_hash == ip_hash),
+    )
+    if failed_query.count() >= 10:
+        oldest = failed_query.order_by(LoginAttempt.attempted_at.asc()).first()
+        oldest_at = oldest.attempted_at if oldest else attempted_at - timedelta(minutes=15)
+        if oldest_at.tzinfo is None:
+            oldest_at = oldest_at.replace(tzinfo=timezone.utc)
+        retry_after = max(1, 900 - int((attempted_at - oldest_at).total_seconds()))
+        db.rollback()
+        raise HTTPException(
+            429, "Too many authentication attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    return email_hash, ip_hash, attempted_at
+
+
+def _record_sensitive_auth_attempt(
+    db: Session, email_hash: str, ip_hash: str, succeeded: bool, attempted_at: datetime
+) -> None:
+    db.add(LoginAttempt(
+        email_hash=email_hash, ip_hash=ip_hash,
+        succeeded=succeeded, attempted_at=attempted_at,
+    ))
+
+
 def _record_registration_attempt(db: Session, email: str, remote_ip: str, now: datetime | None = None) -> int | None:
     """Persist and enforce distributed registration limits; return Retry-After when blocked."""
     attempted_at = now or datetime.now(timezone.utc)
@@ -319,17 +356,23 @@ def mfa_status(user: User = Depends(get_current_user)):
 
 @app.post("/api/v1/auth/mfa/setup")
 def setup_mfa(
+    request: Request,
     current_password: str = Form(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    email_hash, ip_hash, attempted_at = _begin_sensitive_auth_attempt(db, user, request)
     if not verify_password(current_password, user.hashed_password):
+        _record_sensitive_auth_attempt(db, email_hash, ip_hash, False, attempted_at)
+        db.commit()
         raise HTTPException(403, "Current password is incorrect")
     if user.mfa_enabled:
+        db.rollback()
         raise HTTPException(409, "MFA is already enabled; disable it before re-enrolling")
     try:
         secret = generate_totp_secret()
         user.mfa_secret_encrypted = encrypt_totp_secret(secret)
+        _record_sensitive_auth_attempt(db, email_hash, ip_hash, True, attempted_at)
         db.commit()
     except RuntimeError as exc:
         db.rollback()
@@ -342,27 +385,35 @@ def setup_mfa(
 
 @app.post("/api/v1/auth/mfa/enable")
 def enable_mfa(
+    request: Request,
     totp_code: str = Form(...),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    email_hash, ip_hash, attempted_at = _begin_sensitive_auth_attempt(db, user, request)
     locked_user = db.query(User).filter(User.id == user.id, User.tenant_id == user.tenant_id).with_for_update().first()
     if not locked_user or not locked_user.mfa_secret_encrypted:
+        db.rollback()
         raise HTTPException(409, "Start MFA setup before enabling it")
     if locked_user.mfa_enabled:
+        db.rollback()
         raise HTTPException(409, "MFA is already enabled")
     try:
         secret = decrypt_totp_secret(locked_user.mfa_secret_encrypted)
     except RuntimeError as exc:
+        db.rollback()
         raise HTTPException(503, str(exc))
     matched_step = matching_totp_step(secret, totp_code, last_used_step=locked_user.mfa_last_used_step)
     if matched_step is None:
+        _record_sensitive_auth_attempt(db, email_hash, ip_hash, False, attempted_at)
+        db.commit()
         raise HTTPException(400, "Invalid or expired authenticator code")
     recovery_codes = generate_mfa_recovery_codes()
     locked_user.mfa_enabled = True
     locked_user.mfa_enabled_at = datetime.now(timezone.utc)
     locked_user.mfa_last_used_step = matched_step
     locked_user.mfa_recovery_code_hashes = [hash_mfa_recovery_code(code) for code in recovery_codes]
+    _record_sensitive_auth_attempt(db, email_hash, ip_hash, True, attempted_at)
     record_event(db, locked_user, "user", locked_user.id, "mfa_enabled", {
         "method": "totp",
         "recovery_codes_issued": len(recovery_codes),
@@ -373,6 +424,7 @@ def enable_mfa(
 
 @app.post("/api/v1/auth/mfa/disable")
 def disable_mfa(
+    request: Request,
     response: Response,
     current_password: str = Form(...),
     totp_code: str | None = Form(default=None),
@@ -380,21 +432,31 @@ def disable_mfa(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    email_hash, ip_hash, attempted_at = _begin_sensitive_auth_attempt(db, user, request)
     locked_user = db.query(User).filter(User.id == user.id, User.tenant_id == user.tenant_id).with_for_update().first()
     if not locked_user or not locked_user.mfa_enabled or not locked_user.mfa_secret_encrypted:
+        db.rollback()
         raise HTTPException(409, "MFA is not enabled")
     if not verify_password(current_password, locked_user.hashed_password):
+        _record_sensitive_auth_attempt(db, email_hash, ip_hash, False, attempted_at)
+        db.commit()
         raise HTTPException(403, "Current password is incorrect")
     try:
         secret = decrypt_totp_secret(locked_user.mfa_secret_encrypted)
     except RuntimeError as exc:
+        db.rollback()
         raise HTTPException(503, str(exc))
     matched_step = matching_totp_step(secret, totp_code, last_used_step=locked_user.mfa_last_used_step)
     remaining_recovery_hashes = None
     if matched_step is None:
         remaining_recovery_hashes = consume_mfa_recovery_code(locked_user.mfa_recovery_code_hashes, recovery_code)
         if remaining_recovery_hashes is None:
+            _record_sensitive_auth_attempt(db, email_hash, ip_hash, False, attempted_at)
+            db.commit()
             raise HTTPException(400, "Invalid or expired authenticator/recovery code")
+        locked_user.mfa_recovery_code_hashes = remaining_recovery_hashes
+    else:
+        locked_user.mfa_last_used_step = matched_step
     locked_user.mfa_enabled = False
     locked_user.mfa_secret_encrypted = None
     locked_user.mfa_enabled_at = None
@@ -402,6 +464,7 @@ def disable_mfa(
     locked_user.mfa_recovery_code_hashes = []
     now = datetime.now(timezone.utc)
     revoked_count = _revoke_refresh_sessions(db, locked_user.tenant_id, locked_user.id, now)
+    _record_sensitive_auth_attempt(db, email_hash, ip_hash, True, attempted_at)
     record_event(
         db, locked_user, "user", locked_user.id, "mfa_disabled",
         {"method": "totp", "revoked_refresh_sessions": revoked_count},
@@ -409,7 +472,6 @@ def disable_mfa(
     db.commit()
     _clear_auth_cookies(response)
     return {"status": "disabled", "revoked_sessions": revoked_count}
-
 
 
 @app.post("/api/v1/auth/change-password")
