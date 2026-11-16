@@ -210,3 +210,66 @@ def test_logout_locks_session_and_revokes_its_entire_refresh_family(monkeypatch)
     assert any("auth_sessions.revoked_at" in item for item in family_conditions)
     assert captured["synchronize_session"] is False
     assert captured["committed"] is True
+
+
+def test_refresh_locks_account_before_session_and_rejects_deactivated_user(monkeypatch):
+    from datetime import datetime, timezone
+    from fastapi import Response
+    from starlette.requests import Request
+    from app import main
+    from app.models import AuthSession
+    import pytest
+    import uuid
+
+    token_id = str(uuid.uuid4())
+    family_id = str(uuid.uuid4())
+    inactive_user = User(id=9, tenant_id="tenant-test", role=Role.admin)
+    inactive_user.is_active = False
+    refresh_token, _ = create_refresh_token(inactive_user, token_id, family_id)
+    session_row = type("SessionRow", (), {
+        "expires_at": datetime.now(timezone.utc).replace(year=datetime.now(timezone.utc).year + 1),
+        "revoked_at": None,
+        "family_id": family_id,
+        "replaced_by_token_id": None,
+    })()
+    captured = {"queries": [], "committed": False}
+
+    class Query:
+        def __init__(self, model):
+            self.model = model
+            self.locked = False
+        def filter(self, *conditions):
+            return self
+        def with_for_update(self):
+            self.locked = True
+            return self
+        def first(self):
+            return inactive_user if self.model is User else session_row
+
+    class DB:
+        def query(self, model):
+            query = Query(model)
+            captured["queries"].append(query)
+            return query
+        def commit(self):
+            captured["committed"] = True
+
+    monkeypatch.setattr(main, "_require_csrf", lambda request: None)
+    monkeypatch.setattr(main, "set_database_tenant", lambda db, tenant_id: None)
+    request = Request({
+        "type": "http", "http_version": "1.1", "method": "POST",
+        "scheme": "http", "path": "/api/v1/auth/refresh",
+        "raw_path": b"/api/v1/auth/refresh", "query_string": b"",
+        "headers": [(b"cookie", f"ledgergate_refresh={refresh_token}".encode())],
+        "server": ("testserver", 80), "client": ("testclient", 123),
+        "root_path": "",
+    })
+
+    with pytest.raises(Exception) as exc:
+        main.refresh_session(request, Response(), None, DB())
+
+    assert getattr(exc.value, "status_code", None) == 401
+    assert [query.model for query in captured["queries"]] == [User, AuthSession]
+    assert all(query.locked for query in captured["queries"])
+    assert session_row.revoked_at is not None
+    assert captured["committed"] is True
