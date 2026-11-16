@@ -36,8 +36,9 @@ Last checked: 2026-11-16
 
 ## Current verified state — main branch
 
-- Latest verified main commit: `69f07b98c323d23b4fad0ff3649dfb919eb7b647` (PR #22). Post-merge backend, frontend, Docker, Python CodeQL, and JavaScript/TypeScript CodeQL all passed.
+- Latest verified main commit: `2d30d51d5ef2f71e3ddc0988d54d68a824d9fdd6` (PR #27). PR CI [43899662425](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43899662425) and CodeQL [43899662549](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43899662549) passed; post-merge main CI [43899977350](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43899977350) and CodeQL [43899977531](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43899977531) passed all jobs.
 - The runtime role is provisioned through an explicit current-table allowlist. Future tables and sequences receive no default runtime grants; each new runtime dependency requires a reviewed grant change and regression test.
+- `users`, `password_reset_tokens`, and `email_verification_tokens` use PostgreSQL FORCE RLS. Pre-authentication discovery uses four fixed SECURITY DEFINER functions owned by `ledgergate_auth_owner` (NOLOGIN/BYPASSRLS); the runtime role is not a member and receives only EXECUTE grants. The auth owner has no persistent CREATE privilege: migration 0026 grants it only while defining the reviewed functions, then revokes it. Migration 0026 adds/backfills tenant ownership for one-time auth tokens. The privileged auth-owner bootstrap runs before migrations; runtime grants are applied afterward.
 - PR #3 remains an open pull request against the separate `production-readiness` branch, not `main`. Its 74-commit implementation has a different Alembic migration lineage and overlaps later `main` security changes; it is not included in the verified `main` branch and must not be merged wholesale.
 
 - PR #4 and PR #5 are both **merged** into `main`. PR #5 merge commit: `f50bdf6b23c9d882e8cf67ef45e2024971f6bdb3`.
