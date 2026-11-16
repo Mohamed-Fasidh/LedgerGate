@@ -12,8 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, Role, InvoiceStatus
-from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, Role, InvoiceStatus
+from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn
 from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
 from app.audit import record_event
 from app.agent.runtime import AgentContext, ReconciliationAgent
@@ -110,7 +110,7 @@ def list_pos(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     return [po_view(x) for x in db.query(PurchaseOrder).filter(PurchaseOrder.tenant_id==user.tenant_id).all()]
 
 def invoice_view(x):
-    return {"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"created_at":x.created_at.isoformat()}
+    return {"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"approval_stage":x.approval_stage or 1,"approval_total_stages":len(x.approval_steps_snapshot or []),"created_at":x.created_at.isoformat()}
 
 def _validate_idempotency_key(key: str | None) -> None:
     if key is not None and (len(key)<8 or len(key)>128 or not key.isascii() or any(ord(c)<33 or ord(c)>126 for c in key)):
@@ -289,33 +289,128 @@ def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_cu
     db.commit()
     return {"invoice_id":inv.id,"status":inv.status.value,"decision":decision,"findings":result.findings,"evidence":evidence,"requires_human_review":decision=="HUMAN_REVIEW"}
 
+def _resolve_invoice_approval_plan(db:Session,inv:Invoice,user:User):
+    if inv.approval_steps_snapshot:
+        return inv.approval_steps_snapshot
+    amount=float(inv.amount or 0)
+    policy=db.query(ApprovalPolicy).filter(
+        ApprovalPolicy.tenant_id==user.tenant_id,
+        ApprovalPolicy.is_active.is_(True),
+        ApprovalPolicy.min_amount<=amount,
+        or_(ApprovalPolicy.max_amount.is_(None),ApprovalPolicy.max_amount>amount)
+    ).order_by(ApprovalPolicy.min_amount.desc()).first()
+    steps=policy.approval_steps if policy else [["reviewer","admin"]]
+    inv.approval_policy_id=policy.id if policy else None
+    inv.approval_steps_snapshot=steps
+    inv.approval_stage=1
+    return steps
+
+def _validate_approval_actor(db:Session,inv:Invoice,user:User,steps:list):
+    stage=inv.approval_stage or 1
+    if stage<1 or stage>len(steps):
+        raise HTTPException(409,"Invoice approval workflow is in an invalid state")
+    allowed_roles=steps[stage-1]
+    if user.role.value not in allowed_roles:
+        raise HTTPException(403,f"Current approval stage requires one of these roles: {', '.join(allowed_roles)}")
+    previous=db.query(InvoiceApproval).filter(
+        InvoiceApproval.tenant_id==user.tenant_id,
+        InvoiceApproval.invoice_id==inv.id,
+        InvoiceApproval.approver_user_id==user.id
+    ).first()
+    if previous:
+        raise HTTPException(409,"You have already submitted a decision for this invoice")
+    return stage
+
+@app.post("/api/v1/approval-policies")
+def create_approval_policy(payload:ApprovalPolicyIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+    allowed={"admin","reviewer"}
+    if not payload.approval_steps or any(not stage or len(stage)>2 or len(set(stage))!=len(stage) or not set(stage).issubset(allowed) for stage in payload.approval_steps):
+        raise HTTPException(400,"Each approval stage must contain one or two distinct roles: admin and/or reviewer")
+    if payload.max_amount is not None and payload.max_amount<=payload.min_amount:
+        raise HTTPException(400,"max_amount must be greater than min_amount")
+    existing=db.query(ApprovalPolicy).filter(ApprovalPolicy.tenant_id==user.tenant_id,ApprovalPolicy.is_active.is_(True)).all()
+    for policy in existing:
+        old_min=float(policy.min_amount)
+        old_max=float(policy.max_amount) if policy.max_amount is not None else None
+        overlaps=(payload.max_amount is None or old_min<payload.max_amount) and (old_max is None or payload.min_amount<old_max)
+        if overlaps:
+            raise HTTPException(409,f"Amount range overlaps active policy '{policy.name}'")
+    policy=ApprovalPolicy(tenant_id=user.tenant_id,created_by_user_id=user.id,name=payload.name,min_amount=payload.min_amount,max_amount=payload.max_amount,approval_steps=payload.approval_steps)
+    db.add(policy)
+    try:
+        db.flush()
+        record_event(db,user,"approval_policy",policy.id,"created",{"name":policy.name,"min_amount":payload.min_amount,"max_amount":payload.max_amount,"approval_steps":payload.approval_steps})
+        db.commit(); db.refresh(policy)
+    except IntegrityError:
+        db.rollback(); raise HTTPException(409,"An approval policy with this name already exists")
+    return {"id":policy.id,"name":policy.name,"min_amount":float(policy.min_amount),"max_amount":float(policy.max_amount) if policy.max_amount is not None else None,"approval_steps":policy.approval_steps,"is_active":policy.is_active}
+
+@app.get("/api/v1/approval-policies")
+def list_approval_policies(db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+    rows=db.query(ApprovalPolicy).filter(ApprovalPolicy.tenant_id==user.tenant_id).order_by(ApprovalPolicy.min_amount.asc()).all()
+    return [{"id":p.id,"name":p.name,"min_amount":float(p.min_amount),"max_amount":float(p.max_amount) if p.max_amount is not None else None,"approval_steps":p.approval_steps,"is_active":p.is_active} for p in rows]
+
+@app.post("/api/v1/approval-policies/{policy_id}/deactivate")
+def deactivate_approval_policy(policy_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+    policy=db.query(ApprovalPolicy).filter(ApprovalPolicy.id==policy_id,ApprovalPolicy.tenant_id==user.tenant_id).first()
+    if not policy: raise HTTPException(404,"Approval policy not found")
+    policy.is_active=False
+    record_event(db,user,"approval_policy",policy.id,"deactivated",{"name":policy.name})
+    db.commit()
+    return {"id":policy.id,"is_active":False}
+
 @app.post("/api/v1/invoices/{invoice_id}/approve")
-def approve(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+def approve(invoice_id:int,payload:ApprovalDecisionIn|None=None,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
     if inv.created_by_user_id == user.id: raise HTTPException(403,"Maker-checker policy: the invoice creator cannot approve their own invoice")
     if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before approval")
-    inv.status=InvoiceStatus.APPROVED
-    record_event(db,user,"invoice",inv.id,"human_approved",{"warning":"Approval recorded; no payment is initiated.","maker_user_id":inv.created_by_user_id})
+    steps=_resolve_invoice_approval_plan(db,inv,user)
+    stage=_validate_approval_actor(db,inv,user,steps)
+    db.add(InvoiceApproval(tenant_id=user.tenant_id,invoice_id=inv.id,policy_id=inv.approval_policy_id,stage=stage,approver_user_id=user.id,decision="approved",comment=payload.comment if payload else None))
     try:
+        db.flush()
+        if stage>=len(steps):
+            inv.status=InvoiceStatus.APPROVED
+            message="All approval stages completed. Human approval recorded; no payment was initiated."
+            record_event(db,user,"invoice",inv.id,"human_approved",{"stage":stage,"total_stages":len(steps),"maker_user_id":inv.created_by_user_id,"warning":"No payment is initiated."})
+        else:
+            inv.approval_stage=stage+1
+            message=f"Approval stage {stage} recorded. Waiting for stage {stage+1} of {len(steps)}."
+            record_event(db,user,"invoice",inv.id,"approval_stage_approved",{"stage":stage,"total_stages":len(steps),"next_stage_roles":steps[stage]})
         db.commit()
     except StaleDataError:
         db.rollback(); raise HTTPException(409,"Invoice changed concurrently; reload it before approving")
-    return {"id":inv.id,"status":inv.status.value,"message":"Human approval recorded. No payment was initiated."}
+    except IntegrityError:
+        db.rollback(); raise HTTPException(409,"An approval decision already exists for this user or stage")
+    return {"id":inv.id,"status":inv.status.value,"approval_stage":inv.approval_stage,"approval_total_stages":len(steps),"message":message}
 
 @app.post("/api/v1/invoices/{invoice_id}/reject")
-def reject(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+def reject(invoice_id:int,payload:ApprovalDecisionIn|None=None,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status in (InvoiceStatus.APPROVED,InvoiceStatus.REJECTED): raise HTTPException(409,"Invoice is already finalized")
     if inv.created_by_user_id == user.id: raise HTTPException(403,"Maker-checker policy: the invoice creator cannot reject their own invoice")
-    inv.status=InvoiceStatus.REJECTED; record_event(db,user,"invoice",inv.id,"human_rejected",{"maker_user_id":inv.created_by_user_id})
+    steps=_resolve_invoice_approval_plan(db,inv,user)
+    stage=_validate_approval_actor(db,inv,user,steps)
+    db.add(InvoiceApproval(tenant_id=user.tenant_id,invoice_id=inv.id,policy_id=inv.approval_policy_id,stage=stage,approver_user_id=user.id,decision="rejected",comment=payload.comment if payload else None))
+    inv.status=InvoiceStatus.REJECTED
+    record_event(db,user,"invoice",inv.id,"human_rejected",{"stage":stage,"total_stages":len(steps),"maker_user_id":inv.created_by_user_id})
     try:
         db.commit()
     except StaleDataError:
         db.rollback(); raise HTTPException(409,"Invoice changed concurrently; reload it before rejecting")
-    return {"id":inv.id,"status":inv.status.value}
+    except IntegrityError:
+        db.rollback(); raise HTTPException(409,"An approval decision already exists for this user or stage")
+    return {"id":inv.id,"status":inv.status.value,"approval_stage":stage,"message":"Invoice rejected at approval stage."}
+
+@app.get("/api/v1/invoices/{invoice_id}/approvals")
+def invoice_approvals(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    if not inv: raise HTTPException(404,"Invoice not found")
+    rows=db.query(InvoiceApproval).filter(InvoiceApproval.tenant_id==user.tenant_id,InvoiceApproval.invoice_id==inv.id).order_by(InvoiceApproval.stage.asc(),InvoiceApproval.created_at.asc()).all()
+    return {"invoice_id":inv.id,"policy_id":inv.approval_policy_id,"approval_steps":inv.approval_steps_snapshot or [["reviewer","admin"]],"current_stage":inv.approval_stage or 1,"decisions":[{"stage":r.stage,"approver_user_id":r.approver_user_id,"decision":r.decision,"comment":r.comment,"created_at":r.created_at.isoformat()} for r in rows]}
 
 @app.post("/api/v1/agent/memory")
 def add_agent_memory(content:str,memory_type:str="episodic",db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
