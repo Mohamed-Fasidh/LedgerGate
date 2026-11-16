@@ -362,25 +362,31 @@ def setup_mfa(
     user: User = Depends(get_current_user),
 ):
     email_hash, ip_hash, attempted_at = _begin_sensitive_auth_attempt(db, user, request)
-    if not verify_password(current_password, user.hashed_password):
+    locked_user = db.query(User).filter(
+        User.id == user.id, User.tenant_id == user.tenant_id, User.is_active.is_(True)
+    ).with_for_update().first()
+    if locked_user is None:
+        db.rollback()
+        raise HTTPException(401, "Account is no longer active")
+    if not verify_password(current_password, locked_user.hashed_password):
         _record_sensitive_auth_attempt(db, email_hash, ip_hash, False, attempted_at)
         db.commit()
         raise HTTPException(403, "Current password is incorrect")
-    if user.mfa_enabled:
+    if locked_user.mfa_enabled:
         db.rollback()
         raise HTTPException(409, "MFA is already enabled; disable it before re-enrolling")
     try:
         secret = generate_totp_secret()
-        user.mfa_secret_encrypted = encrypt_totp_secret(secret)
+        locked_user.mfa_secret_encrypted = encrypt_totp_secret(secret)
         _record_sensitive_auth_attempt(db, email_hash, ip_hash, True, attempted_at)
         db.commit()
     except RuntimeError as exc:
         db.rollback()
         raise HTTPException(503, str(exc))
-    label = quote(f"LedgerGate:{user.email}")
+    label = quote(f"LedgerGate:{locked_user.email}")
     issuer = quote("LedgerGate")
     otpauth_url = f"otpauth://totp/{label}?secret={secret}&issuer={issuer}&algorithm=SHA1&digits=6&period=30"
-    return {"secret": secret, "otpauth_url": otpauth_url, "issuer": "LedgerGate", "account": user.email}
+    return {"secret": secret, "otpauth_url": otpauth_url, "issuer": "LedgerGate", "account": locked_user.email}
 
 
 @app.post("/api/v1/auth/mfa/enable")
