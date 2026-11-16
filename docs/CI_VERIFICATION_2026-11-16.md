@@ -5,8 +5,8 @@
 - Repository: `Mohamed-Fasidh/LedgerGate`
 - Pull request: [#5 — Production readiness V2](https://github.com/Mohamed-Fasidh/LedgerGate/pull/5)
 - Branch: `hardening/production-readiness-v2`
-- Verified head: `186eb4ea5ce06f1e62f320009f0ae830e7764da1`
-- GitHub Actions run: [43869298071](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43869298071)
+- Verified head: `04ffe33851e480fff57c749b5fc0d93e8da36511`
+- GitHub Actions run: [43870540064](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43870540064)
 - Result: **success** — backend, frontend, and Docker jobs all completed successfully.
 
 ## Checks observed
@@ -31,10 +31,11 @@
 - Docker Compose validation
 - Backend and frontend image builds
 
-## Password recovery implementation verified by code and CI
+## Email verification and password recovery verified by code and CI
 
-- Reset tokens are generated from 48 bytes of cryptographic randomness; only their SHA-256 hashes are persisted. The emailed link carries the token in a URL fragment, so it is not sent in the HTTP request target or ordinary server access logs.
-- Tokens expire after 30 minutes, are single-use, and a new request invalidates prior outstanding links.
+- New registrations create an unverified account and send a 48-byte random verification token; only its SHA-256 hash is persisted. Verification tokens expire after 24 hours, are single-use, and are carried in a URL fragment so they are not sent in the HTTP request target or ordinary server access logs.
+- Sign-in is blocked until email verification succeeds. A generic resend endpoint shares the persistent per-email/IP throttle and invalidates prior outstanding verification links. Existing accounts are treated as verified by the migration default to avoid locking out current users.
+- Password reset tokens expire after 30 minutes, are single-use, and a new request invalidates prior outstanding links. Password-reset requests are limited to active, verified accounts.
 - Request responses do not disclose whether an account exists; requests share the existing per-email/IP throttle and email is dispatched after the generic response.
 - Confirmation requires a strong password and, when MFA is enabled, a fresh TOTP or unused recovery code.
 - Completion increments the account access-token version, revokes refresh sessions, clears browser auth cookies, and records an audit event.
@@ -53,4 +54,4 @@
 
 This is automated CI evidence for the exact PR head listed above. It does not establish that a live staging or production environment has been deployed or validated. It does not prove cloud IAM, TLS/WAF, S3 Object Lock, key custody/rotation, backup recovery, monitoring, or external email delivery.
 
-Verified email, SSO/OIDC, real SMTP provider delivery, durable email retries, cloud provisioning, staging UAT, and real recovery drills remain outstanding. PR #5 remains open and unmerged. No merge or deployment is performed by this verification record; merge still requires explicit authorization and appropriate independent review.
+SSO/OIDC, real SMTP provider delivery, durable email retries/outbox, cloud provisioning, staging UAT, and real recovery drills remain outstanding. PR #5 remains open and unmerged. No merge or deployment is performed by this verification record; merge still requires explicit authorization and appropriate independent review.
