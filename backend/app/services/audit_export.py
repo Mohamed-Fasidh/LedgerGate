@@ -5,6 +5,8 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from app.audit import calculate_event_hash, event_payload
+
 from app.config import settings
 from app.services.storage import _s3_client
 
@@ -63,6 +65,67 @@ def verify_audit_export_signature_with_keyring(document: dict, keyring: dict[str
         return verify_audit_export_signature(document, signing_key)
     except (AuditExportUnavailable, TypeError, ValueError):
         return False
+
+def verify_audit_export_document(document: dict, keyring: dict[str, str]) -> bool:
+    """Verify signature, export metadata, and every event's tenant hash-chain link."""
+    if not verify_audit_export_signature_with_keyring(document, keyring):
+        return False
+    try:
+        events = document.get("events")
+        tenant_id = document.get("tenant_id")
+        if not isinstance(events, list) or not events or not isinstance(tenant_id, str) or not tenant_id:
+            return False
+        if document.get("format") != "ledgergate-audit-export-v1":
+            return False
+        if document.get("event_count") != len(events):
+            return False
+
+        expected_previous = events[0].get("previous_hash")
+        if not isinstance(expected_previous, str) or len(expected_previous) != 64:
+            return False
+        if document.get("first_previous_hash") != expected_previous:
+            return False
+
+        previous_id = None
+        for event in events:
+            if not isinstance(event, dict) or event.get("tenant_id") != tenant_id:
+                return False
+            event_id = event.get("id")
+            if not isinstance(event_id, int) or isinstance(event_id, bool) or event_id < 1:
+                return False
+            if previous_id is not None and event_id <= previous_id:
+                return False
+            previous_id = event_id
+            if event.get("previous_hash") != expected_previous:
+                return False
+
+            created_at = event.get("created_at")
+            if not isinstance(created_at, str):
+                return False
+            timestamp = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            payload = event_payload(
+                tenant_id=event["tenant_id"],
+                actor_user_id=event.get("actor_user_id"),
+                entity_type=event.get("entity_type"),
+                entity_id=event.get("entity_id"),
+                action=event.get("action"),
+                details=event.get("details"),
+                created_at=timestamp,
+            )
+            calculated = calculate_event_hash(expected_previous, payload)
+            stored_hash = event.get("event_hash")
+            if not isinstance(stored_hash, str) or not hmac.compare_digest(stored_hash, calculated):
+                return False
+            expected_previous = stored_hash
+
+        return (
+            document.get("first_event_id") == events[0]["id"]
+            and document.get("last_event_id") == events[-1]["id"]
+            and document.get("last_event_hash") == expected_previous
+        )
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return False
+
 
 def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retention_days: int | None = None) -> dict:
     bucket = settings.audit_worm_bucket.strip()
