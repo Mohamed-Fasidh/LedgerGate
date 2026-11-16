@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, Role, InvoiceStatus
@@ -91,7 +91,7 @@ def create_invoice(payload:InvoiceIn,db:Session=Depends(get_db),user:User=Depend
     if payload.purchase_order_id:
         po=db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first()
         if not po: raise HTTPException(404,"Purchase order not found")
-    obj=Invoice(tenant_id=user.tenant_id,**payload.model_dump()); db.add(obj); db.flush()
+    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,**payload.model_dump()); db.add(obj); db.flush()
     record_event(db,user,"invoice",obj.id,"created",{"invoice_number":obj.invoice_number}); db.commit(); db.refresh(obj)
     return invoice_view(obj)
 
@@ -124,7 +124,7 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
     except Exception as exc:
         path.unlink(missing_ok=True); raise HTTPException(422,f"Document extraction failed: {type(exc).__name__}")
     candidate=fields.get("invoice_number") or f"UNCONFIRMED-{uuid.uuid4().hex[:10].upper()}"
-    obj=Invoice(tenant_id=user.tenant_id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.EXTRACTION_REVIEW,file_name=Path(file.filename or "document").name,file_path=str(path),extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
+    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.EXTRACTION_REVIEW,file_name=Path(file.filename or "document").name,file_path=str(path),extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
     db.add(obj); db.flush(); record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":hashlib.sha256(content).hexdigest(),"bytes":len(content)}); db.commit(); db.refresh(obj)
     return invoice_view(obj)
 
@@ -170,18 +170,28 @@ def approve(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
+    if inv.created_by_user_id == user.id: raise HTTPException(403,"Maker-checker policy: the invoice creator cannot approve their own invoice")
     if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before approval")
     inv.status=InvoiceStatus.APPROVED
-    record_event(db,user,"invoice",inv.id,"human_approved",{"warning":"Approval recorded; no payment is initiated."})
-    db.commit(); return {"id":inv.id,"status":inv.status.value,"message":"Human approval recorded. No payment was initiated."}
+    record_event(db,user,"invoice",inv.id,"human_approved",{"warning":"Approval recorded; no payment is initiated.","maker_user_id":inv.created_by_user_id})
+    try:
+        db.commit()
+    except StaleDataError:
+        db.rollback(); raise HTTPException(409,"Invoice changed concurrently; reload it before approving")
+    return {"id":inv.id,"status":inv.status.value,"message":"Human approval recorded. No payment was initiated."}
 
 @app.post("/api/v1/invoices/{invoice_id}/reject")
 def reject(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status in (InvoiceStatus.APPROVED,InvoiceStatus.REJECTED): raise HTTPException(409,"Invoice is already finalized")
-    inv.status=InvoiceStatus.REJECTED; record_event(db,user,"invoice",inv.id,"human_rejected",{})
-    db.commit(); return {"id":inv.id,"status":inv.status.value}
+    if inv.created_by_user_id == user.id: raise HTTPException(403,"Maker-checker policy: the invoice creator cannot reject their own invoice")
+    inv.status=InvoiceStatus.REJECTED; record_event(db,user,"invoice",inv.id,"human_rejected",{"maker_user_id":inv.created_by_user_id})
+    try:
+        db.commit()
+    except StaleDataError:
+        db.rollback(); raise HTTPException(409,"Invoice changed concurrently; reload it before rejecting")
+    return {"id":inv.id,"status":inv.status.value}
 
 @app.post("/api/v1/agent/memory")
 def add_agent_memory(content:str,memory_type:str="episodic",db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
