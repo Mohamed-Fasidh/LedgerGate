@@ -29,7 +29,9 @@ from app.services.memory import remember, recall
 from app.services.storage import store_invoice, read_invoice, delete_invoice, scan_with_clamav, MalwareDetected, StorageUnavailable
 from app.services.email import send_password_reset_email
 
-logger = logging.getLogger(__name__)\n\napp=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
+logger = logging.getLogger(__name__)
+
+app=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
 app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type","Idempotency-Key","X-CSRF-Token"])
 
 
