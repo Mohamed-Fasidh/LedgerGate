@@ -154,7 +154,7 @@ def test_approval_policy_mutation_lock_is_skipped_for_non_postgres():
 
 @pytest.mark.parametrize(
     ("max_amount", "expected_filter_count"),
-    [(None, 3), (Decimal("500.00"), 4)],
+    [(None, 3), ("500.00", 4)],
 )
 def test_overlap_lookup_is_tenant_scoped_and_uses_half_open_bounds(max_amount, expected_filter_count):
     from decimal import Decimal
@@ -175,7 +175,7 @@ def test_overlap_lookup_is_tenant_scoped_and_uses_half_open_bounds(max_amount, e
             return Query()
 
     result = main._find_overlapping_approval_policy(
-        DB(), "tenant-a", Decimal("100.00"), max_amount,
+        DB(), "tenant-a", Decimal("100.00"), Decimal(max_amount) if max_amount is not None else None,
     )
     assert result is None
     assert len(captured["conditions"]) == expected_filter_count
