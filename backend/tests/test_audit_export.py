@@ -62,6 +62,9 @@ def test_audit_export_is_signed_and_written_in_compliance_mode(monkeypatch):
     assert args["Bucket"] == "ledgergate-audit-worm"
     assert args["ObjectLockRetainUntilDate"] > datetime.now(timezone.utc)
     assert document["event_count"] == 1
+    assert document["export_id"]
+    assert document["export_id"] in args["Key"]
+    assert args["Key"].startswith("tenants/tenant-a/audit-exports/1-1/")
     assert document["signing_key_id"] == settings.audit_export_signing_key_id
     assert audit_export.verify_audit_export_signature(document, settings.audit_export_signing_key)
     tampered_algorithm = dict(document, signature_algorithm="MD5")
