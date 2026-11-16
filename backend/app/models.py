@@ -134,6 +134,10 @@ class LoginAttempt(Base):
     ip_hash: Mapped[str] = mapped_column(String(64), index=True)
     succeeded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+    __table_args__ = (
+        Index("ix_login_attempts_email_failed_time", "email_hash", "succeeded", "attempted_at"),
+        Index("ix_login_attempts_ip_failed_time", "ip_hash", "succeeded", "attempted_at"),
+    )
 
 class ApprovalPolicy(Base):
     __tablename__ = "approval_policies"
