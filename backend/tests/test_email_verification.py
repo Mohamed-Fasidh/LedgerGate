@@ -93,7 +93,7 @@ def test_registration_creates_unverified_account_and_emails_single_use_link(monk
 
 
 def test_verification_resend_is_generic_and_queues_new_link(monkeypatch):
-    user = SimpleNamespace(id=7, email="person@example.com", is_active=True, email_verified=False)
+    user = SimpleNamespace(id=7, tenant_id="tenant-7", email="person@example.com", is_active=True, email_verified=False)
     db = _DB(user=user)
     queued = []
     monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url, token_hash: queued.append((email, kind, url, token_hash)))
@@ -172,7 +172,7 @@ def test_login_eligibility_requires_verified_active_account():
 
 def test_duplicate_registration_is_generic_and_resends_only_unverified_account(monkeypatch):
     existing = SimpleNamespace(
-        id=7, email="person@example.com", is_active=True, email_verified=False
+        id=7, tenant_id="tenant-7", email="person@example.com", is_active=True, email_verified=False
     )
 
     class DuplicateDB(_DB):
