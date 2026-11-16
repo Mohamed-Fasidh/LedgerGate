@@ -118,13 +118,18 @@ def test_password_reset_confirm_changes_password_revokes_sessions_and_audits(mon
     monkeypatch.setattr(main, "set_database_tenant", lambda *args: None)
     monkeypatch.setattr(main, "record_event", lambda *args: events.append(args))
     payload = main.PasswordResetConfirmIn(token="x" * 48, new_password="new-password-strong")
-    response = Response()\n    result = main.confirm_password_reset(payload, _request(), response, db)
+    response = Response()
+    result = main.confirm_password_reset(payload, _request(), response, db)
     assert result == {"status": "password_reset", "revoked_sessions": 3}
     assert user.hashed_password == "new-hash"
     assert user.auth_token_version == 3
     assert reset.used_at is not None
     assert db.commits == 1
-    assert revoked and events\n    cookies = response.headers.getlist("set-cookie")\n    assert any(value.startswith("ledgergate_refresh=") and "max-age=0" in value.lower() for value in cookies)\n    assert any(value.startswith("ledgergate_csrf=") and "max-age=0" in value.lower() for value in cookies)\n    assert events[0][4] == "password_reset_completed"
+    assert revoked and events
+    cookies = response.headers.getlist("set-cookie")
+    assert any(value.startswith("ledgergate_refresh=") and "max-age=0" in value.lower() for value in cookies)
+    assert any(value.startswith("ledgergate_csrf=") and "max-age=0" in value.lower() for value in cookies)
+    assert events[0][4] == "password_reset_completed"
 
 
 def test_password_reset_request_rejects_untrusted_origin(monkeypatch):
