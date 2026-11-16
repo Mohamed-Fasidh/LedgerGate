@@ -101,7 +101,7 @@ Authorization: Bearer <access_token>
 
 ## Authenticator-app MFA
 
-Users can enroll a TOTP authenticator after signing in. The setup response returns the shared secret and an `otpauth://` URI once; display it only to the account owner and never log it. The secret is encrypted before being stored.
+Users can enroll a TOTP authenticator after signing in. The setup response returns the shared secret and an `otpauth://` URI once; display it only to the account owner and never log it. The secret is encrypted before being stored. Enabling MFA also returns ten one-time recovery codes; store them securely because only their hashes are retained and the raw codes are shown once.
 
 1. Start enrollment with the current password:
 
@@ -121,6 +121,6 @@ Content-Type: application/x-www-form-urlencoded
 totp_code=<six-digit-code>
 ```
 
-3. Include `totp_code` with the password at `POST /api/v1/auth/token` whenever MFA is enabled. To disable MFA, send both `current_password` and a fresh `totp_code` to `POST /api/v1/auth/mfa/disable`. The authenticated status endpoint is `GET /api/v1/auth/mfa/status`.
+3. Include `totp_code` with the password at `POST /api/v1/auth/token` whenever MFA is enabled. A one-time `recovery_code` can be used instead if the authenticator is unavailable. To disable MFA, send `current_password` and either a fresh `totp_code` or an unused `recovery_code` to `POST /api/v1/auth/mfa/disable`. The authenticated status endpoint is `GET /api/v1/auth/mfa/status`.
 
 TOTP uses 30-second SHA-1 time steps, accepts a one-step clock-skew window, and prevents reuse of a consumed time step. Failed MFA attempts count toward the existing login throttling. Store `MFA_ENCRYPTION_KEY` as a secret; generate it with `Fernet.generate_key()`. Losing or rotating this key without decrypt-and-reencrypt migration makes existing MFA secrets unreadable.
