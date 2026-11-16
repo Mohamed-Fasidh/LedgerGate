@@ -21,9 +21,14 @@ class ContainerHardeningTests(unittest.TestCase):
 
     def test_compose_healthchecks_gate_frontend_on_api(self):
         compose = (ROOT / "docker-compose.yml").read_text()
-        self.assertIn("http://127.0.0.1:8000/health", compose)
+        self.assertIn("http://127.0.0.1:8000/ready", compose)
         self.assertIn("http://127.0.0.1:3000", compose)
         self.assertIn("condition: service_healthy", compose)
+        api = (ROOT / "backend" / "app" / "main.py").read_text()
+        self.assertIn('@app.get("/health")', api)
+        self.assertIn('@app.get("/ready")', api)
+        self.assertIn('SELECT 1', api)
+        self.assertIn('socket.create_connection', api)
 
 
 if __name__ == "__main__":
