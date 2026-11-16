@@ -196,6 +196,14 @@ def upgrade() -> None:
 def downgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
-    for table in ("invoice_approvals", "approval_policies", "invoices", "purchase_orders"):
+    for table in (
+        "email_verification_tokens",
+        "password_reset_tokens",
+        "auth_sessions",
+        "invoice_approvals",
+        "approval_policies",
+        "invoices",
+        "purchase_orders",
+    ):
         op.execute(f"DROP TRIGGER IF EXISTS ledgergate_same_tenant_reference ON public.{table}")
     op.execute("DROP FUNCTION IF EXISTS public.ledgergate_enforce_same_tenant_reference()")
