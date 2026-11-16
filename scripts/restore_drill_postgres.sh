@@ -27,7 +27,14 @@ trap cleanup EXIT
 docker compose exec -T db sh -c 'createdb -U "$POSTGRES_USER" "$1"' sh "$restore_db"
 created=1
 docker compose exec -T db sh -c 'pg_restore --exit-on-error --no-owner --no-acl -U "$POSTGRES_USER" -d "$1" -' sh "$restore_db" < "$backup_file"
-verification="$(docker compose exec -T db sh -c 'psql -At -U "$POSTGRES_USER" -d "$1" -c "SELECT (EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num <> '''') AND to_regclass('''public.users''') IS NOT NULL AND to_regclass('''public.invoices''') IS NOT NULL)::text;"' sh "$restore_db" | tr -d '\r')"
+verification="$(docker compose exec -T db sh -c 'psql -At -U "$POSTGRES_USER" -d "$1"' sh "$restore_db" <<'SQL'
+SELECT (
+  EXISTS (SELECT 1 FROM public.alembic_version WHERE version_num <> '')
+  AND to_regclass('public.users') IS NOT NULL
+  AND to_regclass('public.invoices') IS NOT NULL
+)::text;
+SQL
+)"
 [[ "$verification" == "true" ]] || {
   echo "Restore completed but migration version or core users/invoices tables are missing" >&2; exit 1;
 }
