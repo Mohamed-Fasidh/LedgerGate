@@ -97,6 +97,7 @@ def extract_file(path: str, suffix: str) -> tuple[str, dict]:
                     raise ValueError("PDF exceeds the total OCR image-size limit")
                 # OCR is optional; unavailable OCR dependencies leave extraction
                 # as an unconfirmed empty candidate rather than blocking upload.
+                ocr_text = None
                 try:
                     import pytesseract
                     from PIL import Image
@@ -105,11 +106,15 @@ def extract_file(path: str, suffix: str) -> tuple[str, dict]:
                     for page in doc:
                         pix = page.get_pixmap(matrix=fitz.Matrix(OCR_SCALE, OCR_SCALE), alpha=False)
                         chunks.append(pytesseract.image_to_string(Image.open(io.BytesIO(pix.tobytes("png")))))
-                    text = "\n".join(chunks)
-                    if len(text) > MAX_EXTRACTED_TEXT_CHARS:
-                        raise ValueError("OCR text exceeds the 2 MB processing limit")
-                except ImportError:
+                    ocr_text = "\\n".join(chunks)
+                except Exception:
+                    # OCR is optional; retain the safe text-layer result if the
+                    # Python package or system Tesseract executable is unavailable.
                     pass
+                if ocr_text is not None:
+                    if len(ocr_text) > MAX_EXTRACTED_TEXT_CHARS:
+                        raise ValueError("OCR text exceeds the 2 MB processing limit")
+                    text = ocr_text
     else:
         raise ValueError("Unsupported file type")
     return text, parse_text(text)
