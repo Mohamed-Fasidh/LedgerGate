@@ -128,7 +128,7 @@ TOTP uses 30-second SHA-1 time steps, accepts a one-step clock-skew window, and 
 
 ## Immutable signed audit export
 
-Production must configure a dedicated `AUDIT_WORM_BUCKET` with S3 versioning enabled and S3 Object Lock enabled at bucket creation. Configure `AUDIT_EXPORT_SIGNING_KEY` with at least 32 random characters and set `AUDIT_WORM_RETENTION_DAYS` (1–3,650; default 2,555 days). The application verifies bucket versioning and Object Lock configuration before each export and fails closed if either is unavailable.
+Production must configure a dedicated `AUDIT_WORM_BUCKET` with S3 versioning enabled and S3 Object Lock enabled at bucket creation. Configure `AUDIT_EXPORT_SIGNING_KEY` with at least 32 random characters, identify its version using `AUDIT_EXPORT_SIGNING_KEY_ID`, and set `AUDIT_WORM_RETENTION_DAYS` (1–3,650; default 2,555 days). The application verifies bucket versioning and Object Lock configuration before each export and fails closed if either is unavailable.
 
 An administrator exports a verified batch using:
 
@@ -137,6 +137,6 @@ POST /api/v1/audit-events/export?after_id=0&batch_size=1000
 Authorization: Bearer <admin-access-token>
 ```
 
-The export contains the event IDs, canonical audit payloads, previous/event hashes, batch boundaries, SHA-256 digest, and HMAC-SHA256 signature. Objects are written with server-side encryption and S3 Object Lock `COMPLIANCE` retention. The response includes `next_after_id`; pass it as `after_id` to export the next batch. An export is refused if the tenant's full database hash chain does not verify. Each successful export is itself recorded in the database audit chain after the object write.
+The export contains the event IDs, canonical audit payloads, previous/event hashes, batch boundaries, SHA-256 digest, HMAC-SHA256 signature, and signing-key ID. The object key is deterministic for a given event range and payload digest. Objects are written with server-side encryption and S3 Object Lock `COMPLIANCE` retention. The response includes `next_after_id`; pass it as `after_id` to export the next batch. An export is refused if the tenant's full database hash chain does not verify. Each successful export is itself recorded in the database audit chain after the object write.
 
 The bucket must be created and its IAM policy configured outside the application. Grant the API role only the required bucket configuration read and object write permissions; do not grant object deletion or retention-bypass permissions. Keep the signing key in a secrets manager and back it up separately. Rotating it requires a versioned key-management procedure so older exports remain verifiable.
