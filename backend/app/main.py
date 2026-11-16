@@ -170,6 +170,23 @@ def logout(payload: RefreshIn, db: Session = Depends(get_db)):
         db.commit()
     return {"status": "logged_out"}
 
+@app.post("/api/v1/auth/logout-all")
+def logout_all_sessions(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    now = datetime.now(timezone.utc)
+    revoked_count = db.query(AuthSession).filter(
+        AuthSession.tenant_id == user.tenant_id,
+        AuthSession.user_id == user.id,
+        AuthSession.revoked_at.is_(None),
+        AuthSession.expires_at > now,
+    ).update({AuthSession.revoked_at: now}, synchronize_session=False)
+    record_event(
+        db, user, "auth_session", user.id, "all_refresh_sessions_revoked",
+        {"revoked_sessions": revoked_count},
+    )
+    db.commit()
+    return {"status": "logged_out_everywhere", "revoked_sessions": revoked_count}
+
+
 @app.post("/api/v1/users")
 def create_tenant_user(email:str,password:str=Form(...),role:str=Form("analyst"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
     if len(password)<12 or len(password)>72: raise HTTPException(400,"Password must be 12-72 characters")
