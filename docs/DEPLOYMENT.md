@@ -78,6 +78,7 @@ The application code does not create the bucket, establish key custody, or indep
 
 - The API image runs as dedicated UID/GID 10001; its upload directory is created with matching ownership so the local named volume can be initialized for the unprivileged process.
 - The frontend image runs as the unprivileged `node` user.
+- Local Compose applies `no-new-privileges` and drops all Linux capabilities for the API and frontend containers; neither service needs privileged port binding. Revalidate these restrictions against any added native dependencies or runtime features.
 - The API exposes `/health` as a lightweight process liveness endpoint and `/ready` as a dependency-aware readiness endpoint. `/ready` executes `SELECT 1` against PostgreSQL and checks the configured ClamAV TCP endpoint; it returns HTTP 503 if either required dependency is unavailable. In development only, an unconfigured scanner is reported as `not_configured`; production configuration requires ClamAV. The probe verifies scanner reachability, not signature freshness or a complete malware scan.
 - Local Compose uses `/ready` for the API health check and gates frontend startup on API readiness. The frontend has its own HTTP health check. S3 permissions and object operations still require staging integration tests; readiness does not perform a bucket write.
 - Keep container images pinned to reviewed base-image digests for controlled production releases, and apply resource limits/read-only root filesystems where compatible with the upload and temporary-file paths.
