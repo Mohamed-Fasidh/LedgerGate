@@ -1202,10 +1202,19 @@ def create_approval_policy(payload:ApprovalPolicyIn,idempotency_key:str|None=Hea
     if payload.max_amount is not None and payload.max_amount<=payload.min_amount:
         raise HTTPException(400,"max_amount must be greater than min_amount")
     _lock_approval_policy_ranges(db, user.tenant_id)
-    existing=db.query(ApprovalPolicy).filter(ApprovalPolicy.tenant_id==user.tenant_id,ApprovalPolicy.is_active.is_(True)).all()
-    for policy in existing:
-        if _approval_ranges_overlap(payload.min_amount,payload.max_amount,policy.min_amount,policy.max_amount):
-            raise HTTPException(409,f"Amount range overlaps active policy '{policy.name}'")
+    overlap_query = db.query(ApprovalPolicy).filter(
+        ApprovalPolicy.tenant_id == user.tenant_id,
+        ApprovalPolicy.is_active.is_(True),
+        or_(ApprovalPolicy.max_amount.is_(None), ApprovalPolicy.max_amount > payload.min_amount),
+    )
+    if payload.max_amount is not None:
+        overlap_query = overlap_query.filter(ApprovalPolicy.min_amount < payload.max_amount)
+    overlapping_policy = overlap_query.first()
+    if overlapping_policy is not None:
+        raise HTTPException(
+            409,
+            f"Amount range overlaps active policy '{overlapping_policy.name}'",
+        )
     policy=ApprovalPolicy(tenant_id=user.tenant_id,created_by_user_id=user.id,name=payload.name,min_amount=payload.min_amount,max_amount=payload.max_amount,approval_steps=payload.approval_steps)
     db.add(policy)
     try:
