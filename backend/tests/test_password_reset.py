@@ -86,6 +86,7 @@ def test_password_reset_request_stores_only_hash_and_sends_expiring_link(monkeyp
     assert isinstance(stored, PasswordResetToken)
     assert len(stored.token_hash) == 64
     assert queued[0][0:2] == (user.email, "password_reset")
+    assert queued[0][3] == stored.token_hash
     assert stored.token_hash not in queued[0][2]
     assert queued[0][2].startswith("https://app.example.com/#reset_token=")
     assert stored.expires_at - stored.created_at == timedelta(minutes=30)
