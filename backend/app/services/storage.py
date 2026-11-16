@@ -66,8 +66,12 @@ def _s3_client():
         kwargs["aws_secret_access_key"] = settings.s3_secret_access_key
     return boto3.client("s3", **kwargs)
 
-def store_invoice(tenant_id: str, suffix: str, content: bytes) -> str:
-    scan_with_clamav(content)
+def store_invoice(tenant_id: str, suffix: str, content: bytes, *, already_scanned: bool = False) -> str:
+    # Upload handlers scan before document extraction. Keep the default fail-closed
+    # behavior for every other caller, but avoid sending the same bytes through
+    # ClamAV twice on the normal upload path.
+    if not already_scanned:
+        scan_with_clamav(content)
     key = f"tenants/{tenant_id}/invoices/{uuid.uuid4().hex}{suffix}"
     if settings.storage_backend.lower() == "s3":
         if not settings.s3_bucket:

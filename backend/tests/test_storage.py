@@ -138,3 +138,24 @@ def test_s3_invoice_read_accepts_bounded_content(monkeypatch):
     assert content == b"%PDF-small"
     assert suffix == ".pdf"
     assert body.closed
+
+
+def test_storage_can_reuse_the_upload_handler_scan_result(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage.settings, "storage_backend", "local")
+    monkeypatch.setattr(storage.settings, "upload_dir", str(tmp_path))
+    monkeypatch.setattr(
+        storage,
+        "scan_with_clamav",
+        lambda _content: (_ for _ in ()).throw(AssertionError("content was scanned twice")),
+    )
+
+    location = storage.store_invoice(
+        "tenant-a",
+        ".txt",
+        b"already scanned invoice",
+        already_scanned=True,
+    )
+
+    body, suffix = storage.read_invoice("tenant-a", location)
+    assert body == b"already scanned invoice"
+    assert suffix == ".txt"
