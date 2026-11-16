@@ -391,6 +391,8 @@ def reject(invoice_id:int,payload:ApprovalDecisionIn|None=None,db:Session=Depend
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status in (InvoiceStatus.APPROVED,InvoiceStatus.REJECTED): raise HTTPException(409,"Invoice is already finalized")
+    if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
+    if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before rejection")
     if inv.created_by_user_id == user.id: raise HTTPException(403,"Maker-checker policy: the invoice creator cannot reject their own invoice")
     steps=_resolve_invoice_approval_plan(db,inv,user)
     stage=_validate_approval_actor(db,inv,user,steps)
