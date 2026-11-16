@@ -69,7 +69,7 @@ def test_tenant_collection_endpoints_apply_bounded_pagination(endpoint, model_na
     assert captured["limit"] == 25
     assert captured["all_called"] is True
     rendered = [str(condition) for condition in captured["conditions"]]
-    assert any(f"{model_name.lower()}.tenant_id" in item for item in rendered)
+    assert any(f"{getattr(models, model_name).__tablename__}.tenant_id" in item for item in rendered)
 
 
 @pytest.mark.parametrize(
