@@ -401,11 +401,17 @@ def _store_idempotency_response(db: Session, tenant_id: str, key: str, operation
     ))
 
 def _tenant_user_request_hash(email: str, password: str, role: str) -> str:
-    # Never persist or fingerprint the raw password value.
+    # A keyed digest avoids exposing a fast offline password-guessing oracle
+    # through the persisted idempotency request hash.
+    password_digest = hmac.new(
+        settings.jwt_secret_key.encode("utf-8"),
+        b"ledgergate:tenant-user-idempotency:v1:" + password.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
     return _request_fingerprint("tenant_user.create", {
         "email": email.strip().lower(),
         "role": role,
-        "password_sha256": hashlib.sha256(password.encode("utf-8")).hexdigest(),
+        "password_hmac_sha256": password_digest,
     })
 
 def _delete_expired_idempotency_records(db: Session, tenant_id: str, cutoff: datetime, batch_size: int = 1000) -> int:
