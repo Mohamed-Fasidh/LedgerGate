@@ -1157,6 +1157,22 @@ def _lock_approval_policy_ranges(db: Session, tenant_id: str) -> None:
             {"tenant_id": tenant_id},
         )
 
+def _find_overlapping_approval_policy(
+    db: Session,
+    tenant_id: str,
+    min_amount: Decimal,
+    max_amount: Decimal | None,
+):
+    """Find one active policy overlapping the requested half-open amount range."""
+    query = db.query(ApprovalPolicy).filter(
+        ApprovalPolicy.tenant_id == tenant_id,
+        ApprovalPolicy.is_active.is_(True),
+        or_(ApprovalPolicy.max_amount.is_(None), ApprovalPolicy.max_amount > min_amount),
+    )
+    if max_amount is not None:
+        query = query.filter(ApprovalPolicy.min_amount < max_amount)
+    return query.first()
+
 def _resolve_invoice_approval_plan(db:Session,inv:Invoice,user:User):
     if inv.approval_steps_snapshot:
         return inv.approval_steps_snapshot
@@ -1202,14 +1218,9 @@ def create_approval_policy(payload:ApprovalPolicyIn,idempotency_key:str|None=Hea
     if payload.max_amount is not None and payload.max_amount<=payload.min_amount:
         raise HTTPException(400,"max_amount must be greater than min_amount")
     _lock_approval_policy_ranges(db, user.tenant_id)
-    overlap_query = db.query(ApprovalPolicy).filter(
-        ApprovalPolicy.tenant_id == user.tenant_id,
-        ApprovalPolicy.is_active.is_(True),
-        or_(ApprovalPolicy.max_amount.is_(None), ApprovalPolicy.max_amount > payload.min_amount),
+    overlapping_policy = _find_overlapping_approval_policy(
+        db, user.tenant_id, payload.min_amount, payload.max_amount
     )
-    if payload.max_amount is not None:
-        overlap_query = overlap_query.filter(ApprovalPolicy.min_amount < payload.max_amount)
-    overlapping_policy = overlap_query.first()
     if overlapping_policy is not None:
         raise HTTPException(
             409,
