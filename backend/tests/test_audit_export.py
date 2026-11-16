@@ -339,3 +339,22 @@ def test_audit_export_keyring_rejects_unknown_or_tampered_key_id():
     tampered = {**document, "signing_key_id": "audit-key-2026-11"}
     assert not audit_export.verify_audit_export_signature_with_keyring(tampered, {"audit-key-2026-01": key, "audit-key-2026-11": key})
     assert not audit_export.verify_audit_export_signature_with_keyring(document, {})
+
+
+def test_audit_export_does_not_query_past_verified_chain_head(monkeypatch):
+    import app.main as main
+    from types import SimpleNamespace
+    from app.models import Role
+
+    monkeypatch.setattr(main, "verify_tenant_chain", lambda db, tenant_id: {
+        "valid": True, "verified_events": 12, "head_hash": "a" * 64,
+        "last_event_id": 12,
+    })
+
+    class DB:
+        def query(self, model):
+            raise AssertionError("No query should run when the cursor is at the verified head")
+
+    actor = SimpleNamespace(id=7, tenant_id="tenant-a", role=Role.admin)
+    result = main.export_audit_events(after_id=12, batch_size=100, db=DB(), user=actor)
+    assert result == {"status": "no_events", "after_id": 12, "event_count": 0}
