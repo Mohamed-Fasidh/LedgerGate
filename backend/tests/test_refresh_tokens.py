@@ -126,3 +126,14 @@ def test_logout_clears_refresh_and_csrf_cookies():
     cookies = response.headers.getlist("set-cookie")
     assert any(value.startswith("ledgergate_refresh=") and "max-age=0" in value.lower() for value in cookies)
     assert any(value.startswith("ledgergate_csrf=") and "max-age=0" in value.lower() for value in cookies)
+
+
+def test_login_and_registration_reject_untrusted_browser_origins():
+    from fastapi import HTTPException
+    from app.main import _require_allowed_origin
+    import pytest
+
+    _require_allowed_origin(_csrf_request(origin="http://localhost:3000"))
+    with pytest.raises(HTTPException) as blocked:
+        _require_allowed_origin(_csrf_request(origin="https://attacker.example"))
+    assert blocked.value.status_code == 403
