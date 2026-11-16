@@ -189,3 +189,22 @@ Content-Type: application/json
 ```
 
 A role change returns the new role and number of revoked sessions. Administrator roles cannot be changed through this endpoint; deactivated accounts must be reactivated through a separate, controlled lifecycle process before their role can be changed.
+
+
+### View and revoke individual login sessions
+
+A signed-in user can view their own active, unexpired refresh sessions. The response intentionally omits refresh tokens, token hashes, and session-family identifiers:
+
+```http
+GET /api/v1/auth/sessions
+Authorization: Bearer <access_token>
+```
+
+To revoke one listed session:
+
+```http
+DELETE /api/v1/auth/sessions/19
+Authorization: Bearer <access_token>
+```
+
+The session ID is scoped to the authenticated user's tenant and account. Revocation prevents further refresh-token use for that session; already-issued short-lived access tokens remain valid until they expire or the account is deactivated.
