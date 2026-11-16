@@ -13,8 +13,12 @@ retention_days="${BACKUP_RETENTION_DAYS:-30}"
 mkdir -p "$backup_dir"
 chmod 700 "$backup_dir"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-final="$backup_dir/ledgergate-$stamp.dump"
-tmp="$final.partial"
+# mktemp provides a collision-free token even when multiple hosts or CI jobs
+# start a backup in the same second and share the destination directory.
+tmp="$(mktemp "$backup_dir/.ledgergate-$stamp.XXXXXX.partial")"
+token="${tmp##*.ledgergate-$stamp.}"
+token="${token%.partial}"
+final="$backup_dir/ledgergate-$stamp-$token.dump"
 checksum_tmp="$final.sha256.partial"
 published=0
 cleanup() {
