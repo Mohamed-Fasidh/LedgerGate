@@ -116,7 +116,7 @@ def _signed_valid_chain_document():
         previous = digest
     export_payload = {
         "format": "ledgergate-audit-export-v1",
-        "export_id": "export-test-uuid",
+        "export_id": "4d7b3c2a-1f90-4a6b-8c5d-2e1f9a7b6c30",
         "tenant_id": "tenant-a",
         "exported_at": created.isoformat(),
         "retention_days": 365,
