@@ -5,8 +5,8 @@
 - Repository: `Mohamed-Fasidh/LedgerGate`
 - Pull request: [#5 — Production readiness V2](https://github.com/Mohamed-Fasidh/LedgerGate/pull/5)
 - Branch: `hardening/production-readiness-v2`
-- Verified head: `00a1ef2baf1b37f671f155348fc08950986e8275`
-- GitHub Actions run: [43868511911](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43868511911)
+- Verified head: `186eb4ea5ce06f1e62f320009f0ae830e7764da1`
+- GitHub Actions run: [43869298071](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43869298071)
 - Result: **success** — backend, frontend, and Docker jobs all completed successfully.
 
 ## Checks observed
@@ -33,7 +33,7 @@
 
 ## Password recovery implementation verified by code and CI
 
-- Reset tokens are generated from 48 bytes of cryptographic randomness; only their SHA-256 hashes are persisted.
+- Reset tokens are generated from 48 bytes of cryptographic randomness; only their SHA-256 hashes are persisted. The emailed link carries the token in a URL fragment, so it is not sent in the HTTP request target or ordinary server access logs.
 - Tokens expire after 30 minutes, are single-use, and a new request invalidates prior outstanding links.
 - Request responses do not disclose whether an account exists; requests share the existing per-email/IP throttle and email is dispatched after the generic response.
 - Confirmation requires a strong password and, when MFA is enabled, a fresh TOTP or unused recovery code.
