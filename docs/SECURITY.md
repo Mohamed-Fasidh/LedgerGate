@@ -22,6 +22,8 @@ Last reviewed: 2026-11-16
 - Append-only audit mutation protection, per-tenant SHA-256 event chains, bounded chain verification, signed audit exports, and an offline export verifier. The export implementation targets S3 Object Lock COMPLIANCE retention.
 - PostgreSQL backup and disposable restore-drill scripts, checksum validation, non-root containers, dropped Linux capabilities, no-new-privileges, dependency-aware API readiness, and CI regression checks.
 - AI/agent outputs are advisory only; tool allowlists prevent the agent from approving invoices or initiating payments.
+- The standalone MCP adapter requires HTTPS for non-loopback API origins, rejects API URLs containing credentials/path/query/fragment, disables redirects for bearer-authenticated requests, and uses the maintained MCP SDK v1.30.0. Loopback HTTP is allowed only for local development.
+- GitHub CodeQL runs security-extended analysis for Python and JavaScript/TypeScript on pull requests and pushes to main, with a weekly scheduled scan.
 
 ## Not yet production-verified
 
