@@ -1,6 +1,6 @@
 import pytest
 
-from app.mcp_server import validate_api_url
+from app import mcp_server
 
 
 @pytest.mark.parametrize(
@@ -14,7 +14,7 @@ from app.mcp_server import validate_api_url
     ],
 )
 def test_validate_api_url_accepts_tls_and_local_loopback(url, expected):
-    assert validate_api_url(url) == expected
+    assert mcp_server.validate_api_url(url) == expected
 
 
 @pytest.mark.parametrize(
@@ -36,4 +36,29 @@ def test_validate_api_url_accepts_tls_and_local_loopback(url, expected):
 )
 def test_validate_api_url_rejects_unsafe_or_malformed_origins(url):
     with pytest.raises(ValueError):
-        validate_api_url(url)
+        mcp_server.validate_api_url(url)
+
+
+def test_authenticated_mcp_api_calls_do_not_follow_redirects(monkeypatch):
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": True}
+
+    def fake_request(method, url, **kwargs):
+        captured.update(method=method, url=url, **kwargs)
+        return Response()
+
+    monkeypatch.setattr(mcp_server, "API", "https://ledgergate.example.com")
+    monkeypatch.setattr(mcp_server, "TOKEN", "user-scoped-test-token")
+    monkeypatch.setattr(mcp_server.httpx, "request", fake_request)
+
+    assert mcp_server.call_api("GET", "/api/v1/invoices") == {"ok": True}
+    assert captured["url"] == "https://ledgergate.example.com/api/v1/invoices"
+    assert captured["headers"]["Authorization"] == "Bearer user-scoped-test-token"
+    assert captured["follow_redirects"] is False
+    assert captured["timeout"] == 15
