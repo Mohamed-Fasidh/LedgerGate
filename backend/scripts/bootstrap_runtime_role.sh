@@ -2,7 +2,8 @@
 set -eu
 : "${MIGRATION_DATABASE_URL:?MIGRATION_DATABASE_URL must point to the migration owner account}"
 : "${DB_RUNTIME_PASSWORD:?DB_RUNTIME_PASSWORD must be set}"
-psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -v runtime_password="$DB_RUNTIME_PASSWORD" <<'SQL'
+PSQL_DATABASE_URL=$(printf '%s' "$MIGRATION_DATABASE_URL" | sed 's#^postgresql+psycopg://#postgresql://#')
+psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 -v runtime_password="$DB_RUNTIME_PASSWORD" <<'SQL'
 SELECT format(
   'CREATE ROLE ledgergate_runtime LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS PASSWORD %L',
   :'runtime_password'
