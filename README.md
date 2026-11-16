@@ -41,9 +41,9 @@ For local development without Docker:
 - Use HTTPS behind a trusted reverse proxy.
 - Use managed PostgreSQL, encrypted object storage, managed secrets, backups, and restricted network access in production.
 - Configure CORS to exact trusted origins.
-- Add malware scanning and file-type/content validation before enabling public uploads.
-- Configure identity provider/SSO, rate limiting, WAF, alerting, retention policies, and disaster recovery.
-- Review tenant isolation and authorization tests before production.
+- Uploads are type/size validated and scanned through ClamAV; scanner unavailability fails closed. Production still requires a private scanner deployment and staging verification.
+- PostgreSQL FORCE RLS, a restricted non-owner runtime role, same-tenant triggers, and composite tenant-aware foreign keys protect tenant boundaries. Run the migration preflight and verify the exact production runtime role before launch.
+- SSO/OIDC is not implemented yet. Configure an identity provider only after that integration is built and independently tested; also provision rate limiting/WAF, alerting, retention policies, and disaster recovery.
 - Do not store card data, bank credentials, or payment secrets in LedgerGate.
 - AI output is advisory. Human authorization is required for financial decisions.
 
