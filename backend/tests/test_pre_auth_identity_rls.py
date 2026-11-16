@@ -73,11 +73,12 @@ def test_pre_auth_identity_tables_are_tenant_scoped_and_lookup_functions_are_nar
         with engine.connect() as admin:
             owner_state = admin.execute(text("""
                 SELECT rolcanlogin, rolbypassrls,
-                       pg_has_role('ledgergate_runtime', 'ledgergate_auth_owner', 'MEMBER')
+                       pg_has_role('ledgergate_runtime', 'ledgergate_auth_owner', 'MEMBER'),
+                       has_schema_privilege('ledgergate_auth_owner', 'public', 'CREATE')
                 FROM pg_roles
                 WHERE rolname = 'ledgergate_auth_owner'
             """)).one()
-            assert tuple(owner_state) == (False, True, False)
+            assert tuple(owner_state) == (False, True, False, False)
 
             function_owners = admin.execute(text("""
                 SELECT p.proname, owner.rolname, p.prosecdef,
