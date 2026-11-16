@@ -22,6 +22,28 @@ Reconcile:
 curl -X POST http://localhost:8000/api/v1/invoices/1/reconcile -H "Authorization: Bearer $TOKEN"
 ```
 
+## Bounded collection listing
+
+Tenant collection endpoints return at most 100 records by default. Use `limit` (1–200) and `offset` (zero or greater) to page through results. Every query remains scoped to the authenticated tenant. The same pagination parameters are available on suppliers, purchase orders, invoices, approval policies, and workspace users.
+
+```bash
+# First 100 invoices
+curl 'http://localhost:8000/api/v1/invoices?limit=100&offset=0' \
+  -H "Authorization: Bearer $TOKEN"
+
+# Next page, filtered to pending invoices
+curl 'http://localhost:8000/api/v1/invoices?status=pending&limit=100&offset=100' \
+  -H "Authorization: Bearer $TOKEN"
+
+# Suppliers and purchase orders
+curl 'http://localhost:8000/api/v1/suppliers?limit=50&offset=0' \
+  -H "Authorization: Bearer $TOKEN"
+curl 'http://localhost:8000/api/v1/purchase-orders?limit=50&offset=0' \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Invalid limits (outside 1–200) or negative offsets return HTTP 400. Responses remain JSON arrays for compatibility with existing clients.
+
 Upload an invoice with an idempotency key (retry with the same key, filename, and file bytes if the response is lost):
 ```bash
 curl -X POST http://localhost:8000/api/v1/invoices/upload \
