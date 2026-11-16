@@ -37,3 +37,33 @@ def test_refresh_token_is_rejected_by_access_token_validation():
     with __import__("pytest").raises(HTTPException) as exc:
         get_current_user(token=refresh, db=Mock())
     assert exc.value.status_code == 401
+
+
+def test_logout_all_sessions_revokes_only_current_users_active_tenant_sessions():
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from app.main import logout_all_sessions
+    from app.models import AuthSession
+
+    captured = {}
+    class Query:
+        def __init__(self, model): self.model = model
+        def filter(self, *conditions):
+            captured["conditions"] = conditions
+            return self
+        def update(self, values, synchronize_session=False):
+            captured["values"] = values
+            captured["synchronize_session"] = synchronize_session
+            return 3
+    class DB:
+        def query(self, model):
+            assert model is AuthSession
+            return Query(model)
+        def commit(self): captured["committed"] = True
+    user = SimpleNamespace(id=7, tenant_id="tenant-a")
+    result = logout_all_sessions(DB(), user)
+    assert result == {"status": "logged_out_everywhere", "revoked_sessions": 3}
+    assert captured["committed"] is True
+    assert captured["synchronize_session"] is False
+    assert AuthSession.tenant_id in [condition.left for condition in captured["conditions"] if hasattr(condition, "left")]
+    assert AuthSession.user_id in [condition.left for condition in captured["conditions"] if hasattr(condition, "left")]
