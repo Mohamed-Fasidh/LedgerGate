@@ -34,6 +34,25 @@ def _cipher():
     return Fernet(key.encode("ascii"))
 
 
+def _decrypt_payload(encrypted_payload: str) -> dict:
+    """Decrypt with the active key or explicitly configured previous rotation keys."""
+    keys = [settings.email_outbox_encryption_key]
+    keys.extend(key.strip() for key in settings.email_outbox_decryption_keys.split(",") if key.strip())
+    if not keys[0] and settings.app_env.lower() != "production":
+        keys[0] = _cipher()._signing_key and settings.jwt_secret_key
+    last_error = None
+    for key in keys:
+        if not key:
+            continue
+        try:
+            return json.loads(Fernet(key.encode("ascii")).decrypt(encrypted_payload.encode("ascii")))
+        except Exception as exc:
+            last_error = exc
+    if last_error:
+        raise last_error
+    raise RuntimeError("Email outbox decryption keys are not configured")
+
+
 def enqueue_email(db, recipient: str, message_type: str, url: str) -> OutboundEmail:
     """Add the encrypted message to the caller's transaction; caller commits atomically."""
     if message_type not in ALLOWED_TYPES:
@@ -53,7 +72,7 @@ def enqueue_email(db, recipient: str, message_type: str, url: str) -> OutboundEm
 
 
 def _send(row):
-    payload = json.loads(_cipher().decrypt(row.encrypted_payload.encode("ascii")))
+    payload = _decrypt_payload(row.encrypted_payload)
     sender = {
         "email_verification": send_email_verification_email,
         "password_reset": send_password_reset_email,
