@@ -512,3 +512,30 @@ def test_export_document_verifier_rejects_noncanonical_uuid_export_ids(export_id
     digest, signature = audit_export.sign_audit_payload(payload, keyring["verify-key-v1"])
     document.update(payload_sha256=digest, signature=signature)
     assert not audit_export.verify_audit_export_document(document, keyring)
+
+
+
+def test_immutable_export_rejects_oversized_document_before_s3_write(monkeypatch):
+    from app.audit import GENESIS_HASH, calculate_event_hash, event_payload
+
+    _settings(monkeypatch)
+    client = FakeS3()
+    monkeypatch.setattr(audit_export, "_s3_client", lambda: client)
+    created_at = datetime(2026, 11, 16, tzinfo=timezone.utc)
+    payload = event_payload(
+        tenant_id="tenant-a", actor_user_id=7, entity_type="invoice",
+        entity_id="large", action="created",
+        details={"large_value": "x" * audit_export.MAX_AUDIT_EXPORT_BYTES},
+        created_at=created_at,
+    )
+    events = [{
+        "id": 1,
+        **payload,
+        "previous_hash": GENESIS_HASH,
+        "event_hash": calculate_event_hash(GENESIS_HASH, payload),
+    }]
+
+    with pytest.raises(audit_export.AuditExportUnavailable, match="exceeds"):
+        audit_export.store_immutable_audit_export("tenant-a", events)
+
+    assert client.put_args is None
