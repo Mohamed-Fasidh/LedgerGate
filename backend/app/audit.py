@@ -80,4 +80,11 @@ def verify_tenant_chain(db, tenant_id: str) -> dict:
         if event.event_hash != expected_hash:
             return {"valid": False, "verified_events": verified_count, "failed_event_id": event.id, "reason": "event_hash_mismatch"}
         expected_previous = event.event_hash
-    return {"valid": True, "verified_events": len(rows), "head_hash": expected_previous}
+    return {
+        "valid": True,
+        "verified_events": len(rows),
+        "head_hash": expected_previous,
+        # Freeze the verified export boundary. Later concurrent appends have
+        # larger IDs and must not leak into a batch verified against this head.
+        "last_event_id": rows[-1].id if rows else None,
+    }
