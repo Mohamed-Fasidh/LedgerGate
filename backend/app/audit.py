@@ -29,14 +29,20 @@ def calculate_event_hash(previous_hash: str, payload: dict) -> str:
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
+def lock_tenant_audit_chain(db, tenant_id: str):
+    """Acquire the same transaction-scoped lock used by all tenant audit writers."""
+    bind = getattr(db, "bind", None)
+    if bind is not None and bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:tenant_id))"),
+            {"tenant_id": tenant_id},
+        )
+
+
 def record_event(db, user, entity_type, entity_id, action, details=None):
     # Serialize writers per tenant so two concurrent transactions cannot fork
     # the chain. The transaction-scoped advisory lock is PostgreSQL-specific.
-    if db.bind is not None and db.bind.dialect.name == "postgresql":
-        db.execute(
-            text("SELECT pg_advisory_xact_lock(hashtext(:tenant_id))"),
-            {"tenant_id": user.tenant_id},
-        )
+    lock_tenant_audit_chain(db, user.tenant_id)
     previous = (
         db.query(AuditEvent)
         .filter(AuditEvent.tenant_id == user.tenant_id)
