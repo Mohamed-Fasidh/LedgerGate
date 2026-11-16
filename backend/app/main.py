@@ -16,7 +16,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, Role, InvoiceStatus
-from app.schemas import RegisterIn, TokenOut, RefreshIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn
+from app.schemas import RegisterIn, TokenOut, RefreshIn, ChangePasswordIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn
 from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code
 from app.audit import record_event, verify_tenant_chain, event_payload, lock_tenant_audit_chain
 from app.services.audit_export import store_immutable_audit_export, AuditExportUnavailable
@@ -410,6 +410,59 @@ def disable_mfa(
     _clear_auth_cookies(response)
     return {"status": "disabled", "revoked_sessions": revoked_count}
 
+
+
+@app.post("/api/v1/auth/change-password")
+def change_password(
+    payload: ChangePasswordIn,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Change the signed-in user's password and invalidate every refresh session."""
+    locked_user = db.query(User).filter(
+        User.id == user.id,
+        User.tenant_id == user.tenant_id,
+        User.is_active.is_(True),
+    ).with_for_update().first()
+    if locked_user is None:
+        raise HTTPException(401, "Account is no longer active")
+    if not verify_password(payload.current_password, locked_user.hashed_password):
+        raise HTTPException(403, "Current password is incorrect")
+    if verify_password(payload.new_password, locked_user.hashed_password):
+        raise HTTPException(400, "New password must be different from the current password")
+
+    consumed_step = None
+    if locked_user.mfa_enabled:
+        if not locked_user.mfa_secret_encrypted:
+            raise HTTPException(503, "MFA configuration is incomplete")
+        try:
+            secret = decrypt_totp_secret(locked_user.mfa_secret_encrypted)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc))
+        consumed_step = matching_totp_step(
+            secret, payload.totp_code, last_used_step=locked_user.mfa_last_used_step
+        )
+        if consumed_step is None:
+            remaining_hashes = consume_mfa_recovery_code(
+                locked_user.mfa_recovery_code_hashes, payload.recovery_code
+            )
+            if remaining_hashes is None:
+                raise HTTPException(400, "A valid authenticator or unused recovery code is required")
+            locked_user.mfa_recovery_code_hashes = remaining_hashes
+        else:
+            locked_user.mfa_last_used_step = consumed_step
+
+    locked_user.hashed_password = hash_password(payload.new_password)
+    now = datetime.now(timezone.utc)
+    revoked_count = _revoke_refresh_sessions(db, locked_user.tenant_id, locked_user.id, now)
+    record_event(
+        db, locked_user, "user", locked_user.id, "password_changed",
+        {"revoked_refresh_sessions": revoked_count, "mfa_verified": locked_user.mfa_enabled},
+    )
+    db.commit()
+    _clear_auth_cookies(response)
+    return {"status": "password_changed", "revoked_sessions": revoked_count}
 
 
 @app.post("/api/v1/auth/refresh", response_model=TokenOut)
