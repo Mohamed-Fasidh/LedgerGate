@@ -84,6 +84,26 @@ def store_invoice(tenant_id: str, suffix: str, content: bytes) -> str:
         stored_file.write(content)
     return str(path)
 
+
+def delete_invoice(tenant_id: str, location: str) -> None:
+    """Remove an uncommitted invoice object after a failed database insert."""
+    if location.startswith("s3://"):
+        parsed = urlparse(location)
+        prefix = f"tenants/{tenant_id}/invoices/"
+        key = parsed.path.lstrip("/")
+        if parsed.netloc != settings.s3_bucket or not key.startswith(prefix):
+            raise FileNotFoundError
+        try:
+            _s3_client().delete_object(Bucket=parsed.netloc, Key=key)
+        except Exception as exc:
+            raise StorageUnavailable("Private object storage cleanup failed") from exc
+        return
+    tenant_dir = (Path(settings.upload_dir) / tenant_id).resolve()
+    file_path = Path(location).resolve()
+    if file_path.parent != tenant_dir:
+        raise FileNotFoundError
+    file_path.unlink(missing_ok=True)
+
 def read_invoice(tenant_id: str, location: str) -> tuple[bytes, str]:
     if location.startswith("s3://"):
         parsed = urlparse(location)
