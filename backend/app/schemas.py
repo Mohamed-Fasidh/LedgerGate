@@ -62,3 +62,7 @@ class ApprovalPolicyIn(BaseModel):
 
 class ApprovalDecisionIn(BaseModel):
     comment: Optional[str] = Field(default=None, max_length=1000)
+
+
+class TenantUserRoleUpdateIn(BaseModel):
+    role: str = Field(pattern="^(analyst|reviewer)$")
