@@ -36,7 +36,8 @@ def _has_auth_dependency(function):
         if not default.args:
             continue
         dependency = default.args[0]
-        if _call_name(dependency) in {"get_current_user", "require_roles"}:
+        dependency_callable = dependency.func if isinstance(dependency, ast.Call) else dependency
+        if _call_name(dependency_callable) in {"get_current_user", "require_roles"}:
             return True
     return False
 
