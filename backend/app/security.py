@@ -53,6 +53,14 @@ def decode_refresh_token(token: str):
         raise JWTError("Invalid refresh token")
     return payload
 
+def _uses_postgres(db: Session) -> bool:
+    """Identify PostgreSQL sessions while keeping lightweight unit-test doubles usable."""
+    try:
+        return db.get_bind().dialect.name == "postgresql"
+    except (AttributeError, TypeError):
+        return False
+
+
 def set_database_tenant(db: Session, tenant_id: str) -> None:
     """Set transaction-connection tenant context consumed by PostgreSQL RLS policies.
 
@@ -61,7 +69,7 @@ def set_database_tenant(db: Session, tenant_id: str) -> None:
     """
     if not tenant_id or len(tenant_id) > 64:
         raise ValueError("Invalid tenant context")
-    if db.get_bind().dialect.name == "postgresql":
+    if _uses_postgres(db):
         db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, false)"), {"tenant_id": tenant_id})
 
 
