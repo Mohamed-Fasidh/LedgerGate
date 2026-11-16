@@ -36,7 +36,9 @@ Configure all values through the cloud secret manager or protected deployment en
 - Unique `AUDIT_EXPORT_SIGNING_KEY` and `AUDIT_EXPORT_SIGNING_KEY_ID`, protected and rotated under a documented key-custody process.
 - Approved `AUDIT_WORM_RETENTION_DAYS` within the supported 1–3650 day range.
 - Authenticated SMTP account-recovery delivery: `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT=587`, `EMAIL_SMTP_USERNAME`, `EMAIL_SMTP_PASSWORD`, and `EMAIL_FROM_ADDRESS`.
-- `PUBLIC_APP_URL` set to the HTTPS public application origin used to construct password-reset links.
+- `PUBLIC_APP_URL` set to the HTTPS public application origin used to construct password-reset and email-verification links.
+
+New registrations are created as unverified and cannot sign in until the email-verification link is confirmed. Existing accounts are preserved as verified by migration default. Provide a real SMTP provider and validate both verification and reset messages in staging before launch.
 
 Production startup deliberately fails if required encryption, audit WORM, SMTP account-recovery, HTTPS public-app URL, or JWT settings are absent/invalid. Do not disable these checks to make a deployment start.
 
