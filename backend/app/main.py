@@ -1438,9 +1438,20 @@ def export_audit_events(
     if not chain["valid"]:
         raise HTTPException(409, "Audit chain verification failed; immutable export refused")
 
+    verified_head_id = chain.get("last_event_id")
+    if verified_head_id is None or after_id >= verified_head_id:
+        return {"status": "no_events", "after_id": after_id, "event_count": 0}
+
+    # Only export rows at or below the exact head that was checked above.
+    # A concurrently committed audit event is picked up by the next request,
+    # after it has been included in a fresh full-chain verification.
     rows = (
         db.query(AuditEvent)
-        .filter(AuditEvent.tenant_id == user.tenant_id, AuditEvent.id > after_id)
+        .filter(
+            AuditEvent.tenant_id == user.tenant_id,
+            AuditEvent.id > after_id,
+            AuditEvent.id <= verified_head_id,
+        )
         .order_by(AuditEvent.id.asc())
         .limit(batch_size)
         .all()
