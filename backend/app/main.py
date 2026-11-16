@@ -1533,9 +1533,22 @@ def cleanup_expired_auth_sessions(
 
 
 @app.get("/api/v1/audit-events")
-def audit_events(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
-    rows=db.query(AuditEvent).filter(AuditEvent.tenant_id==user.tenant_id).order_by(AuditEvent.created_at.desc()).limit(500).all()
-    return [{"id":x.id,"actor_user_id":x.actor_user_id,"entity_type":x.entity_type,"entity_id":x.entity_id,"action":x.action,"details":x.details,"created_at":x.created_at.isoformat()} for x in rows]
+def audit_events(
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if limit < 1 or limit > 200 or offset < 0:
+        raise HTTPException(400, "Limit must be 1-200 and offset must be non-negative")
+    rows = db.query(AuditEvent).filter(
+        AuditEvent.tenant_id == user.tenant_id
+    ).order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc()).offset(offset).limit(limit).all()
+    return [{
+        "id": x.id, "actor_user_id": x.actor_user_id, "entity_type": x.entity_type,
+        "entity_id": x.entity_id, "action": x.action, "details": x.details,
+        "created_at": x.created_at.isoformat(),
+    } for x in rows]
 
 
 @app.get("/api/v1/audit-events/verify")
