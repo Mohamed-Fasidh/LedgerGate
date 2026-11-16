@@ -100,3 +100,23 @@ def test_tenant_collection_endpoints_reject_invalid_pagination(endpoint, kwargs,
             user=SimpleNamespace(id=7, tenant_id="tenant-a"),
         )
     assert error.value.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("model_name", "expected_index"),
+    [
+        ("User", "ix_users_tenant_created_id"),
+        ("Supplier", "ix_suppliers_tenant_id_id"),
+        ("PurchaseOrder", "ix_purchase_orders_tenant_id_id"),
+        ("Invoice", "ix_invoices_tenant_created_id"),
+        ("Invoice", "ix_invoices_tenant_status_created_id"),
+        ("AuditEvent", "ix_audit_events_tenant_created_id"),
+        ("AuditEvent", "ix_audit_events_tenant_id_id"),
+        ("ApprovalPolicy", "ix_approval_policies_tenant_min_id"),
+    ],
+)
+def test_paginated_tenant_models_declare_composite_indexes(model_name, expected_index):
+    from app import models
+
+    model = getattr(models, model_name)
+    assert expected_index in {index.name for index in model.__table__.indexes}
