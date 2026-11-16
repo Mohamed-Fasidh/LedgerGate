@@ -55,6 +55,10 @@ curl http://localhost:8000/api/v1/invoices/1/approvals \
 
 
 
+## Tenant-wide idempotency
+
+The `Idempotency-Key` namespace is shared by invoice creation, invoice uploads, and the other supported state-changing API operations within each tenant. A key already reserved by a different operation or request returns HTTP 409. Invoice creation and upload retain compatibility with historical invoice records while also reserving new keys in the shared `idempotency_records` table. Migration `0012_unified_invoice_idempotency` backfills historical invoice keys; it deliberately stops with an explicit error if a historical key collides with a key already used by another operation, rather than silently changing either record.
+
 ## Idempotency-key retention
 
 Idempotency responses are retained for 90 days by default. A tenant administrator can remove older records in bounded batches; cleanup is scoped to the authenticated tenant by both the query and PostgreSQL row-level security. The operation is audited. Use the same access token and repeat while `has_more` is true:
