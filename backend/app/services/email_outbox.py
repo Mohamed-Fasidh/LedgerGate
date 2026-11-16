@@ -98,6 +98,14 @@ def process_one(session_factory=SessionLocal, sender=_send, now=None) -> bool:
         if row is None:
             db.rollback()
             return False
+        if row.attempts >= row.max_attempts:
+            # A worker exhausted its final lease without recording an outcome.
+            row.status = "dead"
+            row.last_error = "WorkerLeaseExpired"
+            row.encrypted_payload = ""
+            row.locked_at = None
+            db.commit()
+            return True
         row.status = "sending"
         row.attempts += 1
         row.locked_at = now
