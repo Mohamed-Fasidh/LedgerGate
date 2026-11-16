@@ -1,28 +1,34 @@
 # Build and verification status
 
 ## Implemented in repository
-- FastAPI API, PostgreSQL, Alembic and Docker Compose foundation.
-- JWT authentication, tenant-scoped records, role checks and tenant-context-aware PostgreSQL RLS migration.
-- Append-only audit mutation trigger for PostgreSQL.
-- Invoice creator attribution, maker-checker approval/rejection, optimistic concurrency versioning, tenant-authorized invoice file download, and tenant-scoped invoice-create idempotency keys.
-- CI provisions PostgreSQL, exercises RLS under a restricted non-owner role, validates Compose configuration, and builds backend/frontend containers.
-- Invoice/PO intake, extraction confirmation, deterministic reconciliation and human approval.
-- Allowlisted agent tools, MCP adapter, lexical/fuzzy retrieval and advisory model adapters.
-- Next.js dashboard, docs and evaluation suite.
+- FastAPI API, PostgreSQL, Alembic migrations, Next.js dashboard, and Docker Compose.
+- JWT authentication, role checks, tenant-scoped queries, PostgreSQL FORCE RLS, and pooled-connection tenant-context cleanup.
+- Separate migration-owner and non-owner `ledgergate_runtime` database connections; runtime role is provisioned without superuser or BYPASSRLS privileges.
+- Append-only PostgreSQL audit mutation trigger and audit events for invoice file downloads.
+- Invoice creator attribution, maker-checker approval/rejection, optimistic concurrency versioning, and tenant-scoped invoice-create idempotency.
+- Persistent login throttling using hashed email/IP identifiers (10 failures per 15-minute window).
+- S3-compatible private invoice storage adapter, server-side encryption, tenant-prefixed object keys, tenant-authorized downloads, and no-store download responses.
+- ClamAV INSTREAM scanning before document parsing and storage; scanner failures fail closed.
+- PDF page-count and extracted-text size limits; human confirmation of extracted invoice fields.
+- Deterministic invoice/PO reconciliation, approval/rejection, agent tool allowlists, MCP adapter, lexical/fuzzy retrieval, and advisory-only model integrations.
+- GitHub Actions for PostgreSQL migrations, runtime-role bootstrap, backend tests, frontend build, Compose validation, and Docker image builds.
 
-## Verification status
-- Previously recorded: Python source compilation and deterministic evaluation smoke suite (5/5 designed cases).
-- Frontend production build passed in GitHub Actions on the first workflow attempt.
-- A GitHub Actions run passed the earlier RLS, migrations, backend tests, frontend build, Compose validation, and container build. A newer run is required to verify the latest runtime-role bootstrap script and idempotency migration.
-- The latest S3/ClamAV implementation and restricted-role bootstrap are not yet verified by the completed CI run. Live cloud bucket/IAM configuration, malware signature freshness, MCP runtime, model-provider connectivity, and external WORM audit export remain unverified.
-- PostgreSQL security test is opt-in via TEST_POSTGRES_URL and requires a disposable database with migrations and test fixtures.
+## Latest verification
+- Latest GitHub Actions run 421: backend migrations passed; runtime-role bootstrap passed; Python compilation passed; pytest passed; frontend production build passed.
+- Compose configuration validation passed.
+- Backend/frontend Docker image build was still running at the last status check; do not mark it passed until the workflow reports success.
+- Earlier completed workflow run passed Docker image builds, but it predates the latest code changes.
+- PostgreSQL security tests run against a disposable PostgreSQL service with a restricted non-owner role.
 
 ## Remaining production gates
-- Create separate migration and runtime DB roles; runtime must not own tables and must not have BYPASSRLS.
-- S3-compatible private object storage adapter with server-side encryption and ClamAV INSTREAM scanning (fail closed); production startup requires these services.
-- Separate PostgreSQL migration-owner and non-owner runtime-role bootstrap; API is configured to connect using `ledgergate_runtime`.
-- External WORM audit retention and signing.
-- SSO/MFA, token rotation/revocation, rate limiting and idempotency.
-- Dual approval, concurrency controls, backup/restore drills, security review, penetration/load testing and privacy/legal review.
-- Replace lexical retrieval baseline with benchmarked embeddings/vector retrieval if semantic RAG is a product requirement.
-- Execute full CI and production deployment checks before claiming release readiness.
+- SSO/OIDC, MFA, verified email, password reset, refresh-token rotation/revocation, and session/device management.
+- External WORM audit export, cryptographic event chaining/signing, and independent audit retention.
+- Idempotency for invoice uploads and all other state-changing endpoints.
+- Configurable multi-stage approval policies and thresholds.
+- Customer-managed KMS encryption, bucket lifecycle/retention/access logging, and cloud IAM review.
+- Production bucket, ClamAV signature updates, secrets manager, TLS/WAF, monitoring, backup/PITR and restore drills.
+- Benchmark-backed embedding/vector retrieval if semantic RAG is required; current retrieval remains lexical/fuzzy.
+- MCP runtime and model-provider integration verification.
+- Load testing, independent penetration testing, privacy/legal review, and incident-response procedures.
+
+LedgerGate remains an invoice verification and human-approval workflow. It does not initiate payments, and passing CI does not certify the platform for regulated financial production use.
