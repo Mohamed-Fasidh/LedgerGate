@@ -18,7 +18,9 @@ services:
     build: ./backend
     env_file: .env
     environment:
-      MIGRATION_DATABASE_URL: postgresql+psycopg://ledgergate:${POSTGRES_PASSWORD:-change_me_local_only}@db:5432/ledgergate\n      DATABASE_URL: postgresql+psycopg://ledgergate_runtime:${DB_RUNTIME_PASSWORD:-change_me_runtime_local_only}@db:5432/ledgergate\n      DB_RUNTIME_PASSWORD: ${DB_RUNTIME_PASSWORD:-change_me_runtime_local_only}
+      MIGRATION_DATABASE_URL: postgresql+psycopg://ledgergate:${POSTGRES_PASSWORD:-change_me_local_only}@db:5432/ledgergate
+      DATABASE_URL: postgresql+psycopg://ledgergate_runtime:${DB_RUNTIME_PASSWORD:-change_me_runtime_local_only}@db:5432/ledgergate
+      DB_RUNTIME_PASSWORD: ${DB_RUNTIME_PASSWORD:-change_me_runtime_local_only}
       UPLOAD_DIR: /app/uploads
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       S3_BUCKET: ${S3_BUCKET:-}
