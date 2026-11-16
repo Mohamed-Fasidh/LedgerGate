@@ -56,7 +56,7 @@ def _decrypt_payload(encrypted_payload: str) -> dict:
     raise RuntimeError("Email outbox decryption keys are not configured")
 
 
-def enqueue_email(db, recipient: str, message_type: str, url: str, token_hash: str) -> OutboundEmail:
+def enqueue_email(db, recipient: str, message_type: str, url: str, token_hash: str | None = None) -> OutboundEmail:
     """Add the encrypted message to the caller's transaction; caller commits atomically."""
     if message_type not in ALLOWED_TYPES:
         raise ValueError("Unsupported account email type")
