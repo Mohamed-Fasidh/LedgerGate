@@ -16,6 +16,7 @@ class ContainerHardeningTests(unittest.TestCase):
 
     def test_frontend_image_runs_as_node_user(self):
         dockerfile = (ROOT / "frontend" / "Dockerfile").read_text()
+        self.assertIn("chown -R node:node /app", dockerfile)
         self.assertIn("USER node", dockerfile)
 
     def test_compose_healthchecks_gate_frontend_on_api(self):
