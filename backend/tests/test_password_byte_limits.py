@@ -14,10 +14,10 @@ def test_registration_rejects_password_over_bcrypt_utf8_byte_limit():
 
 def test_password_change_rejects_oversized_utf8_passwords():
     with pytest.raises(ValidationError, match="72 UTF-8 bytes"):
-        ChangePasswordIn(current_password="valid-current-password", new_password="é" * 25)
+        ChangePasswordIn(current_password="valid-current-password", new_password="é" * 37)
 
 
 def test_password_hashing_and_verification_enforce_bcrypt_byte_limit():
     with pytest.raises(ValueError, match="72 UTF-8 bytes"):
-        hash_password("é" * 25)
-    assert verify_password("é" * 25, "not-a-real-hash") is False
+        hash_password("é" * 37)
+    assert verify_password("é" * 37, "not-a-real-hash") is False
