@@ -319,6 +319,11 @@ def test_tenant_reference_migration_covers_all_business_relationship_tables():
     assert "USING ERRCODE = '23503'" in migration
     assert "Existing cross-tenant references must be reconciled" in migration
     assert "cross-tenant or missing identity user reference" in migration
+    assert "ledgergate_prevent_tenant_reassignment" in migration
+    assert "cannot reassign supplier tenant while tenant-owned references exist" in migration
+    assert "cannot reassign user tenant while tenant-owned references exist" in migration
+    for parent_table in ("users", "suppliers", "purchase_orders", "approval_policies", "invoices"):
+        assert f'"{parent_table}"' in migration
     assert "LEFT JOIN public.suppliers" in migration
     assert "LEFT JOIN public.purchase_orders" in migration
     assert "LEFT JOIN public.users" in migration
@@ -583,4 +588,47 @@ def test_runtime_role_cannot_attach_cross_tenant_invoice_and_approval_references
             if user_ids:
                 admin.execute(text("DELETE FROM public.users WHERE id = ANY(:ids)"),
                               {"ids": list(user_ids.values())})
+        engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_runtime_role_cannot_reassign_referenced_supplier_to_another_tenant():
+    """Changing a parent tenant must not invalidate existing child references."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    suffix = uuid.uuid4().hex
+    tenant_a = "reassign-a-" + suffix
+    tenant_b = "reassign-b-" + suffix
+    supplier_id = None
+    try:
+        with engine.begin() as admin:
+            supplier_id = admin.execute(text("""
+                INSERT INTO public.suppliers (tenant_id, name, tax_id, created_at)
+                VALUES (:tenant, :name, NULL, now())
+                RETURNING id
+            """), {"tenant": tenant_a, "name": "reassign-" + suffix}).scalar_one()
+            admin.execute(text("""
+                INSERT INTO public.purchase_orders
+                    (tenant_id, po_number, supplier_id, currency, total_amount, description, created_at)
+                VALUES (:tenant, :number, :supplier_id, 'INR', 10.00, NULL, now())
+            """), {"tenant": tenant_a, "number": "reassign-po-" + suffix, "supplier_id": supplier_id})
+
+        with Session() as runtime:
+            runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            runtime.execute(text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": tenant_a})
+            with pytest.raises(Exception, match="cannot reassign supplier tenant while tenant-owned references exist"):
+                runtime.execute(text("""
+                    UPDATE public.suppliers SET tenant_id = :new_tenant WHERE id = :supplier_id
+                """), {"new_tenant": tenant_b, "supplier_id": supplier_id})
+            runtime.rollback()
+
+        # The original tenant relationship remains intact after rejection.
+        with engine.connect() as admin:
+            owner = admin.execute(text("SELECT tenant_id FROM public.suppliers WHERE id = :id"),
+                                  {"id": supplier_id}).scalar_one()
+            assert owner == tenant_a
+    finally:
+        with engine.begin() as admin:
+            if supplier_id is not None:
+                admin.execute(text("DELETE FROM public.purchase_orders WHERE supplier_id = :id"), {"id": supplier_id})
+                admin.execute(text("DELETE FROM public.suppliers WHERE id = :id"), {"id": supplier_id})
         engine.dispose()
