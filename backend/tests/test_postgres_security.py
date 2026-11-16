@@ -154,3 +154,74 @@ def test_runtime_role_cannot_insert_or_move_rows_into_another_tenant():
             db.rollback()
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_runtime_role_uses_explicit_grants_without_future_default_access():
+    """New tables must not silently inherit application-role privileges."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    future_table = "runtime_acl_future_" + uuid.uuid4().hex
+    expected_application_tables = {
+        "users",
+        "suppliers",
+        "purchase_orders",
+        "invoices",
+        "policy_documents",
+        "agent_memories",
+        "audit_events",
+        "registration_attempts",
+        "login_attempts",
+        "approval_policies",
+        "invoice_approvals",
+        "auth_sessions",
+        "idempotency_records",
+        "password_reset_tokens",
+        "email_verification_tokens",
+        "outbound_emails",
+    }
+
+    try:
+        with engine.begin() as connection:
+            defaults = connection.execute(text("""
+                SELECT owner.rolname, defaults.defaclobjtype
+                FROM pg_default_acl AS defaults
+                CROSS JOIN LATERAL aclexplode(defaults.defaclacl) AS acl
+                JOIN pg_roles AS grantee ON grantee.oid = acl.grantee
+                JOIN pg_roles AS owner ON owner.oid = defaults.defaclrole
+                WHERE defaults.defaclnamespace = 'public'::regnamespace
+                  AND defaults.defaclobjtype IN ('r', 'S')
+                  AND grantee.rolname = 'ledgergate_runtime'
+            """)).all()
+            assert defaults == []
+
+            for table in expected_application_tables:
+                privileges = connection.execute(text("""
+                    SELECT
+                      has_table_privilege('ledgergate_runtime', :table_name, 'SELECT'),
+                      has_table_privilege('ledgergate_runtime', :table_name, 'INSERT'),
+                      has_table_privilege('ledgergate_runtime', :table_name, 'UPDATE'),
+                      has_table_privilege('ledgergate_runtime', :table_name, 'DELETE')
+                """), {"table_name": f"public.{table}"}).one()
+                assert tuple(privileges) == (True, True, True, True), table
+
+            migration_table = connection.execute(text("""
+                SELECT
+                  has_table_privilege('ledgergate_runtime', 'public.alembic_version', 'SELECT'),
+                  has_table_privilege('ledgergate_runtime', 'public.alembic_version', 'INSERT'),
+                  has_table_privilege('ledgergate_runtime', 'public.alembic_version', 'UPDATE'),
+                  has_table_privilege('ledgergate_runtime', 'public.alembic_version', 'DELETE')
+            """)).one()
+            assert tuple(migration_table) == (True, False, False, False)
+
+            connection.execute(text(f'CREATE TABLE public."{future_table}" (id integer PRIMARY KEY)'))
+            future_access = connection.execute(text("""
+                SELECT
+                  has_table_privilege('ledgergate_runtime', :table_name, 'SELECT'),
+                  has_table_privilege('ledgergate_runtime', :table_name, 'INSERT'),
+                  has_table_privilege('ledgergate_runtime', :table_name, 'UPDATE'),
+                  has_table_privilege('ledgergate_runtime', :table_name, 'DELETE')
+            """), {"table_name": f"public.{future_table}"}).one()
+            assert tuple(future_access) == (False, False, False, False)
+            connection.execute(text(f'DROP TABLE public."{future_table}"'))
+    finally:
+        engine.dispose()

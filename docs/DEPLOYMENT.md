@@ -48,7 +48,8 @@ Production startup deliberately fails if required MFA/outbox encryption, audit W
 
 - Provision managed PostgreSQL with private networking, encryption, backups, and point-in-time recovery.
 - Run Alembic migrations once as a controlled release job using the migration-owner connection.
-- Run `./scripts/bootstrap_runtime_role.sh` as a separate one-shot release/bootstrap task using the migration-owner connection, then verify the runtime role grants.
+- Run `./scripts/bootstrap_runtime_role.sh` as a separate one-shot release/bootstrap task using the migration-owner connection, then verify the runtime role grants. The script removes blanket grants, grants only the reviewed current application-table allowlist (with read-only access to `alembic_version`), grants usage on existing application sequences, and revokes default table/sequence privileges for the migration owner.
+- Every future migration that creates a table or sequence used by the API or email worker must add an explicit runtime grant and a privilege regression test. New objects intentionally receive no implicit runtime access.
 - The production API image starts only Uvicorn; it does not run migrations or create database roles on startup. This prevents every replica from racing to perform privileged schema changes. The repository's local `docker-compose.yml` deliberately overrides the command to run migrations and runtime-role bootstrap for developer convenience only; do not copy that override into a production deployment.
 - Configure the orchestrator's API readiness gate to wait for the release migration/bootstrap job to succeed before starting or rolling out API replicas. The API role must not own tenant tables, be a superuser, or have BYPASSRLS.
 - Run RLS and cross-tenant negative tests as the exact runtime role.
