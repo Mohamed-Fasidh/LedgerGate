@@ -76,6 +76,10 @@ def _is_sha256_hex(value: object) -> bool:
     return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
 
 
+def _is_bounded_text(value: object, maximum: int) -> bool:
+    return isinstance(value, str) and 0 < len(value) <= maximum and value.strip() == value
+
+
 def verify_audit_export_document(document: dict, keyring: dict[str, str]) -> bool:
     """Verify signature, strict export metadata, and every event hash-chain link."""
     if not verify_audit_export_signature_with_keyring(document, keyring):
@@ -87,7 +91,7 @@ def verify_audit_export_document(document: dict, keyring: dict[str, str]) -> boo
         first_event_id = document.get("first_event_id")
         last_event_id = document.get("last_event_id")
         retention_days = document.get("retention_days")
-        if not isinstance(events, list) or not events or not isinstance(tenant_id, str) or not tenant_id:
+        if not isinstance(events, list) or not events or not _is_bounded_text(tenant_id, 64):
             return False
         if document.get("format") != "ledgergate-audit-export-v1":
             return False
@@ -95,7 +99,7 @@ def verify_audit_export_document(document: dict, keyring: dict[str, str]) -> boo
             return False
         if not isinstance(first_event_id, int) or isinstance(first_event_id, bool) or first_event_id < 1:
             return False
-        if not isinstance(last_event_id, int) or isinstance(last_event_id, bool) or last_event_id < 1:
+        if not isinstance(last_event_id, int) or isinstance(last_event_id, bool) or last_event_id < first_event_id:
             return False
         if not isinstance(retention_days, int) or isinstance(retention_days, bool) or not 1 <= retention_days <= 3650:
             return False
@@ -119,6 +123,19 @@ def verify_audit_export_document(document: dict, keyring: dict[str, str]) -> boo
         previous_id = None
         for event in events:
             if not isinstance(event, dict) or event.get("tenant_id") != tenant_id:
+                return False
+            actor_id = event.get("actor_user_id")
+            if actor_id is not None and (
+                not isinstance(actor_id, int) or isinstance(actor_id, bool) or actor_id < 1
+            ):
+                return False
+            if not _is_bounded_text(event.get("entity_type"), 80):
+                return False
+            if not _is_bounded_text(event.get("entity_id"), 80):
+                return False
+            if not _is_bounded_text(event.get("action"), 100):
+                return False
+            if not isinstance(event.get("details"), dict):
                 return False
             event_id = event.get("id")
             if not isinstance(event_id, int) or isinstance(event_id, bool) or event_id < 1:
