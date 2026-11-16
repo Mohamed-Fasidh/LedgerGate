@@ -24,6 +24,7 @@ Last reviewed: 2026-11-16
 - AI/agent outputs are advisory only; tool allowlists prevent the agent from approving invoices or initiating payments.
 - The standalone MCP adapter requires HTTPS for non-loopback API origins, rejects API URLs containing credentials/path/query/fragment, disables redirects for bearer-authenticated requests, and uses the maintained MCP SDK v1.30.0. Loopback HTTP is allowed only for local development.
 - GitHub CodeQL runs security-extended analysis for Python and JavaScript/TypeScript on pull requests and pushes to main, with a weekly scheduled scan.
+- Third-party GitHub Actions used by CI and CodeQL are pinned to verified full commit SHAs. A CI regression check rejects mutable tags or incomplete action references.
 
 ## Not yet production-verified
 
