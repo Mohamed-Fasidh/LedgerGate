@@ -56,12 +56,12 @@ curl http://localhost:8000/api/v1/invoices/1/approvals \
 
 ## Refresh-token lifecycle
 
-Authentication responses now include a short-lived access token and a 30-day refresh token. Clients should keep refresh tokens in protected storage, send them only to `POST /api/v1/auth/refresh`, and replace the stored refresh token on every successful rotation. Reuse of a previously rotated refresh token revokes the entire token family. `POST /api/v1/auth/logout` revokes the submitted refresh token. Access tokens remain valid until their short expiry; logout does not provide immediate access-token revocation. Use HTTPS and secure client-side storage in deployed environments.
+Authentication responses return a short-lived access token and set a 30-day refresh credential in a host-only `HttpOnly` cookie (`ledgergate_refresh`). The cookie is scoped to `/api/v1/auth`, uses `SameSite=Lax`, and is marked `Secure` in production. The API also sets a separate readable `ledgergate_csrf` cookie. Browser clients must send its value in the `X-CSRF-Token` header for refresh and logout requests; the API also validates the request `Origin` against `CORS_ORIGINS`. Do not copy the refresh cookie into JavaScript storage. Successful refresh rotates the cookie automatically. Reuse of a previously rotated refresh token revokes the entire token family. `POST /api/v1/auth/logout` revokes the current refresh session and clears both cookies. Access tokens remain valid until their short expiry; logout does not immediately revoke already-issued access tokens. Use HTTPS in deployed environments and configure frontend/API origins as explicitly allowed same-site origins.
 
 
 ### Log out all devices
 
-Use the authenticated access token to revoke every unexpired refresh-token session for the current user in the current tenant:
+Use the authenticated access token to revoke every unexpired refresh-token session for the current user in the current tenant. The endpoint also clears the current browser's refresh and CSRF cookies:
 
 ```http
 POST /api/v1/auth/logout-all
