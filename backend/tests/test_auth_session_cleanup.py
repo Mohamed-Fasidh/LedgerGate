@@ -327,7 +327,7 @@ def test_user_session_listing_is_tenant_scoped_and_minimal():
     assert result == [{
         "id": 8,
         "created_at": "2026-11-15T00:00:00+00:00",
-        "expires_at": "2026-12-15T00:00:00",
+        "expires_at": "2026-12-15T00:00:00+00:00",
     }]
     rendered = [str(condition) for condition in captured["conditions"]]
     assert any("auth_sessions.tenant_id" in item for item in rendered)
