@@ -1,4 +1,4 @@
-import uuid, hashlib, tempfile, json, secrets, hmac
+import uuid, hashlib, tempfile, json, secrets, hmac, socket
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from fastapi import Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, text as sql_text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
@@ -187,6 +187,34 @@ def _issue_token_pair(db: Session, user: User, family_id: str | None = None):
 
 @app.get("/health")
 def health(): return {"status":"ok","service":"ledgergate-api"}
+
+
+@app.get("/ready")
+def readiness(db: Session = Depends(get_db)):
+    """Report readiness only when required request-path dependencies respond."""
+    dependencies = {"database": "ok", "clamav": "not_configured"}
+    try:
+        db.execute(sql_text("SELECT 1"))
+    except Exception:
+        dependencies["database"] = "unavailable"
+
+    scanner_required = settings.app_env.lower() == "production" or bool(settings.clamav_host)
+    if scanner_required:
+        try:
+            with socket.create_connection(
+                (settings.clamav_host, settings.clamav_port),
+                timeout=min(max(settings.clamav_timeout_seconds, 1), 3),
+            ):
+                dependencies["clamav"] = "reachable"
+        except OSError:
+            dependencies["clamav"] = "unavailable"
+
+    if dependencies["database"] != "ok" or dependencies["clamav"] == "unavailable":
+        raise HTTPException(
+            status_code=503,
+            detail={"status": "not_ready", "dependencies": dependencies},
+        )
+    return {"status": "ready", "dependencies": dependencies}
 
 @app.post("/api/v1/auth/register",response_model=TokenOut)
 def register(payload:RegisterIn,request:Request,response:Response,db:Session=Depends(get_db)):
