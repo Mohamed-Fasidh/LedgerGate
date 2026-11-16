@@ -46,7 +46,7 @@ def upgrade():
             "entity_type": row["entity_type"],
             "entity_id": str(row["entity_id"]),
             "action": row["action"],
-            "details": row["details"] or {},
+            "details": json.loads(row["details"]) if isinstance(row["details"], str) else (row["details"] or {}),
             "created_at": _iso(row["created_at"]),
         }
         digest = _digest(previous, payload)
