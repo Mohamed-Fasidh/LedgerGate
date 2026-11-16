@@ -3,7 +3,7 @@ name: LedgerGate CI
 on:
   # Verify pull requests before merge and the exact release commit after merge.
   pull_request:
-    branches: [main]
+    branches: [main, security/strict-audit-export-validation]
   push:
     branches: [main]
   workflow_dispatch:
