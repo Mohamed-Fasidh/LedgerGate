@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from urllib.parse import quote
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, Request, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from fastapi import Response
@@ -27,7 +27,7 @@ from app.services.evaluation import run_evaluation
 from app.services.model_router import explain_findings, ModelUnavailable
 from app.services.memory import remember, recall
 from app.services.storage import store_invoice, read_invoice, delete_invoice, scan_with_clamav, MalwareDetected, StorageUnavailable
-from app.services.email import send_password_reset_email, send_email_verification_email
+from app.services.email_outbox import enqueue_email
 
 logger = logging.getLogger(__name__)
 
@@ -269,14 +269,6 @@ EMAIL_VERIFICATION_GENERIC_MESSAGE = (
 )
 
 
-def _deliver_email_verification(recipient: str, verification_url: str) -> None:
-    try:
-        send_email_verification_email(recipient, verification_url)
-    except Exception:
-        # Do not expose delivery state or token material to the requesting client.
-        logger.exception("Email verification delivery failed")
-
-
 def _create_email_verification_link(db: Session, user: User, now: datetime) -> str:
     """Replace any previous verification link while holding the user's row lock."""
     db.query(EmailVerificationToken).filter(
@@ -296,7 +288,6 @@ def _create_email_verification_link(db: Session, user: User, now: datetime) -> s
 def register(
     payload: RegisterIn,
     request: Request,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Create an unverified workspace without disclosing whether an email is registered."""
@@ -326,15 +317,15 @@ def register(
         ).with_for_update().first()
         if existing is not None and existing.is_active and not existing.email_verified:
             verification_url = _create_email_verification_link(db, existing, datetime.now(timezone.utc))
+            enqueue_email(db, existing.email, "email_verification", verification_url)
             db.commit()
-            background_tasks.add_task(_deliver_email_verification, existing.email, verification_url)
         elif existing is None:
             raise
         return {"status": "accepted", "message": EMAIL_VERIFICATION_GENERIC_MESSAGE}
 
     verification_url = _create_email_verification_link(db, user, datetime.now(timezone.utc))
+    enqueue_email(db, user.email, "email_verification", verification_url)
     db.commit()
-    background_tasks.add_task(_deliver_email_verification, user.email, verification_url)
     return {"status": "accepted", "message": EMAIL_VERIFICATION_GENERIC_MESSAGE}
 
 
@@ -357,8 +348,8 @@ def request_email_verification(
         ).with_for_update().first()
         if user is not None:
             verification_url = _create_email_verification_link(db, user, datetime.now(timezone.utc))
+            enqueue_email(db, user.email, "email_verification", verification_url)
             db.commit()
-            background_tasks.add_task(_deliver_email_verification, user.email, verification_url)
     return {"status": "accepted", "message": EMAIL_VERIFICATION_GENERIC_MESSAGE}
 
 
@@ -714,14 +705,6 @@ def change_password(
 PASSWORD_RESET_TTL = timedelta(minutes=30)
 
 
-def _deliver_password_reset_email(recipient: str, reset_url: str) -> None:
-    try:
-        send_password_reset_email(recipient, reset_url)
-    except Exception:
-        # Never log the one-time token or disclose delivery state to the caller.
-        logger.exception("Password reset email delivery failed")
-
-
 @app.post("/api/v1/auth/password-reset/request", status_code=202)
 def request_password_reset(
     payload: PasswordResetRequestIn,
@@ -754,10 +737,10 @@ def request_password_reset(
             expires_at=now + PASSWORD_RESET_TTL,
             created_at=now,
         ))
-        db.commit()
         reset_url = f"{settings.public_app_url.rstrip('/')}/#reset_token={quote(raw_token, safe='')}"
-        # Deliver after the generic 202 response to reduce account-enumeration timing.
-        background_tasks.add_task(_deliver_password_reset_email, user.email, reset_url)
+        # Persist the encrypted delivery payload atomically with the one-time token.
+        enqueue_email(db, user.email, "password_reset", reset_url)
+        db.commit()
     return {"status": "accepted", "message": "If the account exists, a reset link will be sent."}
 
 
