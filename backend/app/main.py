@@ -442,7 +442,13 @@ def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_ke
         raise HTTPException(409,"Invoice extraction confirmation conflicted with another request")
 
 @app.post("/api/v1/invoices/{invoice_id}/reconcile",response_model=ReconcileOut)
-def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+def reconcile(invoice_id:int,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+    _validate_idempotency_key(idempotency_key)
+    operation=f"invoice.reconcile:{invoice_id}:{user.id}"
+    fingerprint=_request_fingerprint(operation,{})
+    if idempotency_key:
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+        if cached is not None: return cached
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.amount is None or inv.invoice_number.startswith("UNCONFIRMED-"):
@@ -463,9 +469,19 @@ def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_cu
     decision="HUMAN_REVIEW" if result.state.value=="human_review" or duplicate else "MATCHED"
     inv.status=InvoiceStatus.REVIEW_REQUIRED
     inv.reconciliation={"decision":decision,"findings":result.findings,"evidence":evidence,"trace":result.trace,"policy_matches":policies}
-    record_event(db,user,"invoice",inv.id,"reconciled",{"decision":decision,"finding_count":len(result.findings)})
-    db.commit()
-    return {"invoice_id":inv.id,"status":inv.status.value,"decision":decision,"findings":result.findings,"evidence":evidence,"requires_human_review":decision=="HUMAN_REVIEW"}
+    response={"invoice_id":inv.id,"status":inv.status.value,"decision":decision,"findings":result.findings,"evidence":evidence,"requires_human_review":decision=="HUMAN_REVIEW"}
+    if idempotency_key:
+        _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
+    record_event(db,user,"invoice",inv.id,"reconciled",{"decision":decision,"finding_count":len(result.findings),"idempotent":bool(idempotency_key)})
+    try:
+        db.commit()
+        return response
+    except IntegrityError:
+        db.rollback()
+        if idempotency_key:
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+            if cached is not None: return cached
+        raise HTTPException(409,"Invoice reconciliation conflicted with another request")
 
 def _validate_approval_steps(steps:list):
     allowed={"admin","reviewer"}
@@ -557,7 +573,14 @@ def deactivate_approval_policy(policy_id:int,db:Session=Depends(get_db),user:Use
     return {"id":policy.id,"is_active":False}
 
 @app.post("/api/v1/invoices/{invoice_id}/approve")
-def approve(invoice_id:int,payload:ApprovalDecisionIn|None=None,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+def approve(invoice_id:int,payload:ApprovalDecisionIn|None=None,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+    _validate_idempotency_key(idempotency_key)
+    operation=f"invoice.approve:{invoice_id}:{user.id}"
+    payload_data=payload.model_dump() if payload else {}
+    fingerprint=_request_fingerprint(operation,payload_data)
+    if idempotency_key:
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+        if cached is not None: return cached
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
@@ -576,15 +599,29 @@ def approve(invoice_id:int,payload:ApprovalDecisionIn|None=None,db:Session=Depen
             inv.approval_stage=stage+1
             message=f"Approval stage {stage} recorded. Waiting for stage {stage+1} of {len(steps)}."
             record_event(db,user,"invoice",inv.id,"approval_stage_approved",{"stage":stage,"total_stages":len(steps),"next_stage_roles":steps[stage]})
+        response={"id":inv.id,"status":inv.status.value,"approval_stage":inv.approval_stage,"approval_total_stages":len(steps),"message":message}
+        if idempotency_key:
+            _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
         db.commit()
+        return response
     except StaleDataError:
         db.rollback(); raise HTTPException(409,"Invoice changed concurrently; reload it before approving")
     except IntegrityError:
-        db.rollback(); raise HTTPException(409,"An approval decision already exists for this user or stage")
-    return {"id":inv.id,"status":inv.status.value,"approval_stage":inv.approval_stage,"approval_total_stages":len(steps),"message":message}
+        db.rollback()
+        if idempotency_key:
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+            if cached is not None: return cached
+        raise HTTPException(409,"An approval decision or idempotency record already exists")
 
 @app.post("/api/v1/invoices/{invoice_id}/reject")
-def reject(invoice_id:int,payload:ApprovalDecisionIn|None=None,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+def reject(invoice_id:int,payload:ApprovalDecisionIn|None=None,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
+    _validate_idempotency_key(idempotency_key)
+    operation=f"invoice.reject:{invoice_id}:{user.id}"
+    payload_data=payload.model_dump() if payload else {}
+    fingerprint=_request_fingerprint(operation,payload_data)
+    if idempotency_key:
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+        if cached is not None: return cached
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status in (InvoiceStatus.APPROVED,InvoiceStatus.REJECTED): raise HTTPException(409,"Invoice is already finalized")
@@ -595,14 +632,21 @@ def reject(invoice_id:int,payload:ApprovalDecisionIn|None=None,db:Session=Depend
     stage=_validate_approval_actor(db,inv,user,steps)
     db.add(InvoiceApproval(tenant_id=user.tenant_id,invoice_id=inv.id,policy_id=inv.approval_policy_id,stage=stage,approver_user_id=user.id,decision="rejected",comment=payload.comment if payload else None))
     inv.status=InvoiceStatus.REJECTED
-    record_event(db,user,"invoice",inv.id,"human_rejected",{"stage":stage,"total_stages":len(steps),"maker_user_id":inv.created_by_user_id})
+    record_event(db,user,"invoice",inv.id,"human_rejected",{"stage":stage,"total_stages":len(steps),"maker_user_id":inv.created_by_user_id,"idempotent":bool(idempotency_key)})
+    response={"id":inv.id,"status":inv.status.value,"approval_stage":stage,"message":"Invoice rejected at approval stage."}
+    if idempotency_key:
+        _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
     try:
         db.commit()
+        return response
     except StaleDataError:
         db.rollback(); raise HTTPException(409,"Invoice changed concurrently; reload it before rejecting")
     except IntegrityError:
-        db.rollback(); raise HTTPException(409,"An approval decision already exists for this user or stage")
-    return {"id":inv.id,"status":inv.status.value,"approval_stage":stage,"message":"Invoice rejected at approval stage."}
+        db.rollback()
+        if idempotency_key:
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+            if cached is not None: return cached
+        raise HTTPException(409,"An approval decision or idempotency record already exists")
 
 @app.get("/api/v1/invoices/{invoice_id}/approvals")
 def invoice_approvals(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
