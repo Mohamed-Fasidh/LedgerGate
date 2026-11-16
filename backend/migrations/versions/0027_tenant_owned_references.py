@@ -64,6 +64,18 @@ def upgrade() -> None:
                 LEFT JOIN public.approval_policies parent ON parent.id = child.policy_id
                 WHERE child.policy_id IS NOT NULL
                   AND (parent.id IS NULL OR parent.tenant_id <> child.tenant_id)
+            ) OR EXISTS (
+                SELECT 1 FROM public.auth_sessions child
+                LEFT JOIN public.users parent ON parent.id = child.user_id
+                WHERE parent.id IS NULL OR parent.tenant_id <> child.tenant_id
+            ) OR EXISTS (
+                SELECT 1 FROM public.password_reset_tokens child
+                LEFT JOIN public.users parent ON parent.id = child.user_id
+                WHERE parent.id IS NULL OR parent.tenant_id <> child.tenant_id
+            ) OR EXISTS (
+                SELECT 1 FROM public.email_verification_tokens child
+                LEFT JOIN public.users parent ON parent.id = child.user_id
+                WHERE parent.id IS NULL OR parent.tenant_id <> child.tenant_id
             ) THEN
                 RAISE EXCEPTION 'Existing cross-tenant references must be reconciled before migration 0027';
             END IF;
@@ -125,6 +137,15 @@ def upgrade() -> None:
                         USING ERRCODE = '23503';
                 END IF;
 
+            ELSIF TG_TABLE_NAME IN ('auth_sessions', 'password_reset_tokens', 'email_verification_tokens') THEN
+                IF NOT EXISTS (
+                    SELECT 1 FROM public.users
+                    WHERE id = NEW.user_id AND tenant_id = NEW.tenant_id
+                ) THEN
+                    RAISE EXCEPTION 'cross-tenant or missing identity user reference'
+                        USING ERRCODE = '23503';
+                END IF;
+
             ELSIF TG_TABLE_NAME = 'invoice_approvals' THEN
                 IF NOT EXISTS (
                     SELECT 1 FROM public.invoices
@@ -153,7 +174,15 @@ def upgrade() -> None:
         $$;
     """)
 
-    for table in ("purchase_orders", "invoices", "approval_policies", "invoice_approvals"):
+    for table in (
+        "purchase_orders",
+        "invoices",
+        "approval_policies",
+        "invoice_approvals",
+        "auth_sessions",
+        "password_reset_tokens",
+        "email_verification_tokens",
+    ):
         op.execute(f"DROP TRIGGER IF EXISTS ledgergate_same_tenant_reference ON public.{table}")
         op.execute(f"""
             CREATE TRIGGER ledgergate_same_tenant_reference
