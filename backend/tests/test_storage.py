@@ -94,3 +94,47 @@ def test_clamav_scanner_rejects_unterminated_response(monkeypatch):
 
     with pytest.raises(storage.StorageUnavailable, match="invalid response"):
         storage.scan_with_clamav(b"invoice bytes")
+
+
+
+def test_s3_invoice_read_is_bounded_and_closes_response_body(monkeypatch):
+    import io
+    monkeypatch.setattr(storage.settings, "storage_backend", "s3")
+    monkeypatch.setattr(storage.settings, "s3_bucket", "private-invoices")
+    monkeypatch.setattr(storage.settings, "max_upload_mb", 1)
+    body = io.BytesIO(b"x" * (1024 * 1024 + 10))
+    class FakeS3:
+        def get_object(self, **kwargs):
+            assert kwargs == {
+                "Bucket": "private-invoices",
+                "Key": "tenants/tenant-a/invoices/large.pdf",
+            }
+            return {"Body": body}
+    monkeypatch.setattr(storage, "_s3_client", lambda: FakeS3())
+
+    with pytest.raises(storage.StorageUnavailable, match="size limit"):
+        storage.read_invoice(
+            "tenant-a",
+            "s3://private-invoices/tenants/tenant-a/invoices/large.pdf",
+        )
+    assert body.closed
+
+
+def test_s3_invoice_read_accepts_bounded_content(monkeypatch):
+    import io
+    monkeypatch.setattr(storage.settings, "storage_backend", "s3")
+    monkeypatch.setattr(storage.settings, "s3_bucket", "private-invoices")
+    monkeypatch.setattr(storage.settings, "max_upload_mb", 1)
+    body = io.BytesIO(b"%PDF-small")
+    class FakeS3:
+        def get_object(self, **kwargs):
+            return {"Body": body}
+    monkeypatch.setattr(storage, "_s3_client", lambda: FakeS3())
+
+    content, suffix = storage.read_invoice(
+        "tenant-a",
+        "s3://private-invoices/tenants/tenant-a/invoices/small.pdf",
+    )
+    assert content == b"%PDF-small"
+    assert suffix == ".pdf"
+    assert body.closed
