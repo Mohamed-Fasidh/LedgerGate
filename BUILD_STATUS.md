@@ -45,7 +45,7 @@ Run **43864520264** on commit `0d8c41d58ac8f72aea523699656dd11e81cb5863` (backen
 - Frontend: dependency advisory reporting, high-severity dependency audit gate, and production build — passed.
 - Docker: operational-script and cleanup-safety tests, production startup and one-shot migration guards, PostgreSQL backup/restore checks, non-root container and health-check tests, Compose validation, and backend/frontend image builds — passed.
 
-The passing run verifies this exact PR #5 head. It does not certify cloud configuration, production deployment, disaster recovery, or independent security assurance. PR #5 remains open and unmerged pending independent review and explicit merge approval.
+The passing run verifies this exact PR #5 head. It does not certify cloud configuration, production deployment, disaster recovery, or independent security assurance. Historical note: PR #5 was subsequently merged into main; see Current verified state at the top of this document.
 
 ## Remaining work before production
 
@@ -117,7 +117,7 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - GitHub Actions run [43840701587](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43840701587) passed backend, frontend, and Docker jobs on commit `a540cb16acb04e0787181eecccb1eba0c8637ca3`.
 - S3 invoice download reads are bounded to the configured upload limit plus one byte; oversized stored objects are rejected and response streams are closed. Regression tests cover both oversized and valid bounded downloads.
 - Invoice reconciliation is restricted to administrator and analyst roles. Reviewers cannot invoke this processing action; a regression test checks the role boundary.
-- PR #5 remains open and unmerged pending independent review and production acceptance. Passing CI is not production certification.
+- Historical note: PR #5 was subsequently merged into main; see Current verified state at the top of this document. Passing CI is not production certification.
 
 
 ## Tenant pagination and approval-policy concurrency hardening — 2026-11-16
@@ -128,7 +128,7 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Added regression tests for pagination, tenant scoping, invalid pagination values, PostgreSQL advisory-lock behavior, and overlap-query predicates.
 - CI run [43844747286](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43844747286) passed all three jobs before the latest approval-policy concurrency changes.
 - CI run [43845374167](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43845374167) on frontend pagination commit `23da5bc0a58b0cdda7ab2a9f54b8b65a915376e5`: backend and frontend jobs passed; Docker image build was still running at last check.
-- Subsequent approval-policy changes are on PR #5 and require a fresh successful full CI run. PR #5 remains open and unmerged.
+- Subsequent approval-policy changes are on PR #5 and require a fresh successful full CI run. Historical note: PR #5 was subsequently merged into main; see Current verified state at the top of this document.
 - Passing CI does not validate a live cloud deployment. Staging, cloud IAM/Object Lock/KMS validation, real restore drills, identity lifecycle completion, independent security/load testing, and operational sign-off remain release gates.
 
 
@@ -190,7 +190,7 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 
 - GitHub Actions run [43850651897](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43850651897) passed all three jobs on commit `e9f381b4b2792fe806ad8a7506b63b42229210b6`: backend migrations through the current Alembic head, restricted runtime-role bootstrap, Python compilation and pytest; frontend dependency audit and production build; Docker operational-script regression checks, Compose validation, and backend/frontend image builds.
 - This passing run includes migration `0020_auth_session_query_indexes`, the password-change backend endpoint and regression tests, and the frontend account-security password-change form.
-- PR #5 remains open and unmerged. This CI result verifies repository automation only; it does not establish production readiness or replace staging, cloud integration, recovery drills, independent security testing, and operational sign-off.
+- Historical note: PR #5 was subsequently merged into main; see Current verified state at the top of this document. This CI result verifies repository automation only; it does not establish production readiness or replace staging, cloud integration, recovery drills, independent security testing, and operational sign-off.
 
 
 ## Password-change abuse protection — 2026-11-16
@@ -271,7 +271,7 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Frontend job passed: dependency advisory reporting, high-severity audit enforcement, and Next.js production build.
 - Docker job passed: operational-script validation, workflow-run cleanup safety regression test, production startup/migration guards, PostgreSQL backup/restore checks, non-root container and health-check checks, Compose validation, and backend/frontend image builds.
 - This verifies the repository CI pipeline at this commit only. It is not evidence of cloud provisioning, staging UAT, production deployment, independent security review, or a real disaster-recovery exercise.
-- PR #5 remains open and unmerged. The workflow-run cleanup schedule is every five minutes (GitHub Actions scheduled workflows do not support one-minute intervals) and will only become active on `main` after the PR is merged.
+- Historical note: PR #5 was subsequently merged into main; see Current verified state at the top of this document. The workflow-run cleanup schedule is every five minutes (GitHub Actions scheduled workflows do not support one-minute intervals) and will only become active on `main` after the PR is merged.
 
 
 ## Account-wide access-token revocation (2026-11-16)
@@ -295,4 +295,4 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Docker passed: operational-script validation, workflow cleanup safety tests, production startup/migration guards, PostgreSQL backup/restore checks, non-root/service-health checks, Compose validation, and backend/frontend image builds.
 - Added `docs/CI_VERIFICATION_2026-11-16.md` to preserve the exact revision, run URL, checks, and production release boundary.
 - This result verifies automated CI only; it does not establish staging or production deployment, cloud security configuration, external email delivery, independent security review, or operational acceptance.
-- PR #5 remains open and unmerged. Workflow cleanup remains branch-only until a separately authorized merge.
+- Historical note: PR #5 was subsequently merged into main; see Current verified state at the top of this document. Workflow cleanup remains branch-only until a separately authorized merge.
