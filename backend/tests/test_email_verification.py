@@ -96,7 +96,7 @@ def test_verification_resend_is_generic_and_queues_new_link(monkeypatch):
     user = SimpleNamespace(id=7, email="person@example.com", is_active=True, email_verified=False)
     db = _DB(user=user)
     queued = []
-    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url: queued.append((email, kind, url)))
+    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url, token_hash: queued.append((email, kind, url, token_hash)))
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
     monkeypatch.setattr(settings, "public_app_url", "https://app.example.com")
 
@@ -184,7 +184,7 @@ def test_duplicate_registration_is_generic_and_resends_only_unverified_account(m
 
     db = DuplicateDB(user=existing)
     queued = []
-    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url: queued.append((email, kind, url)))
+    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url, token_hash: queued.append((email, kind, url, token_hash)))
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
     monkeypatch.setattr(main, "hash_password", lambda value: "hashed-password")
     monkeypatch.setattr(settings, "public_app_url", "https://app.example.com")
@@ -214,7 +214,7 @@ def test_duplicate_verified_registration_does_not_disclose_or_send_email(monkeyp
 
     db = DuplicateDB(user=existing)
     queued = []
-    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url: queued.append((email, kind, url)))
+    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url, token_hash: queued.append((email, kind, url, token_hash)))
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
     monkeypatch.setattr(main, "hash_password", lambda value: "hashed-password")
 
