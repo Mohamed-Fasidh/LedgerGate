@@ -302,6 +302,8 @@ def test_tenant_reference_migration_covers_all_business_relationship_tables():
         / "0027_tenant_owned_references.py"
     ).read_text(encoding="utf-8")
     assert "ledgergate_enforce_same_tenant_reference" in migration
+    assert "DO $" in migration
+    assert "\n        $;" in migration
     for table in ("purchase_orders", "invoices", "approval_policies", "invoice_approvals"):
         assert f'"{table}"' in migration
     assert "BEFORE INSERT OR UPDATE" in migration
