@@ -12,5 +12,8 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ledgergate_auth_owner'
 ALTER ROLE ledgergate_auth_owner NOLOGIN BYPASSRLS;
 SELECT format('GRANT ledgergate_auth_owner TO %I', current_user)
 \gexec
-GRANT USAGE, CREATE ON SCHEMA public TO ledgergate_auth_owner;
+GRANT USAGE ON SCHEMA public TO ledgergate_auth_owner;
+-- The role owns only the reviewed lookup functions; it needs no persistent
+-- ability to create arbitrary objects in the application schema.
+REVOKE CREATE ON SCHEMA public FROM ledgergate_auth_owner;
 SQL
