@@ -218,7 +218,7 @@ def test_worker_delivers_message_when_bound_token_is_still_valid(db_factory):
         db.commit()
 
     delivered = []
-    assert process_one(db_factory, sender=lambda message: delivered.append(message.token_hash), now=now)
+    assert process_one(db_factory, sender=lambda message: delivered.append(message.token_hash), now=now + timedelta(seconds=1))
     with db_factory() as db:
         row = db.get(OutboundEmail, row_id)
         assert row.status == "sent"
