@@ -133,6 +133,7 @@ def refresh_session(request: Request, response: Response, payload: RefreshIn | N
     refresh_token = request.cookies.get(REFRESH_COOKIE_NAME) or (payload.refresh_token if payload else None)
     unauthorized = HTTPException(401, "Invalid or expired refresh token")
     if not refresh_token:
+        _clear_auth_cookies(response)
         raise unauthorized
     try:
         claims = decode_refresh_token(refresh_token)
@@ -141,10 +142,12 @@ def refresh_session(request: Request, response: Response, payload: RefreshIn | N
         token_id = claims["jti"]
         family_id = claims["family"]
     except Exception:
+        _clear_auth_cookies(response)
         raise unauthorized
     try:
         set_database_tenant(db, tenant_id)
     except ValueError:
+        _clear_auth_cookies(response)
         raise unauthorized
     token_hash = _token_hash(refresh_token)
     session = db.query(AuthSession).filter(
@@ -154,6 +157,7 @@ def refresh_session(request: Request, response: Response, payload: RefreshIn | N
         AuthSession.token_hash == token_hash,
     ).with_for_update().first()
     if not session:
+        _clear_auth_cookies(response)
         raise unauthorized
     now = datetime.now(timezone.utc)
     expires_at = session.expires_at
@@ -167,10 +171,12 @@ def refresh_session(request: Request, response: Response, payload: RefreshIn | N
             AuthSession.revoked_at.is_(None),
         ).update({AuthSession.revoked_at: now}, synchronize_session=False)
         db.commit()
+        _clear_auth_cookies(response)
         raise unauthorized
     if expires_at <= now:
         session.revoked_at = now
         db.commit()
+        _clear_auth_cookies(response)
         raise unauthorized
     user = db.query(User).filter(
         User.id == user_id, User.tenant_id == tenant_id, User.is_active.is_(True)
@@ -178,6 +184,7 @@ def refresh_session(request: Request, response: Response, payload: RefreshIn | N
     if not user:
         session.revoked_at = now
         db.commit()
+        _clear_auth_cookies(response)
         raise unauthorized
     session.revoked_at = now
     tokens = _issue_token_pair(db, user, family_id=family_id)
