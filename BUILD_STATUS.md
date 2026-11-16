@@ -4,11 +4,13 @@ Last checked: 2026-11-16
 
 ## Latest verification — 2026-11-16
 
-- PR #6 (redacted agent runtime errors), PR #7 (redacted invalid tool arguments), PR #8 (bounded tenant retrieval), PR #9 (avoid duplicate ClamAV scanning after a successful upload scan), and PR #10 (require verified PostgreSQL TLS in production) are merged into `main`.
-- PR #10 CI run [43885039107](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43885039107) passed backend, frontend, and Docker checks before merge.
-- Post-merge main CI run [43885803935](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43885803935) passed all three jobs on merge commit `cb4f71dce844301e72bf1d4f90b23976f30ad671`.
-- Production PostgreSQL connections now require `sslmode=verify-full` and an explicit `sslrootcert` CA bundle path. Staging must still verify the mounted CA certificate and actual managed-database hostname/certificate chain.
-- PR #11 proposes a 500-character maximum for agent-memory search input and a 20-result cap, with tenant-isolation and input-boundary regression tests. Its CI is pending; it is not yet merged.
+- PR #11 (bounded tenant agent-memory search) merged as `b1f822520f78fb05de3e8a5829425e233f35d232`. Its PR CI run [43886140222](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43886140222) passed backend, frontend, and Docker; post-merge main run [43886734493](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43886734493) also passed all three jobs.
+- PR #12 (email outbox lease fencing) merged as `90a1ac1f2c6b357974f1ca90cdea93f794307d58`. Its PR CI run [43886893597](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43886893597) passed backend, frontend, and Docker.
+- Post-merge main CI run [43887974188](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43887974188) is running; do not treat the merged commit as fully main-branch verified until all three jobs pass.
+- Agent-memory search now rejects queries over 500 characters, caps results at 20, and keeps candidate reads bounded to 500 tenant records.
+- Email outbox delivery, retry, and cancellation updates are fenced to the active worker lease. Delivery remains at-least-once; SMTP acceptance followed by worker crash can still cause duplicate email.
+- The threat model and security posture documentation were refreshed to reflect implemented controls and current external release gates.
+- Production PostgreSQL connections require `sslmode=verify-full` and an explicit `sslrootcert` CA bundle path. Staging must verify the mounted CA and actual managed-database certificate chain/hostname.
 - Passing repository CI is not production certification. Staging deployment, cloud integration, external SMTP receipt, Object Lock/IAM verification, restore drills, independent security testing, and operational acceptance remain outstanding.
 
 ## Current verified state — main branch
