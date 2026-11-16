@@ -126,3 +126,48 @@ def test_expired_idempotency_cleanup_handles_empty_batch():
     assert _delete_expired_idempotency_records(
         DB(), "tenant-empty", datetime.now(timezone.utc), batch_size=10
     ) == 0
+
+
+
+def test_invoice_key_is_reserved_against_other_write_operations():
+    from types import SimpleNamespace
+    from app.main import _get_idempotent_response
+
+    record = SimpleNamespace(
+        operation="invoice.create",
+        request_hash="d" * 64,
+        response_json={"id": 17},
+    )
+
+    class Query:
+        def filter(self, *args, **kwargs): return self
+        def first(self): return record
+
+    class DB:
+        def query(self, *args, **kwargs): return Query()
+
+    with pytest.raises(HTTPException) as exc:
+        _get_idempotent_response(
+            DB(), "tenant-a", "shared-key-0001", "supplier.create", "d" * 64
+        )
+    assert exc.value.status_code == 409
+
+
+def test_invoice_idempotency_response_is_stored_in_shared_namespace():
+    from app.main import _store_idempotency_response
+
+    class DB:
+        def __init__(self): self.added = []
+        def add(self, value): self.added.append(value)
+
+    db = DB()
+    response = {"id": 17, "invoice_number": "INV-17"}
+    _store_idempotency_response(
+        db, "tenant-a", "invoice-key-0001", "invoice.create",
+        "e" * 64, response,
+    )
+    assert len(db.added) == 1
+    assert db.added[0].tenant_id == "tenant-a"
+    assert db.added[0].key == "invoice-key-0001"
+    assert db.added[0].operation == "invoice.create"
+    assert db.added[0].response_json == response
