@@ -44,7 +44,8 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
       - run: alembic upgrade head
-      - name: Bootstrap restricted runtime role\n        run: ./scripts/bootstrap_runtime_role.sh
+      - name: Bootstrap restricted runtime role
+        run: ./scripts/bootstrap_runtime_role.sh
       - run: python -m compileall -q app migrations
       - run: pytest -q
 
