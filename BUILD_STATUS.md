@@ -30,7 +30,7 @@ Last checked: 2026-11-16
 
 ## Latest CI result
 
-The latest fully successful run is **43823358318** on commit `e94d2522807f2c0b31cc9a3e7ab1f1c0b8f721d3`:
+The latest fully successful run is **43832313424** on commit `9b909e0bb3306fe6beeff7035da301611a1ad9df` (backend, frontend, Docker all passed):
 - Backend: migrations through `0017_login_throttle_indexes`, restricted runtime-role bootstrap, Python compilation, and pytest — passed.
 - Frontend: dependency advisory report, high-severity npm audit gate, and production build — passed.
 - Docker: Compose configuration validation and backend/frontend image builds — passed.
@@ -94,3 +94,5 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Container hardening update: API image now runs as dedicated UID/GID 10001 with upload-volume ownership initialized for that identity; frontend image runs as the unprivileged `node` user. Local Compose now checks API and frontend health and gates frontend startup on API health. Added a CI regression test for these Dockerfile/Compose invariants. This health endpoint currently checks HTTP process responsiveness only; dependency-aware readiness and real orchestrator probes remain deployment validation tasks.
 
 - API readiness hardening: added `/ready`, which checks PostgreSQL with `SELECT 1` and verifies configured ClamAV TCP reachability; returns 503 when a required dependency is unavailable. `/health` remains a lightweight liveness check. Compose now gates frontend startup on dependency-aware API readiness. Regression tests cover healthy dependencies, database failure, scanner failure, and development without a configured scanner. S3 connectivity/permissions remain an integration-test gate.
+
+- Additional runtime restrictions: local Compose now applies `no-new-privileges` and drops all Linux capabilities for API and frontend containers; CI asserts both services retain these settings.
