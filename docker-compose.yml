@@ -30,6 +30,9 @@ services:
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       CLAMAV_HOST: clamav
       CLAMAV_PORT: 3310
+    # Local Compose bootstraps schema/role for developer convenience. Production
+    # deployments should run these as a one-shot release job before API rollout.
+    command: ["sh", "-c", "alembic upgrade head && ./scripts/bootstrap_runtime_role.sh && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
     volumes:
@@ -39,6 +42,32 @@ services:
         condition: service_healthy
       clamav:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
+  email-worker:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://ledgergate_runtime:${DB_RUNTIME_PASSWORD:-change_me_runtime_local_only}@db:5432/ledgergate
+      DB_RUNTIME_PASSWORD: ${DB_RUNTIME_PASSWORD:-change_me_runtime_local_only}
+    command: ["python", "-m", "app.email_worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   clamav:
@@ -52,7 +81,18 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
 volumes:

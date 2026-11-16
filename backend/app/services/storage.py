@@ -19,6 +19,9 @@ class MalwareDetected(ValueError):
 class StorageUnavailable(RuntimeError):
     pass
 
+
+MAX_CLAMAV_RESPONSE_BYTES = 4096
+
 def scan_with_clamav(content: bytes) -> None:
     if not settings.clamav_host:
         if settings.app_env.lower() == "production":
@@ -38,8 +41,15 @@ def scan_with_clamav(content: bytes) -> None:
                 if not part:
                     break
                 response += part
+                # The daemon should return one short status line. Bound the
+                # response so a faulty or hostile scanner cannot grow memory
+                # without limit while an upload request is waiting.
+                if len(response) > MAX_CLAMAV_RESPONSE_BYTES:
+                    raise StorageUnavailable("Malware scanner response exceeded the allowed size")
     except (OSError, TimeoutError) as exc:
         raise StorageUnavailable("Malware scanner is unavailable; upload rejected") from exc
+    if not response.endswith(b"\0"):
+        raise StorageUnavailable("Malware scanner returned an invalid response; upload rejected")
     result = response.decode("utf-8", errors="replace").strip("\0 ")
     if result.endswith(" FOUND"):
         raise MalwareDetected("Uploaded document was identified as malware")
@@ -109,11 +119,24 @@ def read_invoice(tenant_id: str, location: str) -> tuple[bytes, str]:
         parsed = urlparse(location)
         if parsed.netloc != settings.s3_bucket or not parsed.path.lstrip("/").startswith(f"tenants/{tenant_id}/invoices/"):
             raise FileNotFoundError
+        body = None
         try:
             response = _s3_client().get_object(Bucket=parsed.netloc, Key=parsed.path.lstrip("/"))
-            return response["Body"].read(), Path(parsed.path).suffix.lower()
+            body = response["Body"]
+            # Bound memory use even if an object was written outside the upload
+            # endpoint or its metadata does not match the configured upload cap.
+            max_bytes = settings.max_upload_mb * 1024 * 1024
+            content = body.read(max_bytes + 1)
+            if len(content) > max_bytes:
+                raise StorageUnavailable("Stored invoice exceeds the configured download size limit")
+            return content, Path(parsed.path).suffix.lower()
+        except StorageUnavailable:
+            raise
         except Exception as exc:
             raise StorageUnavailable("Private object storage read failed") from exc
+        finally:
+            if body is not None:
+                body.close()
     tenant_dir = (Path(settings.upload_dir) / tenant_id).resolve()
     file_path = Path(location).resolve()
     if file_path.parent != tenant_dir or not file_path.is_file():
