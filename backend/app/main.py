@@ -1,4 +1,4 @@
-import uuid, hashlib, tempfile, json
+import uuid, hashlib, tempfile, json, secrets, hmac
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
+from fastapi import Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -27,7 +28,36 @@ from app.services.memory import remember, recall
 from app.services.storage import store_invoice, read_invoice, delete_invoice, scan_with_clamav, MalwareDetected, StorageUnavailable
 
 app=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
-app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type","Idempotency-Key"])
+app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type","Idempotency-Key","X-CSRF-Token"])
+
+
+REFRESH_COOKIE_NAME = "ledgergate_refresh"
+CSRF_COOKIE_NAME = "ledgergate_csrf"
+REFRESH_COOKIE_PATH = "/api/v1/auth"
+REFRESH_TOKEN_MAX_AGE = 30 * 24 * 60 * 60
+
+
+def _set_auth_cookies(response: Response, refresh_token: str, csrf_token: str | None = None):
+    secure = settings.app_env.lower() == "production"
+    csrf_value = csrf_token or secrets.token_urlsafe(32)
+    response.set_cookie(key=REFRESH_COOKIE_NAME, value=refresh_token, max_age=REFRESH_TOKEN_MAX_AGE, path=REFRESH_COOKIE_PATH, secure=secure, httponly=True, samesite="lax")
+    # The CSRF token is readable by same-origin JavaScript and echoed in a header.
+    response.set_cookie(key=CSRF_COOKIE_NAME, value=csrf_value, max_age=REFRESH_TOKEN_MAX_AGE, path="/", secure=secure, httponly=False, samesite="lax")
+
+
+def _clear_auth_cookies(response: Response):
+    secure = settings.app_env.lower() == "production"
+    response.delete_cookie(key=REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH, secure=secure, httponly=True, samesite="lax")
+    response.delete_cookie(key=CSRF_COOKIE_NAME, path="/", secure=secure, httponly=False, samesite="lax")
+
+
+def _require_csrf(request: Request):
+    origin = request.headers.get("origin")
+    cookie_token = request.cookies.get(CSRF_COOKIE_NAME, "")
+    header_token = request.headers.get("x-csrf-token", "")
+    if not origin or origin not in settings.cors_origin_list or not cookie_token or not header_token or not hmac.compare_digest(cookie_token, header_token):
+        raise HTTPException(403, "CSRF validation failed")
+
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -49,7 +79,7 @@ def _issue_token_pair(db: Session, user: User, family_id: str | None = None):
 def health(): return {"status":"ok","service":"ledgergate-api"}
 
 @app.post("/api/v1/auth/register",response_model=TokenOut)
-def register(payload:RegisterIn,db:Session=Depends(get_db)):
+def register(payload:RegisterIn,response:Response,db:Session=Depends(get_db)):
     tenant_id=str(uuid.uuid4())
     user=User(tenant_id=tenant_id,tenant_name=payload.tenant_name,email=payload.email.lower(),hashed_password=hash_password(payload.password),role=Role.admin)
     db.add(user)
@@ -57,10 +87,10 @@ def register(payload:RegisterIn,db:Session=Depends(get_db)):
     except IntegrityError: db.rollback(); raise HTTPException(409,"Account already exists")
     db.refresh(user)
     set_database_tenant(db, user.tenant_id)
-    tokens=_issue_token_pair(db,user); db.commit(); return tokens
+    tokens=_issue_token_pair(db,user); db.commit(); _set_auth_cookies(response,tokens["refresh_token"]); return {"access_token":tokens["access_token"]}
 
 @app.post("/api/v1/auth/token",response_model=TokenOut)
-def login(request:Request,username:str=Form(...),password:str=Form(...),db:Session=Depends(get_db)):
+def login(request:Request,response:Response,username:str=Form(...),password:str=Form(...),db:Session=Depends(get_db)):
     normalized_email=username.strip().lower()
     email_hash=hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
     remote_ip=request.client.host if request.client else "unknown"
@@ -85,15 +115,19 @@ def login(request:Request,username:str=Form(...),password:str=Form(...),db:Sessi
     db.commit()
     if not authenticated: raise HTTPException(401,"Incorrect email or password")
     set_database_tenant(db, user.tenant_id)
-    tokens=_issue_token_pair(db,user); db.commit(); return tokens
+    tokens=_issue_token_pair(db,user); db.commit(); _set_auth_cookies(response,tokens["refresh_token"]); return {"access_token":tokens["access_token"]}
 
 
 
 @app.post("/api/v1/auth/refresh", response_model=TokenOut)
-def refresh_session(payload: RefreshIn, db: Session = Depends(get_db)):
+def refresh_session(request: Request, response: Response, payload: RefreshIn | None = None, db: Session = Depends(get_db)):
+    _require_csrf(request)
+    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME) or (payload.refresh_token if payload else None)
     unauthorized = HTTPException(401, "Invalid or expired refresh token")
+    if not refresh_token:
+        raise unauthorized
     try:
-        claims = decode_refresh_token(payload.refresh_token)
+        claims = decode_refresh_token(refresh_token)
         user_id = int(claims["sub"])
         tenant_id = claims["tenant"]
         token_id = claims["jti"]
@@ -104,7 +138,7 @@ def refresh_session(payload: RefreshIn, db: Session = Depends(get_db)):
         set_database_tenant(db, tenant_id)
     except ValueError:
         raise unauthorized
-    token_hash = _token_hash(payload.refresh_token)
+    token_hash = _token_hash(refresh_token)
     session = db.query(AuthSession).filter(
         AuthSession.tenant_id == tenant_id,
         AuthSession.user_id == user_id,
@@ -145,14 +179,20 @@ def refresh_session(payload: RefreshIn, db: Session = Depends(get_db)):
     ).first()
     session.replaced_by_token_id = replacement.token_id if replacement else None
     db.commit()
-    return tokens
+    _set_auth_cookies(response, tokens["refresh_token"])
+    return {"access_token": tokens["access_token"]}
 
 
 @app.post("/api/v1/auth/logout")
-def logout(payload: RefreshIn, db: Session = Depends(get_db)):
+def logout(request: Request, response: Response, payload: RefreshIn | None = None, db: Session = Depends(get_db)):
+    _require_csrf(request)
+    refresh_token = request.cookies.get(REFRESH_COOKIE_NAME) or (payload.refresh_token if payload else None)
+    if not refresh_token:
+        _clear_auth_cookies(response)
+        return {"status": "logged_out"}
     unauthorized = HTTPException(401, "Invalid refresh token")
     try:
-        claims = decode_refresh_token(payload.refresh_token)
+        claims = decode_refresh_token(refresh_token)
         tenant_id = claims["tenant"]
         user_id = int(claims["sub"])
         token_id = claims["jti"]
@@ -163,11 +203,12 @@ def logout(payload: RefreshIn, db: Session = Depends(get_db)):
         AuthSession.tenant_id == tenant_id,
         AuthSession.user_id == user_id,
         AuthSession.token_id == token_id,
-        AuthSession.token_hash == _token_hash(payload.refresh_token),
+        AuthSession.token_hash == _token_hash(refresh_token),
     ).first()
     if session and session.revoked_at is None:
         session.revoked_at = datetime.now(timezone.utc)
         db.commit()
+    _clear_auth_cookies(response)
     return {"status": "logged_out"}
 
 def _revoke_refresh_sessions(db: Session, tenant_id: str, user_id: int, now: datetime) -> int:
@@ -180,7 +221,7 @@ def _revoke_refresh_sessions(db: Session, tenant_id: str, user_id: int, now: dat
 
 
 @app.post("/api/v1/auth/logout-all")
-def logout_all_sessions(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def logout_all_sessions(response: Response, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     now = datetime.now(timezone.utc)
     revoked_count = _revoke_refresh_sessions(db, user.tenant_id, user.id, now)
     record_event(
@@ -188,6 +229,7 @@ def logout_all_sessions(db: Session = Depends(get_db), user: User = Depends(get_
         {"revoked_sessions": revoked_count},
     )
     db.commit()
+    _clear_auth_cookies(response)
     return {"status": "logged_out_everywhere", "revoked_sessions": revoked_count}
 
 
