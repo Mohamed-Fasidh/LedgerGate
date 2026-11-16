@@ -44,3 +44,21 @@ def test_totp_encryption_requires_a_configured_key(monkeypatch):
     monkeypatch.setattr(settings, "mfa_encryption_key", "")
     with pytest.raises(RuntimeError, match="MFA_ENCRYPTION_KEY"):
         encrypt_totp_secret(generate_totp_secret())
+
+
+def test_mfa_recovery_codes_are_hashed_and_single_use():
+    from app.security import (
+        consume_mfa_recovery_code,
+        generate_mfa_recovery_codes,
+        hash_mfa_recovery_code,
+    )
+
+    codes = generate_mfa_recovery_codes()
+    assert len(codes) == 10
+    assert len(set(codes)) == 10
+    hashes = [hash_mfa_recovery_code(code) for code in codes]
+    assert codes[0] not in hashes
+    remaining = consume_mfa_recovery_code(hashes, codes[0].lower())
+    assert remaining == hashes[1:]
+    assert consume_mfa_recovery_code(remaining, codes[0]) is None
+    assert consume_mfa_recovery_code(remaining, "not-a-valid-code") is None
