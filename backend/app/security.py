@@ -131,13 +131,13 @@ def generate_mfa_recovery_codes(count: int = 10) -> list[str]:
 
 
 def hash_mfa_recovery_code(code: str) -> str:
-    normalized = re.sub(r"[-\\s]", "", code).upper()
+    normalized = re.sub(r"[-\s]", "", code).upper()
     return hashlib.sha256(normalized.encode("ascii", errors="ignore")).hexdigest()
 
 
 def consume_mfa_recovery_code(hashes: list[str] | None, code: str | None) -> list[str] | None:
     """Return the remaining hashes when one valid code is consumed, else None."""
-    if not code or not re.fullmatch(r"[A-Fa-f0-9\\-\\s]{12,20}", code):
+    if not code or not re.fullmatch(r"[A-Fa-f0-9\-\s]{12,20}", code):
         return None
     candidate = hash_mfa_recovery_code(code)
     remaining = list(hashes or [])
