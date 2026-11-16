@@ -56,6 +56,7 @@ def test_mfa_recovery_codes_are_hashed_and_single_use():
     codes = generate_mfa_recovery_codes()
     assert len(codes) == 10
     assert len(set(codes)) == 10
+    assert all(len(code) == 24 for code in codes)
     hashes = [hash_mfa_recovery_code(code) for code in codes]
     assert codes[0] not in hashes
     remaining = consume_mfa_recovery_code(hashes, codes[0].lower())
