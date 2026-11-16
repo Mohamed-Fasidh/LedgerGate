@@ -15,7 +15,7 @@ checksum_file="$backup_file.sha256"
 docker compose exec -T db pg_restore --list - < "$backup_file" >/dev/null
 
 # Add process and shell-random suffixes so simultaneous drills never collide.
-restore_db="ledgergate_restore_drill_$(date -u +%Y%m%d%H%M%S)_$_${RANDOM}"
+restore_db="ledgergate_restore_drill_$(date -u +%Y%m%d%H%M%S)_${BASHPID}_${RANDOM}"
 created=0
 cleanup() {
   if [[ "$created" == "1" && "${RESTORE_DRILL_KEEP_DB:-0}" != "1" ]]; then
