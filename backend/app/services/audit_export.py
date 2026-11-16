@@ -98,7 +98,7 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
     body = canonical_json(document)
     key = (
         f"tenants/{tenant_id}/audit-exports/"
-        f"{now.strftime('%Y%m%dT%H%M%SZ')}-{events[0]['id']}-{events[-1]['id']}-{digest[:16]}.json"
+        f"{events[0]['id']}-{events[-1]['id']}-{digest[:16]}.json"
     )
     try:
         client.put_object(
@@ -113,6 +113,7 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
                 "tenant-id": tenant_id,
                 "payload-sha256": digest,
                 "signature-algorithm": "HMAC-SHA256",
+                "signing-key-id": settings.audit_export_signing_key_id,
             },
         )
     except Exception as exc:
@@ -125,6 +126,7 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
         "payload_sha256": digest,
         "signature": signature,
         "signature_algorithm": "HMAC-SHA256",
+        "signing_key_id": settings.audit_export_signing_key_id,
         "object_lock_mode": "COMPLIANCE",
         "retain_until": retain_until.isoformat(),
         "event_count": len(events),
