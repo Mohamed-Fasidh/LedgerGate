@@ -47,6 +47,14 @@ GRANT SELECT ON TABLE public.alembic_version TO ledgergate_runtime;
 -- receive no automatic grant and must be added through a reviewed migration.
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ledgergate_runtime;
 
+-- Authentication lookup functions are the only cross-tenant discovery
+-- boundary. Grant EXECUTE after the runtime role has been created; PUBLIC
+-- execution was revoked by migration 0026.
+GRANT EXECUTE ON FUNCTION public.auth_lookup_user(text) TO ledgergate_runtime;
+GRANT EXECUTE ON FUNCTION public.auth_email_exists(text) TO ledgergate_runtime;
+GRANT EXECUTE ON FUNCTION public.auth_lookup_password_reset(character varying) TO ledgergate_runtime;
+GRANT EXECUTE ON FUNCTION public.auth_lookup_email_verification(character varying) TO ledgergate_runtime;
+
 -- Revoke inherited defaults for the actual migration owner (which may differ
 -- between local Compose, CI, and a managed production database).
 DO $$

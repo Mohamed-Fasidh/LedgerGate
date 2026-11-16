@@ -69,7 +69,7 @@ def test_password_reset_request_response_does_not_disclose_unknown_account(monke
 
 
 def test_password_reset_request_stores_only_hash_and_sends_expiring_link(monkeypatch):
-    user = SimpleNamespace(id=7, email="person@example.com", is_active=True, email_verified=True)
+    user = SimpleNamespace(id=7, tenant_id="tenant-7", email="person@example.com", is_active=True, email_verified=True)
     db = _DB(user=user)
     queued = []
     monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url, token_hash: queued.append((email, kind, url, token_hash)))
@@ -108,8 +108,9 @@ def test_password_reset_confirm_changes_password_revokes_sessions_and_audits(mon
         id=1, user_id=7, used_at=None, expires_at=now + timedelta(minutes=10)
     )
     user = SimpleNamespace(
-        id=7, tenant_id="tenant-7", is_active=True, email="person@example.com",
-        hashed_password="old-hash", mfa_enabled=False, auth_token_version=2,
+        id=7, tenant_id="tenant-7", is_active=True, email_verified=True,
+        email="person@example.com", hashed_password="old-hash",
+        mfa_enabled=False, auth_token_version=2,
         mfa_secret_encrypted=None, mfa_recovery_code_hashes=[], mfa_last_used_step=None,
     )
     db = _DB(user=user, reset=reset)

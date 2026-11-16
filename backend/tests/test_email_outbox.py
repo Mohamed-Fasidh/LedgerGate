@@ -206,7 +206,7 @@ def test_worker_delivers_message_when_bound_token_is_still_valid(db_factory):
     token_hash = "b" * 64
     with db_factory() as db:
         db.add(EmailVerificationToken(
-            user_id=1, token_hash=token_hash,
+            user_id=1, tenant_id="outbox-test-tenant", token_hash=token_hash,
             expires_at=now + timedelta(hours=1), created_at=now,
         ))
         row = enqueue_email(

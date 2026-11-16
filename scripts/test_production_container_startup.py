@@ -18,7 +18,12 @@ class ProductionContainerStartupTests(unittest.TestCase):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
         api = compose.split("\n  clamav:", 1)[0]
         self.assertIn("alembic upgrade head", api)
+        self.assertIn("bootstrap_auth_owner_role.sh", api)
         self.assertIn("bootstrap_runtime_role.sh", api)
+        self.assertLess(
+            api.index("bootstrap_auth_owner_role.sh"),
+            api.index("alembic upgrade head"),
+        )
 
     def test_deployment_guide_requires_one_shot_release_job(self):
         guide = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
