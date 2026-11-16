@@ -1218,6 +1218,15 @@ def create_approval_policy(payload:ApprovalPolicyIn,idempotency_key:str|None=Hea
     if payload.max_amount is not None and payload.max_amount<=payload.min_amount:
         raise HTTPException(400,"max_amount must be greater than min_amount")
     _lock_approval_policy_ranges(db, user.tenant_id)
+    # A concurrent request with the same key may have committed while this
+    # request waited for the tenant policy lock. Re-check inside the lock so
+    # retries replay the original response instead of reporting an overlap.
+    if idempotency_key:
+        cached = _get_idempotent_response(
+            db, user.tenant_id, idempotency_key, operation, fingerprint
+        )
+        if cached is not None:
+            return cached
     overlapping_policy = _find_overlapping_approval_policy(
         db, user.tenant_id, payload.min_amount, payload.max_amount
     )
