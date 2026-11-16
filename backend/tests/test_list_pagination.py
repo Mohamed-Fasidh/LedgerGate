@@ -44,6 +44,7 @@ class BoundedListDB:
         ("list_pos", "PurchaseOrder", {}),
         ("list_invoices", "Invoice", {"status": None}),
         ("list_approval_policies", "ApprovalPolicy", {}),
+        ("audit_events", "AuditEvent", {}),
     ],
 )
 def test_tenant_collection_endpoints_apply_bounded_pagination(endpoint, model_name, kwargs):
@@ -79,6 +80,7 @@ def test_tenant_collection_endpoints_apply_bounded_pagination(endpoint, model_na
         ("list_pos", {}),
         ("list_invoices", {"status": None}),
         ("list_approval_policies", {}),
+        ("audit_events", {}),
     ],
 )
 @pytest.mark.parametrize(("limit", "offset"), [(0, 0), (201, 0), (100, -1)])
