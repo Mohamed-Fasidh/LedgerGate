@@ -170,15 +170,19 @@ def logout(payload: RefreshIn, db: Session = Depends(get_db)):
         db.commit()
     return {"status": "logged_out"}
 
-@app.post("/api/v1/auth/logout-all")
-def logout_all_sessions(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    now = datetime.now(timezone.utc)
-    revoked_count = db.query(AuthSession).filter(
-        AuthSession.tenant_id == user.tenant_id,
-        AuthSession.user_id == user.id,
+def _revoke_refresh_sessions(db: Session, tenant_id: str, user_id: int, now: datetime) -> int:
+    return db.query(AuthSession).filter(
+        AuthSession.tenant_id == tenant_id,
+        AuthSession.user_id == user_id,
         AuthSession.revoked_at.is_(None),
         AuthSession.expires_at > now,
     ).update({AuthSession.revoked_at: now}, synchronize_session=False)
+
+
+@app.post("/api/v1/auth/logout-all")
+def logout_all_sessions(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    now = datetime.now(timezone.utc)
+    revoked_count = _revoke_refresh_sessions(db, user.tenant_id, user.id, now)
     record_event(
         db, user, "auth_session", user.id, "all_refresh_sessions_revoked",
         {"revoked_sessions": revoked_count},
