@@ -14,3 +14,46 @@ def test_audit_event_hash_is_deterministic_and_chained():
     assert first != calculate_event_hash("f" * 64, payload)
     changed = dict(payload, action="rejected")
     assert first != calculate_event_hash(GENESIS_HASH, changed)
+
+
+def test_audit_chain_reports_verified_prefix_before_corruption():
+    from types import SimpleNamespace
+    from app.audit import verify_tenant_chain
+
+    created = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = []
+    previous = GENESIS_HASH
+    for index in range(2):
+        payload = event_payload(
+            tenant_id="tenant-a", actor_user_id=7, entity_type="invoice",
+            entity_id=index + 1, action="created", details={"index": index},
+            created_at=created,
+        )
+        digest = calculate_event_hash(previous, payload)
+        rows.append(SimpleNamespace(
+            tenant_id="tenant-a", actor_user_id=7, entity_type="invoice",
+            entity_id=str(index + 1), action="created", details={"index": index},
+            created_at=created, previous_hash=previous, event_hash=digest, id=index + 1,
+        ))
+        previous = digest
+
+    corrupted = SimpleNamespace(**{**rows[1].__dict__, "id": 3, "previous_hash": "f" * 64})
+    rows.append(corrupted)
+
+    class Query:
+        def filter(self, *args, **kwargs):
+            return self
+        def order_by(self, *args, **kwargs):
+            return self
+        def all(self):
+            return rows
+
+    class DB:
+        def query(self, *args, **kwargs):
+            return Query()
+
+    result = verify_tenant_chain(DB(), "tenant-a")
+    assert result["valid"] is False
+    assert result["verified_events"] == 2
+    assert result["failed_event_id"] == 3
+    assert result["reason"] == "previous_hash_mismatch"
