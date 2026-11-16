@@ -277,3 +277,30 @@ Authenticated users can change their password with `POST /api/v1/auth/change-pas
   "totp_code": "123456"
 }
 ```
+
+
+## MFA enrollment and verification throttling
+
+MFA setup, TOTP enrollment confirmation, and MFA disablement share the same persistent authentication failure budget as login and password changes: 10 failed checks per normalized account email or source IP in a rolling 15-minute window. A blocked request returns HTTP 429 with a `Retry-After` header. Failed current-password, TOTP, and recovery-code checks are stored as keyed HMAC identifiers only; raw email addresses and IP addresses are not written to the attempt table. PostgreSQL advisory locks serialize the budget across API replicas. The API acquires these locks before locking the account row to keep the lock order consistent.
+
+For example, start enrollment with the current password:
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/mfa/setup \
+  -H "Authorization: Bearer $TOKEN" \
+  -F 'current_password=your-current-password'
+```
+
+Confirm enrollment with the six-digit authenticator code:
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/mfa/enable \
+  -H "Authorization: Bearer $TOKEN" \
+  -F 'totp_code=123456'
+```
+
+Disable MFA only after providing the current password and a fresh TOTP code or unused recovery code:
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/mfa/disable \
+  -H "Authorization: Bearer $TOKEN" \
+  -F 'current_password=your-current-password' \
+  -F 'totp_code=123456'
+```
