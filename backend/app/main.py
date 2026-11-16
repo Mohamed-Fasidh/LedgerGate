@@ -345,6 +345,7 @@ def enable_mfa(
 
 @app.post("/api/v1/auth/mfa/disable")
 def disable_mfa(
+    response: Response,
     current_password: str = Form(...),
     totp_code: str | None = Form(default=None),
     recovery_code: str | None = Form(default=None),
@@ -371,9 +372,15 @@ def disable_mfa(
     locked_user.mfa_enabled_at = None
     locked_user.mfa_last_used_step = None
     locked_user.mfa_recovery_code_hashes = []
-    record_event(db, locked_user, "user", locked_user.id, "mfa_disabled", {"method": "totp"})
+    now = datetime.now(timezone.utc)
+    revoked_count = _revoke_refresh_sessions(db, locked_user.tenant_id, locked_user.id, now)
+    record_event(
+        db, locked_user, "user", locked_user.id, "mfa_disabled",
+        {"method": "totp", "revoked_refresh_sessions": revoked_count},
+    )
     db.commit()
-    return {"status": "disabled"}
+    _clear_auth_cookies(response)
+    return {"status": "disabled", "revoked_sessions": revoked_count}
 
 
 
