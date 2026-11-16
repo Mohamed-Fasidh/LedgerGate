@@ -263,6 +263,10 @@ def readiness(db: Session = Depends(get_db)):
     return {"status": "ready", "dependencies": dependencies}
 
 EMAIL_VERIFICATION_TTL = timedelta(hours=24)
+EMAIL_VERIFICATION_GENERIC_MESSAGE = (
+    "If this address is eligible, a verification link will be emailed. "
+    "Check your inbox before signing in."
+)
 
 
 def _deliver_email_verification(recipient: str, verification_url: str) -> None:
@@ -273,37 +277,11 @@ def _deliver_email_verification(recipient: str, verification_url: str) -> None:
         logger.exception("Email verification delivery failed")
 
 
-@app.post("/api/v1/auth/register", status_code=202)
-def register(
-    payload: RegisterIn,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-):
-    _require_allowed_origin(request)
-    remote_ip = request.client.host if request.client else "unknown"
-    retry_after = _record_registration_attempt(db, payload.email, remote_ip)
-    if retry_after is not None:
-        raise HTTPException(429, "Too many registration attempts. Try again later.", headers={"Retry-After": str(retry_after)})
-
-    tenant_id = str(uuid.uuid4())
-    user = User(
-        tenant_id=tenant_id,
-        tenant_name=payload.tenant_name,
-        email=payload.email.strip().lower(),
-        hashed_password=hash_password(payload.password),
-        role=Role.admin,
-        email_verified=False,
-    )
-    db.add(user)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(409, "Account already exists")
-    db.refresh(user)
-
-    now = datetime.now(timezone.utc)
+def _create_email_verification_link(db: Session, user: User, now: datetime) -> str:
+    """Replace any previous verification link while holding the user's row lock."""
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user.id
+    ).delete(synchronize_session=False)
     raw_token = secrets.token_urlsafe(48)
     db.add(EmailVerificationToken(
         user_id=user.id,
@@ -311,13 +289,53 @@ def register(
         expires_at=now + EMAIL_VERIFICATION_TTL,
         created_at=now,
     ))
+    return f"{settings.public_app_url.rstrip('/')}/#verify_email_token={quote(raw_token, safe='')}"
+
+
+@app.post("/api/v1/auth/register", status_code=202)
+def register(
+    payload: RegisterIn,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Create an unverified workspace without disclosing whether an email is registered."""
+    _require_allowed_origin(request)
+    remote_ip = request.client.host if request.client else "unknown"
+    retry_after = _record_registration_attempt(db, payload.email, remote_ip)
+    if retry_after is not None:
+        raise HTTPException(429, "Too many registration attempts. Try again later.", headers={"Retry-After": str(retry_after)})
+
+    normalized_email = payload.email.strip().lower()
+    user = User(
+        tenant_id=str(uuid.uuid4()),
+        tenant_name=payload.tenant_name,
+        email=normalized_email,
+        hashed_password=hash_password(payload.password),
+        role=Role.admin,
+        email_verified=False,
+    )
+    db.add(user)
+    try:
+        # Flush obtains the generated user ID but keeps account and token creation atomic.
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        existing = db.query(User).filter(
+            User.email == normalized_email
+        ).with_for_update().first()
+        if existing is not None and existing.is_active and not existing.email_verified:
+            verification_url = _create_email_verification_link(db, existing, datetime.now(timezone.utc))
+            db.commit()
+            background_tasks.add_task(_deliver_email_verification, existing.email, verification_url)
+        elif existing is None:
+            raise
+        return {"status": "accepted", "message": EMAIL_VERIFICATION_GENERIC_MESSAGE}
+
+    verification_url = _create_email_verification_link(db, user, datetime.now(timezone.utc))
     db.commit()
-    verification_url = f"{settings.public_app_url.rstrip('/')}/#verify_email_token={quote(raw_token, safe='')}"
     background_tasks.add_task(_deliver_email_verification, user.email, verification_url)
-    return {
-        "status": "verification_required",
-        "message": "Workspace created. Check your email for a verification link before signing in.",
-    }
+    return {"status": "accepted", "message": EMAIL_VERIFICATION_GENERIC_MESSAGE}
 
 
 @app.post("/api/v1/auth/email-verification/request", status_code=202)
@@ -336,27 +354,12 @@ def request_email_verification(
             User.email == payload.email.strip().lower(),
             User.is_active.is_(True),
             User.email_verified.is_(False),
-        ).first()
+        ).with_for_update().first()
         if user is not None:
-            now = datetime.now(timezone.utc)
-            db.query(EmailVerificationToken).filter(
-                EmailVerificationToken.user_id == user.id,
-                EmailVerificationToken.used_at.is_(None),
-            ).update({EmailVerificationToken.used_at: now}, synchronize_session=False)
-            raw_token = secrets.token_urlsafe(48)
-            db.add(EmailVerificationToken(
-                user_id=user.id,
-                token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
-                expires_at=now + EMAIL_VERIFICATION_TTL,
-                created_at=now,
-            ))
+            verification_url = _create_email_verification_link(db, user, datetime.now(timezone.utc))
             db.commit()
-            verification_url = f"{settings.public_app_url.rstrip('/')}/#verify_email_token={quote(raw_token, safe='')}"
             background_tasks.add_task(_deliver_email_verification, user.email, verification_url)
-    return {
-        "status": "accepted",
-        "message": "If the account needs verification, a verification link will be emailed.",
-    }
+    return {"status": "accepted", "message": EMAIL_VERIFICATION_GENERIC_MESSAGE}
 
 
 @app.post("/api/v1/auth/email-verification/confirm")
