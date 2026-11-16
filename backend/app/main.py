@@ -500,14 +500,24 @@ def logout(request: Request, response: Response, payload: RefreshIn | None = Non
     except Exception:
         _clear_auth_cookies(response)
         raise unauthorized
+    # Lock the presented session before revoking its family. If refresh is
+    # rotating this token concurrently, logout waits and then observes the
+    # replacement session instead of leaving a live token behind.
     session = db.query(AuthSession).filter(
         AuthSession.tenant_id == tenant_id,
         AuthSession.user_id == user_id,
         AuthSession.token_id == token_id,
         AuthSession.token_hash == _token_hash(refresh_token),
-    ).first()
-    if session and session.revoked_at is None:
-        session.revoked_at = datetime.now(timezone.utc)
+    ).with_for_update().first()
+    if session:
+        db.query(AuthSession).filter(
+            AuthSession.tenant_id == tenant_id,
+            AuthSession.family_id == session.family_id,
+            AuthSession.revoked_at.is_(None),
+        ).update(
+            {AuthSession.revoked_at: datetime.now(timezone.utc)},
+            synchronize_session=False,
+        )
         db.commit()
     _clear_auth_cookies(response)
     return {"status": "logged_out"}
