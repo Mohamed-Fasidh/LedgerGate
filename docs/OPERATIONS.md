@@ -15,12 +15,23 @@ docker compose down
 docker compose up --build -d
 ```
 
-## Database backup example
-For local Docker development:
+## Database backup and restore drills
+
+Run these scripts from the repository root with the Compose database service healthy:
+
 ```bash
-docker compose exec -T db pg_dump -U ledgergate ledgergate > ledgergate-backup.sql
+# Create a custom-format, archive-validated dump and SHA-256 sidecar.
+bash scripts/backup_postgres.sh
+
+# Verify checksum and restore into a disposable database, then drop it.
+bash scripts/restore_drill_postgres.sh ./backups/ledgergate-YYYYMMDDTHHMMSSZ.dump
 ```
-Restore drills must be performed in a separate environment before relying on backups.
+
+- Backups are written under `./backups` by default with restrictive permissions. Set `BACKUP_DIR` to a protected, capacity-managed destination and `BACKUP_RETENTION_DAYS` (1–3650; default 30) to control local cleanup.
+- The backup script validates the PostgreSQL custom archive before publishing it and writes a SHA-256 sidecar. Copy both files to encrypted off-host storage; a local dump is not a disaster-recovery strategy.
+- The restore drill checks the checksum, restores into a newly created disposable database, and confirms the Alembic version table exists. It never restores over the configured application database. Set `RESTORE_DRILL_KEEP_DB=1` only when you intentionally want to inspect the temporary database; remove it manually afterwards.
+- These scripts do not back up PostgreSQL roles/globals, object-storage invoice files, secrets, or cloud configuration. Back up and test those separately. Production backups should use managed encrypted backups/PITR and an independently secured off-site copy.
+- Run restore drills against an isolated recovery environment, not a busy production database. Record duration, backup age, row counts, and recovery-point/recovery-time results.
 
 ## Incident response
 1. Disable affected user accounts and rotate credentials.
