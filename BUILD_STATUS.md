@@ -111,3 +111,11 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - PDF page count remains capped at 50. OCR now estimates rendered page pixels before allocating images and rejects pages above 12 million pixels or documents above 48 million total OCR pixels.
 - Added regression tests for oversized TXT/parser input and OCR page-dimension limits. OCR remains optional when its Python dependencies are unavailable; extraction candidates still require human confirmation.
 - Latest fully passing CI before this change: [43834026551](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43834026551).
+
+
+## Verification refresh — 2026-11-16
+
+- Latest PR #5 head `0fa714dfff727fe6aaa17b59268d98c06106feff` passed GitHub Actions run [43834868897](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43834868897): backend migrations/runtime-role bootstrap/compilation/pytest, frontend dependency audit and production build, and Docker operational-script checks/Compose validation/image builds all passed.
+- This is CI evidence for the PR branch only. PR #5 remains open and unmerged; `main` does not yet contain these changes.
+- Several earlier runs were automatically cancelled when newer commits superseded them. One earlier run failed ([43833599492](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43833599492)); the latest head subsequently passed all three jobs.
+- The repository is not production-complete. Staging deployment, cloud resource provisioning and end-to-end IAM/KMS/Object Lock validation, real backup/restore and audit-export drills, identity lifecycle features (SSO/OIDC, verified email, password recovery), independent security/load testing, and operational/legal sign-off remain outstanding.
