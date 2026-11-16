@@ -6,7 +6,7 @@ Last checked: 2026-11-16
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **CI for the current PR #5 head:** GitHub Actions run [43810434996](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43810434996) completed successfully. Backend, frontend, and Docker jobs all passed.
+- **Latest code CI:** GitHub Actions run [43810434996](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43810434996) completed successfully on the application-code head; backend, frontend, and Docker jobs all passed. Documentation-only commits then advanced the PR head to `10e8477b9ffa73837af1859a7227b9b1043d8758`; its follow-up CI run `43812922102` is queued and must pass before calling the current head green.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
@@ -30,10 +30,12 @@ Last checked: 2026-11-16
 
 ## Latest CI result
 
-Run **43810434996** on the current PR #5 head:
+Run **43810434996** on the application-code head immediately before documentation refresh:
 - Backend: migrations, restricted runtime-role bootstrap, Python compilation, and pytest — passed.
 - Frontend: dependency advisory report, high-severity npm audit gate, and production build — passed.
 - Docker: Compose configuration validation and backend/frontend image builds — passed.
+
+Documentation refresh commit `10e8477b9ffa73837af1859a7227b9b1043d8758` triggered run [43812922102](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43812922102), which is queued at the time of this status update. Recheck it before merging.
 
 CI validates the repository's automated checks. It does not provision cloud resources, validate production secrets/IAM policies, prove disaster recovery, or replace an independent security assessment.
 
