@@ -152,6 +152,12 @@ def downgrade() -> None:
     )
     for name, signature in functions:
         op.execute(f"DROP FUNCTION IF EXISTS public.{name}({signature})")
+    op.execute("""
+        REVOKE SELECT ON public.users,
+                        public.password_reset_tokens,
+                        public.email_verification_tokens
+        FROM ledgergate_auth_owner
+    """)
     for table in ("email_verification_tokens", "password_reset_tokens", "users"):
         op.execute(f'DROP POLICY IF EXISTS tenant_isolation ON public."{table}"')
         op.execute(f'ALTER TABLE public."{table}" NO FORCE ROW LEVEL SECURITY')
