@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.config import settings
@@ -94,8 +95,13 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
 
     now = datetime.now(timezone.utc)
     retain_until = now + timedelta(days=retention)
+    # Every export attempt gets a fresh immutable object key. Reusing a
+    # range-only key makes retries ambiguous when Object Lock/versioning is on
+    # and the database commit after a successful S3 write later fails.
+    export_id = str(uuid.uuid4())
     payload = {
         "format": "ledgergate-audit-export-v1",
+        "export_id": export_id,
         "tenant_id": tenant_id,
         "exported_at": now.isoformat(),
         "retention_days": retention,
@@ -117,7 +123,7 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
     body = canonical_json(document)
     key = (
         f"tenants/{tenant_id}/audit-exports/"
-        f"{events[0]['id']}-{events[-1]['id']}.json"
+        f"{events[0]['id']}-{events[-1]['id']}/{export_id}.json"
     )
     try:
         put_response = client.put_object(
@@ -139,6 +145,7 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
         raise AuditExportUnavailable("Immutable audit export write failed") from exc
 
     return {
+        "export_id": export_id,
         "bucket": bucket,
         "key": key,
         "version_id": put_response.get("VersionId"),
