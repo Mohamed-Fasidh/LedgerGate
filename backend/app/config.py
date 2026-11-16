@@ -122,8 +122,18 @@ def validate_production_settings(config: Settings) -> None:
     if not config.email_from_address.strip() or "@" not in config.email_from_address:
         raise RuntimeError("Production requires a valid EMAIL_FROM_ADDRESS")
     public_url = urlparse(config.public_app_url)
-    if public_url.scheme != "https" or not public_url.netloc or public_url.username or public_url.password or public_url.query or public_url.fragment:
-        raise RuntimeError("Production PUBLIC_APP_URL must be an HTTPS application origin")
+    public_hostname = (public_url.hostname or "").lower()
+    if (
+        public_url.scheme != "https"
+        or not public_url.netloc
+        or public_url.path not in ("", "/")
+        or public_url.username
+        or public_url.password
+        or public_url.query
+        or public_url.fragment
+        or public_hostname in {"localhost", "127.0.0.1", "::1"}
+    ):
+        raise RuntimeError("Production PUBLIC_APP_URL must be a public HTTPS application origin without a path")
     database_url = config.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
     parsed_database_url = urlparse(database_url)
     if parsed_database_url.scheme not in ("postgres", "postgresql") or parsed_database_url.username != "ledgergate_runtime":
