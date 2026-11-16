@@ -282,3 +282,13 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Docker job passed: operational-script validation, workflow-run cleanup safety regression test, production startup/migration guards, PostgreSQL backup/restore checks, non-root container and health-check checks, Compose validation, and backend/frontend image builds.
 - This verifies the repository CI pipeline at this commit only. It is not evidence of cloud provisioning, staging UAT, production deployment, independent security review, or a real disaster-recovery exercise.
 - PR #5 remains open and unmerged. The workflow-run cleanup schedule is every five minutes (GitHub Actions scheduled workflows do not support one-minute intervals) and will only become active on `main` after the PR is merged.
+
+
+## Account-wide access-token revocation (2026-11-16)
+
+- Added migration 0021_access_token_version and a zero-defaulted users.auth_token_version field.
+- New access tokens carry the account version; authenticated requests compare it to the current user row and reject stale tokens.
+- Password changes, MFA disablement, logout-all, member role changes, and member deactivation increment the version in their existing account transaction while revoking refresh sessions.
+- Existing access tokens without a version claim remain compatible at version zero until they expire.
+- Added regression tests for version claims, stale-token rejection, and legacy-token compatibility.
+- The change is committed to PR #5 and is awaiting its own complete CI run. It has not been merged or deployed.
