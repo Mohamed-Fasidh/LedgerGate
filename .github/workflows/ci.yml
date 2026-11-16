@@ -81,6 +81,8 @@ jobs:
         run: bash -n scripts/backup_postgres.sh scripts/restore_drill_postgres.sh
       - name: Test PostgreSQL backup publication and failure cleanup
         run: python3 scripts/test_backup_postgres.py
+      - name: Test PostgreSQL restore drill verification and cleanup
+        run: python3 scripts/test_restore_drill_postgres.py
       - name: Validate Compose configuration
         run: |
           cp .env.example .env
