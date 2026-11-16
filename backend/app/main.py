@@ -348,7 +348,7 @@ def create_approval_policy(payload:ApprovalPolicyIn,db:Session=Depends(get_db),u
     db.add(policy)
     try:
         db.flush()
-        record_event(db,user,"approval_policy",policy.id,"created",{"name":policy.name,"min_amount":payload.min_amount,"max_amount":payload.max_amount,"approval_steps":payload.approval_steps})
+        record_event(db,user,"approval_policy",policy.id,"created",{"name":policy.name,"min_amount":str(payload.min_amount),"max_amount":str(payload.max_amount) if payload.max_amount is not None else None,"approval_steps":payload.approval_steps})
         db.commit(); db.refresh(policy)
     except IntegrityError:
         db.rollback(); raise HTTPException(409,"An approval policy with this name already exists")
