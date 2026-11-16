@@ -97,6 +97,70 @@ def test_repeated_export_range_gets_distinct_immutable_object_keys(monkeypatch):
     assert len(set(client.keys)) == 2
 
 
+def _signed_valid_chain_document():
+    from app.audit import GENESIS_HASH, calculate_event_hash, event_payload
+
+    created = datetime(2026, 11, 16, tzinfo=timezone.utc)
+    events = []
+    previous = GENESIS_HASH
+    for event_id in (3, 8):
+        payload = event_payload(
+            tenant_id="tenant-a", actor_user_id=7, entity_type="invoice",
+            entity_id=str(event_id), action="created", details={"id": event_id},
+            created_at=created,
+        )
+        digest = calculate_event_hash(previous, payload)
+        events.append({"id": event_id, **payload, "previous_hash": previous, "event_hash": digest})
+        previous = digest
+    export_payload = {
+        "format": "ledgergate-audit-export-v1",
+        "export_id": "export-test-uuid",
+        "tenant_id": "tenant-a",
+        "exported_at": created.isoformat(),
+        "retention_days": 365,
+        "signing_key_id": "verify-key-v1",
+        "first_event_id": events[0]["id"],
+        "last_event_id": events[-1]["id"],
+        "event_count": len(events),
+        "first_previous_hash": events[0]["previous_hash"],
+        "last_event_hash": events[-1]["event_hash"],
+        "events": events,
+    }
+    key = "test-verification-key-material-longer-than-32-bytes"
+    digest, signature = audit_export.sign_audit_payload(export_payload, key)
+    return {
+        **export_payload, "payload_sha256": digest,
+        "signature_algorithm": "HMAC-SHA256", "signature": signature,
+    }, {"verify-key-v1": key}
+
+
+def test_export_document_verifier_checks_signature_and_full_event_chain():
+    document, keyring = _signed_valid_chain_document()
+    assert audit_export.verify_audit_export_document(document, keyring)
+
+
+@pytest.mark.parametrize("mutation", ["event_hash", "previous_hash", "tenant_id", "event_count", "last_event_id"])
+def test_export_document_verifier_rejects_invalid_chain_or_metadata(mutation):
+    document, keyring = _signed_valid_chain_document()
+    tampered = json.loads(json.dumps(document))
+    if mutation == "event_hash":
+        tampered["events"][1]["event_hash"] = "f" * 64
+    elif mutation == "previous_hash":
+        tampered["events"][1]["previous_hash"] = "f" * 64
+    elif mutation == "tenant_id":
+        tampered["events"][1]["tenant_id"] = "tenant-b"
+    elif mutation == "event_count":
+        tampered["event_count"] = 99
+    else:
+        tampered["last_event_id"] = 999
+    # Re-sign the modified document to prove the structural verifier catches
+    # errors even when the document HMAC itself is valid.
+    payload = {k: v for k, v in tampered.items() if k not in ("signature", "payload_sha256", "signature_algorithm")}
+    digest, signature = audit_export.sign_audit_payload(payload, keyring["verify-key-v1"])
+    tampered.update(payload_sha256=digest, signature=signature)
+    assert not audit_export.verify_audit_export_document(tampered, keyring)
+
+
 def test_audit_export_fails_closed_without_bucket_object_lock(monkeypatch):
     _settings(monkeypatch)
     client = FakeS3(lock={"ObjectLockConfiguration": {"ObjectLockEnabled": "Disabled"}})
