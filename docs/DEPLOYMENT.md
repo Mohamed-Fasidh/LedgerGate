@@ -42,7 +42,9 @@ Production startup deliberately fails if required encryption, audit WORM, or JWT
 
 - Provision managed PostgreSQL with private networking, encryption, backups, and point-in-time recovery.
 - Run Alembic migrations once as a controlled release job using the migration-owner connection.
-- Bootstrap/verify the non-owner runtime role and grants. The API role must not own tenant tables, be a superuser, or have BYPASSRLS.
+- Run `./scripts/bootstrap_runtime_role.sh` as a separate one-shot release/bootstrap task using the migration-owner connection, then verify the runtime role grants.
+- The production API image starts only Uvicorn; it does not run migrations or create database roles on startup. This prevents every replica from racing to perform privileged schema changes. The repository's local `docker-compose.yml` deliberately overrides the command to run migrations and runtime-role bootstrap for developer convenience only; do not copy that override into a production deployment.
+- Configure the orchestrator's API readiness gate to wait for the release migration/bootstrap job to succeed before starting or rolling out API replicas. The API role must not own tenant tables, be a superuser, or have BYPASSRLS.
 - Run RLS and cross-tenant negative tests as the exact runtime role.
 - Start API replicas only after the migration job succeeds. Do not run migrations concurrently from every API replica.
 - Validate tenant context is reset between pooled requests and that no tenant can access another tenant's records.
