@@ -21,6 +21,12 @@ def test_rls_blocks_cross_tenant_and_audit_is_append_only():
             VALUES
               ('tenant-a', NULL, 'test', :event_id, 'created', '{}'::json, now())
         """), {"event_id": event_id})
+        db.execute(text("""
+            INSERT INTO approval_policies
+              (tenant_id, name, min_amount, max_amount, approval_steps, is_active, created_by_user_id, created_at)
+            VALUES
+              ('tenant-a', :policy_name, 0, NULL, '[["reviewer"],["admin"]]'::json, true, NULL, now())
+        """), {"policy_name": f"rls-test-{event_id}"})
         db.commit()
 
     with Session() as db:
@@ -31,6 +37,11 @@ def test_rls_blocks_cross_tenant_and_audit_is_append_only():
             {"event_id": event_id},
         ).scalar_one()
         assert visible == 0
+        policy_visible = db.execute(
+            text("SELECT count(*) FROM approval_policies WHERE name=:policy_name"),
+            {"policy_name": f"rls-test-{event_id}"},
+        ).scalar_one()
+        assert policy_visible == 0
         db.rollback()
 
     with Session() as db:
