@@ -264,3 +264,11 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Added this regression test to the Docker CI job and included the cleanup script in shell syntax validation.
 - A local smoke test of the cleanup script with a fake CLI passed for the deletion filter and required-environment guards.
 - The latest full GitHub Actions success remains run [43856458704](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43856458704), which predates these latest workflow changes. CI for the current head is still required.
+
+## API route authentication guard — 2026-11-16
+
+- Added an AST-based backend regression test that checks every `/api/v1/*` business route for an explicit `get_current_user` or `require_roles` dependency.
+- The test permits only the intentionally public account-entry endpoints: registration, login/token issuance, refresh, and logout (which validates the presented refresh session).
+- New business routes that omit an authentication/role dependency will fail the backend pytest suite.
+- This is a static dependency-presence guard; it complements, but does not replace, endpoint-level authorization, tenant-isolation, and penetration tests.
+- Added as `backend/tests/test_route_authentication.py`; current PR CI must execute it before the guard is considered verified.
