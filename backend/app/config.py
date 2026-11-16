@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     clamav_host: str = ""
     clamav_port: int = 3310
     clamav_timeout_seconds: int = 20
+    email_smtp_host: str = ""
+    email_smtp_port: int = 587
+    email_smtp_username: str = ""
+    email_smtp_password: str = ""
+    email_from_address: str = ""
+    public_app_url: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
@@ -97,6 +103,15 @@ def validate_production_settings(config: Settings) -> None:
         raise RuntimeError("ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 60 in production")
     if len(config.db_runtime_password) < 32:
         raise RuntimeError("Production requires DB_RUNTIME_PASSWORD with at least 32 characters")
+    if not config.email_smtp_host.strip() or not config.email_smtp_username.strip() or not config.email_smtp_password:
+        raise RuntimeError("Production requires authenticated SMTP configuration for account recovery")
+    if config.email_smtp_port != 587:
+        raise RuntimeError("Production SMTP must use port 587 with STARTTLS")
+    if not config.email_from_address.strip() or "@" not in config.email_from_address:
+        raise RuntimeError("Production requires a valid EMAIL_FROM_ADDRESS")
+    public_url = urlparse(config.public_app_url)
+    if public_url.scheme != "https" or not public_url.netloc or public_url.username or public_url.password or public_url.query or public_url.fragment:
+        raise RuntimeError("Production PUBLIC_APP_URL must be an HTTPS application origin")
     database_url = config.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
     parsed_database_url = urlparse(database_url)
     if parsed_database_url.scheme not in ("postgres", "postgresql") or parsed_database_url.username != "ledgergate_runtime":
