@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from fastapi import BackgroundTasks, HTTPException
 from starlette.requests import Request
 
@@ -107,7 +108,7 @@ def test_verification_resend_is_generic_and_queues_new_link(monkeypatch):
     )
 
     assert result["status"] == "accepted"
-    assert "If the account needs verification" in result["message"]
+    assert "If this address is eligible" in result["message"]
     assert len(db.added) == 1 and isinstance(db.added[0], EmailVerificationToken)
     assert len(tasks.tasks) == 1
     tasks.tasks[0].func(*tasks.tasks[0].args, **tasks.tasks[0].kwargs)
@@ -121,7 +122,7 @@ def test_verification_request_does_not_disclose_unknown_email(monkeypatch):
         _request(), BackgroundTasks(), _DB(user=None),
     )
     assert result["status"] == "accepted"
-    assert "If the account needs verification" in result["message"]
+    assert "If this address is eligible" in result["message"]
 
 
 def test_email_verification_confirm_activates_account_and_audits(monkeypatch):
@@ -168,3 +169,63 @@ def test_login_eligibility_requires_verified_active_account():
     assert not main._login_credentials_are_valid(
         SimpleNamespace(is_active=False, email_verified=True), True
     )
+
+
+def test_duplicate_registration_is_generic_and_resends_only_unverified_account(monkeypatch):
+    existing = SimpleNamespace(
+        id=7, email="person@example.com", is_active=True, email_verified=False
+    )
+
+    class DuplicateDB(_DB):
+        def flush(self):
+            raise IntegrityError("INSERT", {}, RuntimeError("duplicate email"))
+        def rollback(self):
+            super().rollback()
+            self.added.clear()
+
+    db = DuplicateDB(user=existing)
+    sent = []
+    tasks = BackgroundTasks()
+    monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
+    monkeypatch.setattr(main, "hash_password", lambda value: "hashed-password")
+    monkeypatch.setattr(main, "_deliver_email_verification", lambda email, url: sent.append((email, url)))
+    monkeypatch.setattr(settings, "public_app_url", "https://app.example.com")
+
+    result = main.register(
+        main.RegisterIn(email="person@example.com", password="long-strong-password", tenant_name="Other Workspace"),
+        _request(), tasks, db,
+    )
+
+    assert result == {"status": "accepted", "message": main.EMAIL_VERIFICATION_GENERIC_MESSAGE}
+    assert db.rollbacks == 1
+    assert len(db.added) == 1 and isinstance(db.added[0], EmailVerificationToken)
+    assert len(tasks.tasks) == 1
+    tasks.tasks[0].func(*tasks.tasks[0].args, **tasks.tasks[0].kwargs)
+    assert sent[0][0] == "person@example.com"
+
+
+def test_duplicate_verified_registration_does_not_disclose_or_send_email(monkeypatch):
+    existing = SimpleNamespace(
+        id=7, email="person@example.com", is_active=True, email_verified=True
+    )
+
+    class DuplicateDB(_DB):
+        def flush(self):
+            raise IntegrityError("INSERT", {}, RuntimeError("duplicate email"))
+        def rollback(self):
+            super().rollback()
+            self.added.clear()
+
+    db = DuplicateDB(user=existing)
+    tasks = BackgroundTasks()
+    monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
+    monkeypatch.setattr(main, "hash_password", lambda value: "hashed-password")
+
+    result = main.register(
+        main.RegisterIn(email="person@example.com", password="long-strong-password", tenant_name="Other Workspace"),
+        _request(), tasks, db,
+    )
+
+    assert result == {"status": "accepted", "message": main.EMAIL_VERIFICATION_GENERIC_MESSAGE}
+    assert not tasks.tasks
+    assert not db.added
