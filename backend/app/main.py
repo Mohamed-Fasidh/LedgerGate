@@ -411,15 +411,34 @@ def download_invoice_file(invoice_id:int,db:Session=Depends(get_db),user:User=De
     return StreamingResponse(BytesIO(content),media_type=media_type,headers={"Content-Disposition":f"attachment; filename*=UTF-8''{safe_filename}","X-Content-Type-Options":"nosniff","Cache-Control":"private, no-store"})
 
 @app.post("/api/v1/invoices/{invoice_id}/confirm-extraction")
-def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    _validate_idempotency_key(idempotency_key)
+    operation=f"invoice.confirm_extraction:{invoice_id}:{user.id}"
+    payload_data=payload.model_dump()
+    fingerprint=_request_fingerprint(operation,payload_data)
+    if idempotency_key:
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+        if cached is not None: return cached
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if payload.supplier_id and not db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Supplier not found")
-    if payload.purchase_order_id and not db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Purchase order not found")
-    for k,v in payload.model_dump().items(): setattr(inv,k,v)
+    if payload.purchase_order_id and not db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Purchase order not found")
+    for k,v in payload_data.items(): setattr(inv,k,v)
     inv.status=InvoiceStatus.RECEIVED
-    record_event(db,user,"invoice",inv.id,"extraction_confirmed",{"invoice_number":inv.invoice_number,"amount":payload.amount})
-    db.commit(); db.refresh(inv); return invoice_view(inv)
+    db.flush()
+    response=invoice_view(inv)
+    if idempotency_key:
+        _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
+    record_event(db,user,"invoice",inv.id,"extraction_confirmed",{"invoice_number":inv.invoice_number,"amount":payload.amount,"idempotent":bool(idempotency_key)})
+    try:
+        db.commit()
+        return response
+    except IntegrityError:
+        db.rollback()
+        if idempotency_key:
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+            if cached is not None: return cached
+        raise HTTPException(409,"Invoice extraction confirmation conflicted with another request")
 
 @app.post("/api/v1/invoices/{invoice_id}/reconcile",response_model=ReconcileOut)
 def reconcile(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
@@ -490,26 +509,37 @@ def _validate_approval_actor(db:Session,inv:Invoice,user:User,steps:list):
     return stage
 
 @app.post("/api/v1/approval-policies")
-def create_approval_policy(payload:ApprovalPolicyIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+def create_approval_policy(payload:ApprovalPolicyIn,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
+    _validate_idempotency_key(idempotency_key)
+    operation=f"approval_policy.create:{user.id}"
+    payload_data=payload.model_dump()
+    fingerprint=_request_fingerprint(operation,payload_data)
+    if idempotency_key:
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+        if cached is not None: return cached
     _validate_approval_steps(payload.approval_steps)
     if payload.max_amount is not None and payload.max_amount<=payload.min_amount:
         raise HTTPException(400,"max_amount must be greater than min_amount")
     existing=db.query(ApprovalPolicy).filter(ApprovalPolicy.tenant_id==user.tenant_id,ApprovalPolicy.is_active.is_(True)).all()
     for policy in existing:
-        old_min=policy.min_amount
-        old_max=policy.max_amount
-        overlaps=_approval_ranges_overlap(payload.min_amount,payload.max_amount,old_min,old_max)
-        if overlaps:
+        if _approval_ranges_overlap(payload.min_amount,payload.max_amount,policy.min_amount,policy.max_amount):
             raise HTTPException(409,f"Amount range overlaps active policy '{policy.name}'")
     policy=ApprovalPolicy(tenant_id=user.tenant_id,created_by_user_id=user.id,name=payload.name,min_amount=payload.min_amount,max_amount=payload.max_amount,approval_steps=payload.approval_steps)
     db.add(policy)
     try:
         db.flush()
-        record_event(db,user,"approval_policy",policy.id,"created",{"name":policy.name,"min_amount":str(payload.min_amount),"max_amount":str(payload.max_amount) if payload.max_amount is not None else None,"approval_steps":payload.approval_steps})
-        db.commit(); db.refresh(policy)
+        response={"id":policy.id,"name":policy.name,"min_amount":float(policy.min_amount),"max_amount":float(policy.max_amount) if policy.max_amount is not None else None,"approval_steps":policy.approval_steps,"is_active":policy.is_active}
+        if idempotency_key:
+            _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
+        record_event(db,user,"approval_policy",policy.id,"created",{"name":policy.name,"min_amount":str(payload.min_amount),"max_amount":str(payload.max_amount) if payload.max_amount is not None else None,"approval_steps":payload.approval_steps,"idempotent":bool(idempotency_key)})
+        db.commit()
+        return response
     except IntegrityError:
-        db.rollback(); raise HTTPException(409,"An approval policy with this name already exists")
-    return {"id":policy.id,"name":policy.name,"min_amount":float(policy.min_amount),"max_amount":float(policy.max_amount) if policy.max_amount is not None else None,"approval_steps":policy.approval_steps,"is_active":policy.is_active}
+        db.rollback()
+        if idempotency_key:
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+            if cached is not None: return cached
+        raise HTTPException(409,"An approval policy with this name or idempotency key already exists")
 
 @app.get("/api/v1/approval-policies")
 def list_approval_policies(db:Session=Depends(get_db),user:User=Depends(require_roles("admin","reviewer"))):
@@ -581,12 +611,23 @@ def invoice_approvals(invoice_id:int,db:Session=Depends(get_db),user:User=Depend
     return {"invoice_id":inv.id,"policy_id":inv.approval_policy_id,"approval_steps":inv.approval_steps_snapshot or [["reviewer","admin"]],"current_stage":inv.approval_stage or 1,"decisions":[{"stage":r.stage,"approver_user_id":r.approver_user_id,"decision":r.decision,"comment":r.comment,"created_at":r.created_at.isoformat()} for r in rows]}
 
 @app.post("/api/v1/agent/memory")
-def add_agent_memory(content:str,memory_type:str="episodic",db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+def add_agent_memory(content:str,memory_type:str="episodic",idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    _validate_idempotency_key(idempotency_key)
+    operation=f"agent_memory.create:{user.id}"
+    payload={"content":content,"memory_type":memory_type}
+    fingerprint=_request_fingerprint(operation,payload)
+    if idempotency_key:
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+        if cached is not None: return cached
     if len(content.strip())<5 or len(content)>10000: raise HTTPException(400,"Memory content must be 5-10000 characters")
     try: obj=remember(db,user.tenant_id,content,memory_type,{"created_by":user.id})
     except ValueError as exc: raise HTTPException(400,str(exc))
-    record_event(db,user,"agent_memory",obj.id,"created",{"memory_type":memory_type}); db.commit()
-    return {"id":obj.id,"memory_type":obj.memory_type}
+    response={"id":obj.id,"memory_type":obj.memory_type}
+    if idempotency_key:
+        _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
+    record_event(db,user,"agent_memory",obj.id,"created",{"memory_type":memory_type,"idempotent":bool(idempotency_key)})
+    db.commit()
+    return response
 
 @app.get("/api/v1/agent/memory/search")
 def search_agent_memory(q:str,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
@@ -606,10 +647,21 @@ def explain_invoice(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(
     return {"invoice_id":inv.id,**explanation,"advisory_only":True}
 
 @app.post("/api/v1/policies")
-def add_policy(payload:PolicyIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
-    doc=PolicyDocument(tenant_id=user.tenant_id,**payload.model_dump()); db.add(doc); db.flush()
-    record_event(db,user,"policy",doc.id,"created",{"title":doc.title}); db.commit(); db.refresh(doc)
-    return {"id":doc.id,"title":doc.title}
+def add_policy(payload:PolicyIn,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    _validate_idempotency_key(idempotency_key)
+    operation=f"policy.create:{user.id}"
+    payload_data=payload.model_dump()
+    fingerprint=_request_fingerprint(operation,payload_data)
+    if idempotency_key:
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+        if cached is not None: return cached
+    doc=PolicyDocument(tenant_id=user.tenant_id,**payload_data); db.add(doc); db.flush()
+    response={"id":doc.id,"title":doc.title}
+    if idempotency_key:
+        _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
+    record_event(db,user,"policy",doc.id,"created",{"title":doc.title,"idempotent":bool(idempotency_key)})
+    db.commit()
+    return response
 
 @app.get("/api/v1/policies/search")
 def search_policies(q:str,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
