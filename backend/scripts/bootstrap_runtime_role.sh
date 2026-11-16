@@ -14,10 +14,27 @@ SELECT format('ALTER ROLE ledgergate_runtime PASSWORD %L', :'runtime_password')
 \gexec
 GRANT CONNECT ON DATABASE ledgergate TO ledgergate_runtime;
 GRANT USAGE ON SCHEMA public TO ledgergate_runtime;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ledgergate_runtime;
+-- The API needs normal DML, but deletion is restricted to bounded
+-- retention/cleanup paths. Revoke the historical broad grant on every run
+-- so existing installations converge to the same least-privilege policy.
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO ledgergate_runtime;
+REVOKE DELETE ON ALL TABLES IN SCHEMA public FROM ledgergate_runtime;
+GRANT DELETE ON TABLE
+  registration_attempts,
+  login_attempts,
+  email_verification_tokens,
+  auth_sessions,
+  idempotency_records,
+  outbound_emails
+TO ledgergate_runtime;
+-- Audit records are append-only; enforce that at the privilege layer as well
+-- as with the database trigger.
+REVOKE UPDATE, DELETE ON audit_events FROM ledgergate_runtime;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ledgergate_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE ledgergate IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ledgergate_runtime;
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO ledgergate_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE ledgergate IN SCHEMA public
+  REVOKE DELETE ON TABLES FROM ledgergate_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE ledgergate IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO ledgergate_runtime;
 SQL
