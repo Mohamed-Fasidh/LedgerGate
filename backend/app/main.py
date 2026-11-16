@@ -17,7 +17,7 @@ from app.config import settings
 from app.database import Base, engine, get_db
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, RefreshIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn
-from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step
+from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code
 from app.audit import record_event, verify_tenant_chain
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
@@ -103,6 +103,7 @@ def login(
     username: str = Form(...),
     password: str = Form(...),
     totp_code: str | None = Form(default=None),
+    recovery_code: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ):
     _require_allowed_origin(request)
@@ -129,6 +130,7 @@ def login(
     user = db.query(User).filter(User.email == normalized_email).with_for_update().first()
     password_valid = bool(user and verify_password(password, user.hashed_password))
     matched_step = None
+    remaining_recovery_hashes = None
     authenticated = password_valid
     if password_valid and user.mfa_enabled:
         try:
@@ -136,12 +138,19 @@ def login(
             matched_step = matching_totp_step(secret, totp_code, last_used_step=user.mfa_last_used_step)
         except RuntimeError:
             matched_step = None
-        authenticated = matched_step is not None
+        if matched_step is not None:
+            authenticated = True
+        else:
+            remaining_recovery_hashes = consume_mfa_recovery_code(user.mfa_recovery_code_hashes, recovery_code)
+            authenticated = remaining_recovery_hashes is not None
 
     if authenticated and matched_step is not None:
         # Persist the consumed TOTP step in the same transaction as the
         # login-attempt record while the user row lock is still held.
         user.mfa_last_used_step = matched_step
+    elif authenticated and remaining_recovery_hashes is not None:
+        # Recovery codes are single-use and consumed atomically with login.
+        user.mfa_recovery_code_hashes = remaining_recovery_hashes
     db.add(LoginAttempt(email_hash=email_hash, ip_hash=ip_hash, succeeded=authenticated, attempted_at=now))
     db.commit()
     if not authenticated:
@@ -200,18 +209,24 @@ def enable_mfa(
     matched_step = matching_totp_step(secret, totp_code, last_used_step=locked_user.mfa_last_used_step)
     if matched_step is None:
         raise HTTPException(400, "Invalid or expired authenticator code")
+    recovery_codes = generate_mfa_recovery_codes()
     locked_user.mfa_enabled = True
     locked_user.mfa_enabled_at = datetime.now(timezone.utc)
     locked_user.mfa_last_used_step = matched_step
-    record_event(db, locked_user, "user", locked_user.id, "mfa_enabled", {"method": "totp"})
+    locked_user.mfa_recovery_code_hashes = [hash_mfa_recovery_code(code) for code in recovery_codes]
+    record_event(db, locked_user, "user", locked_user.id, "mfa_enabled", {
+        "method": "totp",
+        "recovery_codes_issued": len(recovery_codes),
+    })
     db.commit()
-    return {"status": "enabled", "method": "totp"}
+    return {"status": "enabled", "method": "totp", "recovery_codes": recovery_codes}
 
 
 @app.post("/api/v1/auth/mfa/disable")
 def disable_mfa(
     current_password: str = Form(...),
-    totp_code: str = Form(...),
+    totp_code: str | None = Form(default=None),
+    recovery_code: str | None = Form(default=None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -225,12 +240,16 @@ def disable_mfa(
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
     matched_step = matching_totp_step(secret, totp_code, last_used_step=locked_user.mfa_last_used_step)
+    remaining_recovery_hashes = None
     if matched_step is None:
-        raise HTTPException(400, "Invalid or expired authenticator code")
+        remaining_recovery_hashes = consume_mfa_recovery_code(locked_user.mfa_recovery_code_hashes, recovery_code)
+        if remaining_recovery_hashes is None:
+            raise HTTPException(400, "Invalid or expired authenticator/recovery code")
     locked_user.mfa_enabled = False
     locked_user.mfa_secret_encrypted = None
     locked_user.mfa_enabled_at = None
     locked_user.mfa_last_used_step = None
+    locked_user.mfa_recovery_code_hashes = []
     record_event(db, locked_user, "user", locked_user.id, "mfa_disabled", {"method": "totp"})
     db.commit()
     return {"status": "disabled"}
