@@ -702,6 +702,58 @@ def test_runtime_role_cannot_reassign_referenced_purchase_order_to_another_tenan
         engine.dispose()
 
 
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_runtime_role_cannot_reassign_referenced_approval_policy_to_another_tenant():
+    """An approval policy referenced by an invoice cannot change tenant."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    Session = sessionmaker(bind=engine)
+    suffix = uuid.uuid4().hex
+    tenant_a = "policy-reassign-a-" + suffix
+    tenant_b = "policy-reassign-b-" + suffix
+    policy_id = None
+    invoice_id = None
+    try:
+        with engine.begin() as admin:
+            policy_id = admin.execute(text("""
+                INSERT INTO public.approval_policies
+                    (tenant_id, name, min_amount, max_amount, approval_steps,
+                     is_active, created_by_user_id, created_at)
+                VALUES (:tenant, :name, 0, NULL, '[]'::json, true, NULL, now())
+                RETURNING id
+            """), {"tenant": tenant_a, "name": "policy-reassign-" + suffix}).scalar_one()
+            invoice_id = admin.execute(text("""
+                INSERT INTO public.invoices
+                    (tenant_id, invoice_number, currency, amount, invoice_date,
+                     status, extraction_fields, reconciliation, created_at, approval_policy_id)
+                VALUES (:tenant, :number, 'INR', 100.00, '2026-01-01',
+                        'received', '{}'::json, '{}'::json, now(), :policy_id)
+                RETURNING id
+            """), {"tenant": tenant_a, "number": "INV-policy-reassign-" + suffix,
+                   "policy_id": policy_id}).scalar_one()
+
+        with Session() as runtime:
+            runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            runtime.execute(text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": tenant_a})
+            with pytest.raises(Exception, match="cannot reassign approval-policy tenant while tenant-owned references exist"):
+                runtime.execute(text("""
+                    UPDATE public.approval_policies SET tenant_id = :new_tenant WHERE id = :policy_id
+                """), {"new_tenant": tenant_b, "policy_id": policy_id})
+            runtime.rollback()
+
+        with engine.connect() as admin:
+            owner = admin.execute(text("SELECT tenant_id FROM public.approval_policies WHERE id = :id"),
+                                  {"id": policy_id}).scalar_one()
+            assert owner == tenant_a
+    finally:
+        with engine.begin() as admin:
+            if invoice_id is not None:
+                admin.execute(text("DELETE FROM public.invoices WHERE id = :id"), {"id": invoice_id})
+            if policy_id is not None:
+                admin.execute(text("DELETE FROM public.approval_policies WHERE id = :id"), {"id": policy_id})
+        engine.dispose()
+
+
 @pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
 def test_runtime_role_cannot_reassign_referenced_supplier_to_another_tenant():
     """Changing a parent tenant must not invalidate existing child references."""
