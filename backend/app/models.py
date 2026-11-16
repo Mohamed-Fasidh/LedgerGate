@@ -211,4 +211,7 @@ class IdempotencyRecord(Base):
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     response_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    __table_args__ = (UniqueConstraint("tenant_id", "key", name="uq_idempotency_tenant_key"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "key", name="uq_idempotency_tenant_key"),
+        Index("ix_idempotency_tenant_created_id", "tenant_id", "created_at", "id"),
+    )
