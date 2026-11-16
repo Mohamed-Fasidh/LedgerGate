@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     audit_worm_bucket: str = ""
     audit_worm_retention_days: int = 2555
     audit_export_signing_key: str = ""
+    audit_export_signing_key_id: str = "default"
     access_token_expire_minutes: int = 30
     cors_origins: str = "http://localhost:3000"
     upload_dir: str = "./uploads"
