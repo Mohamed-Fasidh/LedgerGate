@@ -24,6 +24,8 @@ class ContainerHardeningTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:8000/ready", compose)
         self.assertIn("http://127.0.0.1:3000", compose)
         self.assertIn("condition: service_healthy", compose)
+        self.assertEqual(compose.count("no-new-privileges:true"), 2)
+        self.assertEqual(compose.count("      - ALL"), 2)
         api = (ROOT / "backend" / "app" / "main.py").read_text()
         self.assertIn('@app.get("/health")', api)
         self.assertIn('@app.get("/ready")', api)
