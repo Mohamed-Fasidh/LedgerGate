@@ -199,7 +199,7 @@ def upgrade() -> None:
         CREATE OR REPLACE FUNCTION public.ledgergate_prevent_tenant_reassignment()
         RETURNS trigger
         LANGUAGE plpgsql
-        AS $
+        AS $$
         BEGIN
             IF OLD.tenant_id IS NOT DISTINCT FROM NEW.tenant_id THEN
                 RETURN NEW;
@@ -244,7 +244,7 @@ def upgrade() -> None:
             END IF;
             RETURN NEW;
         END;
-        $;
+        $$;;
     """)
 
     for table in ("users", "suppliers", "purchase_orders", "approval_policies", "invoices"):
