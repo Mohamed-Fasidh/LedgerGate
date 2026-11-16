@@ -2,11 +2,18 @@
 
 Last checked: 2026-11-16
 
+## Latest full CI verification — 2026-11-16
+
+- GitHub Actions run [43866324051](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43866324051) completed successfully on PR #5 head `b4eee14e99bde3fff43674fb788066b735ff3da8`.
+- Backend, frontend, and Docker jobs all completed with success. Docker included operational-script and cleanup-safety tests, production startup/migration guards, PostgreSQL backup/restore checks, non-root and health checks, Compose validation, and both image builds.
+- Exactly one workflow-run cleanup schedule is retained: `.github/workflows/cleanup-unsuccessful-runs.yml`, every five minutes. It targets completed failed and cancelled runs only. GitHub Actions scheduled workflows do not support a one-minute cadence.
+- PR #5 remains open and unmerged. This CI result verifies repository automation only; it is not staging or production deployment evidence.
+
 ## Current delivery state
 
 - **Stage 1 — core platform:** implemented and merged to `main` in PR #4.
 - **Stage 2 — application hardening:** implemented on `hardening/production-readiness-v2` in PR #5. The branch is not yet merged.
-- **Latest fully passing CI:** run [43864520264](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43864520264) passed backend, frontend, and Docker on PR #5 head `0d8c41d58ac8f72aea523699656dd11e81cb5863`. PR #5 is open and unmerged.
+- **Latest fully passing CI:** run [43866324051](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43866324051) passed backend, frontend, and Docker on PR #5 head `b4eee14e99bde3fff43674fb788066b735ff3da8`. PR #5 is open and unmerged.
 - **Stage 3 — staging deployment:** not yet verified against a provisioned staging environment.
 - **Stage 4 — public production deployment:** not yet deployed.
 - **Stage 5 — operational launch:** not complete; security assurance, recovery drills, and operational monitoring remain required.
@@ -28,9 +35,9 @@ Last checked: 2026-11-16
 - Tenant-wide idempotency for supported write operations, request fingerprint conflict protection, replayed response handling, and bounded tenant-admin retention maintenance.
 - Append-only audit mutation protection, per-tenant SHA-256 event chains, admin chain verification, and signed audit export to a separately provisioned S3 Object Lock bucket with COMPLIANCE retention and AES256 server-side encryption.
 
-## Latest CI result
+## Previous CI result details (superseded by run 43866324051)
 
-The latest fully successful run is **43864520264** on commit `0d8c41d58ac8f72aea523699656dd11e81cb5863` (backend, frontend, and Docker all passed):
+Run **43864520264** on commit `0d8c41d58ac8f72aea523699656dd11e81cb5863` (backend, frontend, and Docker all passed):
 - Backend: database migrations, restricted runtime-role bootstrap, Python compilation, and the full pytest suite — passed. This includes the corrected UTF-8 password byte-limit boundary tests.
 - Frontend: dependency advisory reporting, high-severity dependency audit gate, and production build — passed.
 - Docker: operational-script and cleanup-safety tests, production startup and one-shot migration guards, PostgreSQL backup/restore checks, non-root container and health-check tests, Compose validation, and backend/frontend image builds — passed.
