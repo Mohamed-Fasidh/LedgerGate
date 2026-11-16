@@ -103,3 +103,11 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Upload scanning now caps the ClamAV daemon's status response at 4 KiB. An oversized response is rejected as a scanner failure instead of being accumulated without a bound in API memory.
 - Added regression coverage for a valid NUL-terminated response, an oversized response, and an unterminated response. All malformed scanner responses fail closed.
 - Latest previously verified full CI run: [43832704393](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43832704393), all three jobs passed before this incremental change. This change requires its own CI run.
+
+
+## Document extraction resource limits (PR #5)
+
+- Text and PDF extraction now enforce a shared 2-million-character output cap; TXT reads are bounded to one character beyond that cap before rejection.
+- PDF page count remains capped at 50. OCR now estimates rendered page pixels before allocating images and rejects pages above 12 million pixels or documents above 48 million total OCR pixels.
+- Added regression tests for oversized TXT/parser input and OCR page-dimension limits. OCR remains optional when its Python dependencies are unavailable; extraction candidates still require human confirmation.
+- Latest fully passing CI before this change: [43834026551](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43834026551).
