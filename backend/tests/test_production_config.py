@@ -41,6 +41,7 @@ def test_production_accepts_explicit_https_origins_and_private_services():
         "https://localhost:3000",
         "https://127.0.0.1:3000",
         "https://app.example.com/dashboard",
+        "https://app.example.com/",
         "https://user:password@app.example.com",
         "*",
     ],
