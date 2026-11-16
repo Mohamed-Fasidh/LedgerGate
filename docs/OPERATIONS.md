@@ -33,6 +33,26 @@ bash scripts/restore_drill_postgres.sh ./backups/ledgergate-YYYYMMDDTHHMMSSZ.dum
 - These scripts do not back up PostgreSQL roles/globals, object-storage invoice files, secrets, or cloud configuration. Back up and test those separately. Production backups should use managed encrypted backups/PITR and an independently secured off-site copy.
 - Run restore drills against an isolated recovery environment, not a busy production database. Record duration, backup age, row counts, and recovery-point/recovery-time results.
 
+
+### Offline audit-export verification CLI
+
+After downloading an export object from the WORM bucket, verify it outside the API process. From the `backend/` directory, create a protected JSON keyring whose keys are indexed by the exact non-secret signing key IDs in the exports:
+
+```json
+{
+  "audit-key-2026-11": "REPLACE_WITH_THE_32_OR_MORE_CHARACTER_SECRET"
+}
+```
+
+On Linux/macOS, restrict the keyring file before use:
+
+```bash
+chmod 600 /secure/path/audit-keyring.json
+python -m scripts.verify_audit_export --document /secure/path/export.json --keyring-file /secure/path/audit-keyring.json
+```
+
+The CLI returns exit code 0 only when the HMAC, export metadata, tenant consistency, and complete included event hash chain validate; 1 means the export is invalid; 2 means the input/keyring could not be read or is unsafe. It never accepts secret values as command-line arguments and does not print key material. On Windows, store the keyring in a directory restricted to the operator account because POSIX mode checks are not available. Keep the keyring out of source control and ordinary logs.
+
 ## Incident response
 1. Disable affected user accounts and rotate credentials.
 2. Preserve logs and audit events.
