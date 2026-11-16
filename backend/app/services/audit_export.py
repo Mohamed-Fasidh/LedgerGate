@@ -35,7 +35,7 @@ def sign_audit_payload(payload: dict, signing_key: str) -> tuple[str, str]:
 def verify_audit_export_signature(document: dict, signing_key: str) -> bool:
     signature = document.get("signature")
     digest = document.get("payload_sha256")
-    payload = {key: value for key, value in document.items() if key not in ("signature", "payload_sha256")}
+    payload = {key: value for key, value in document.items() if key not in ("signature", "payload_sha256", "signature_algorithm")}
     expected_digest, expected_signature = sign_audit_payload(payload, signing_key)
     return (
         isinstance(signature, str)
