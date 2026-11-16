@@ -340,3 +340,63 @@ def test_runtime_role_has_no_default_table_or_sequence_grants():
             assert tuple(access) == (True, True, False, False)
     finally:
         admin_engine.dispose()
+
+@pytest.mark.skipif(
+    not os.getenv("RLS_TEST_ADMIN_DATABASE_URL"),
+    reason="PostgreSQL migration regression requires RLS_TEST_ADMIN_DATABASE_URL",
+)
+def test_0017_revokes_legacy_default_grants_for_existing_owner_roles():
+    """Migration 0017 removes pre-existing table and sequence default ACLs."""
+    import importlib
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    admin_engine = create_engine(os.environ["RLS_TEST_ADMIN_DATABASE_URL"])
+    owner_role = "ledgergate_legacy_acl_test_owner"
+    migration = importlib.import_module(
+        "migrations.versions.0017_revoke_legacy_runtime_defaults"
+    )
+    try:
+        with admin_engine.begin() as conn:
+            conn.execute(text(f'CREATE ROLE "{owner_role}" NOLOGIN'))
+            conn.execute(text(
+                f'ALTER DEFAULT PRIVILEGES FOR ROLE "{owner_role}" IN SCHEMA public '
+                "GRANT ALL ON TABLES TO ledgergate_runtime"
+            ))
+            conn.execute(text(
+                f'ALTER DEFAULT PRIVILEGES FOR ROLE "{owner_role}" IN SCHEMA public '
+                "GRANT ALL ON SEQUENCES TO ledgergate_runtime"
+            ))
+
+            seeded = conn.execute(text("""
+                SELECT count(*)
+                FROM pg_default_acl AS defaults
+                CROSS JOIN LATERAL aclexplode(defaults.defaclacl) AS acl
+                JOIN pg_roles AS grantee ON grantee.oid = acl.grantee
+                JOIN pg_roles AS owner ON owner.oid = defaults.defaclrole
+                WHERE owner.rolname = :owner
+                  AND grantee.rolname = 'ledgergate_runtime'
+                  AND defaults.defaclobjtype IN ('r', 'S')
+            """), {"owner": owner_role}).scalar_one()
+            assert seeded > 0
+
+            context = MigrationContext.configure(conn)
+            with Operations.context(context):
+                migration.upgrade()
+
+            remaining = conn.execute(text("""
+                SELECT count(*)
+                FROM pg_default_acl AS defaults
+                CROSS JOIN LATERAL aclexplode(defaults.defaclacl) AS acl
+                JOIN pg_roles AS grantee ON grantee.oid = acl.grantee
+                JOIN pg_roles AS owner ON owner.oid = defaults.defaclrole
+                WHERE owner.rolname = :owner
+                  AND grantee.rolname = 'ledgergate_runtime'
+                  AND defaults.defaclobjtype IN ('r', 'S')
+            """), {"owner": owner_role}).scalar_one()
+            assert remaining == 0
+            conn.execute(text(f'DROP ROLE "{owner_role}"'))
+    finally:
+        admin_engine.dispose()
+
