@@ -218,3 +218,24 @@ def test_audit_export_endpoint_refuses_corrupt_chain_before_storage(monkeypatch)
 
     assert exc.value.status_code == 409
     assert captured == {"stored": False, "queried": False}
+
+
+def test_audit_export_keyring_verifies_retired_key_after_rotation():
+    old_key = "old-signing-key-material-with-32-bytes"
+    new_key = "new-signing-key-material-with-32-bytes"
+    payload = {"tenant_id": "tenant-a", "event_count": 1, "signing_key_id": "audit-key-2026-01"}
+    digest, signature = audit_export.sign_audit_payload(payload, old_key)
+    document = {**payload, "payload_sha256": digest, "signature_algorithm": "HMAC-SHA256", "signature": signature}
+    keyring = {"audit-key-2026-01": old_key, "audit-key-2026-11": new_key}
+    assert audit_export.verify_audit_export_signature_with_keyring(document, keyring)
+
+
+def test_audit_export_keyring_rejects_unknown_or_tampered_key_id():
+    key = "old-signing-key-material-with-32-bytes"
+    payload = {"tenant_id": "tenant-a", "event_count": 1, "signing_key_id": "audit-key-2026-01"}
+    digest, signature = audit_export.sign_audit_payload(payload, key)
+    document = {**payload, "payload_sha256": digest, "signature_algorithm": "HMAC-SHA256", "signature": signature}
+    assert not audit_export.verify_audit_export_signature_with_keyring(document, {"audit-key-2026-11": key})
+    tampered = {**document, "signing_key_id": "audit-key-2026-11"}
+    assert not audit_export.verify_audit_export_signature_with_keyring(tampered, {"audit-key-2026-01": key, "audit-key-2026-11": key})
+    assert not audit_export.verify_audit_export_signature_with_keyring(document, {})
