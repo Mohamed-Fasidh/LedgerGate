@@ -1425,7 +1425,7 @@ async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Head
         with tempfile.NamedTemporaryFile(delete=False,suffix=suffix) as tmp:
             tmp.write(content); temp_path=tmp.name
         extracted,fields=extract_file(temp_path,suffix)
-        stored_location=store_invoice(user.tenant_id,suffix,content)
+        stored_location=store_invoice(user.tenant_id,suffix,content,already_scanned=True)
     except MalwareDetected as exc:
         raise HTTPException(415,str(exc))
     except StorageUnavailable as exc:
