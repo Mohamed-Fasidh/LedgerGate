@@ -56,6 +56,9 @@ def test_ocr_pixel_estimate_accepts_normal_page():
         ("Grand Total: USD 2,000", "USD", 2000.0),
         ("Amount Due: €845.20", "EUR", 845.2),
         ("Total: GBP 99.99", "GBP", 99.99),
+        ("Grand Total: 1,250.75 USD", "USD", 1250.75),
+        ("Amount Due: 845.20 EUR", "EUR", 845.2),
+        ("Total: 99.99 GBP", "GBP", 99.99),
     ],
 )
 def test_extracts_supported_currency_symbols_and_codes(text, expected_currency, expected_amount):
