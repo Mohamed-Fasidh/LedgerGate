@@ -345,8 +345,8 @@ def test_tenant_reference_migration_covers_all_business_relationship_tables():
         "fk_email_verification_tokens_tenant_user",
     ):
         assert constraint_name in migration
-    for parent_table in ("users", "suppliers", "purchase_orders", "approval_policies", "invoices"):
-        assert f"uq_{parent_table}_tenant_id_id" in migration
+    assert 'f"uq_{table}_tenant_id_id"' in migration
+    assert 'for table in ("users", "suppliers", "purchase_orders", "approval_policies", "invoices")' in migration
 
 
 @pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
