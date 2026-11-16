@@ -39,15 +39,13 @@ def test_refresh_token_is_rejected_by_access_token_validation():
     assert exc.value.status_code == 401
 
 
-def test_logout_all_sessions_revokes_only_current_users_active_tenant_sessions():
+def test_revoke_refresh_sessions_is_scoped_to_tenant_and_user():
     from datetime import datetime, timezone
-    from types import SimpleNamespace
-    from app.main import logout_all_sessions
+    from app.main import _revoke_refresh_sessions
     from app.models import AuthSession
 
     captured = {}
     class Query:
-        def __init__(self, model): self.model = model
         def filter(self, *conditions):
             captured["conditions"] = conditions
             return self
@@ -58,12 +56,13 @@ def test_logout_all_sessions_revokes_only_current_users_active_tenant_sessions()
     class DB:
         def query(self, model):
             assert model is AuthSession
-            return Query(model)
-        def commit(self): captured["committed"] = True
-    user = SimpleNamespace(id=7, tenant_id="tenant-a")
-    result = logout_all_sessions(DB(), user)
-    assert result == {"status": "logged_out_everywhere", "revoked_sessions": 3}
-    assert captured["committed"] is True
+            return Query()
+    now = datetime.now(timezone.utc)
+    assert _revoke_refresh_sessions(DB(), "tenant-a", 7, now) == 3
+    rendered = [str(condition) for condition in captured["conditions"]]
+    assert any("auth_sessions.tenant_id" in item for item in rendered)
+    assert any("auth_sessions.user_id" in item for item in rendered)
+    assert any("auth_sessions.revoked_at" in item for item in rendered)
+    assert any("auth_sessions.expires_at" in item for item in rendered)
+    assert captured["values"][AuthSession.revoked_at] == now
     assert captured["synchronize_session"] is False
-    assert AuthSession.tenant_id in [condition.left for condition in captured["conditions"] if hasattr(condition, "left")]
-    assert AuthSession.user_id in [condition.left for condition in captured["conditions"] if hasattr(condition, "left")]
