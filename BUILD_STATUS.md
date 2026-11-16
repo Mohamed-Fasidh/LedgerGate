@@ -150,3 +150,12 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Dashboard KPI labels now explicitly say "on page" / "loaded" because these figures describe the currently fetched page, not global tenant totals.
 - Earlier CI run [43845791004](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43845791004) passed backend, frontend, and Docker on commit `f54d2fb7a427e532fbf19aa06114c54f9c73806f`.
 - New pagination and dashboard-label changes require a fresh complete CI pass before being treated as verified.
+
+
+## Supplier and purchase-order selector pagination — 2026-11-16
+
+- Frontend supplier and purchase-order selectors now fetch 100 records per page from the bounded tenant APIs.
+- Added Previous/Next controls to supplier and purchase-order creation panels so users can select records beyond the first 100 without unbounded API responses.
+- Existing invoice, member, and audit pagination remains in place. KPI labels describe page-scoped counts rather than implying tenant-wide totals.
+- Latest complete CI before this selector change: [43846321589](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43846321589) passed backend migrations, restricted runtime-role bootstrap, compileall, pytest, frontend dependency audit/build, Docker operational checks, Compose validation, and both image builds.
+- The selector pagination commit requires its own complete CI run before verification.
