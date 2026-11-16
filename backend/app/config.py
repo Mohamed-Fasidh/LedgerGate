@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./ledgergate.db"
     jwt_secret_key: str = "unsafe-development-secret-change-this"
     jwt_algorithm: str = "HS256"
+    mfa_encryption_key: str = ""
     access_token_expire_minutes: int = 30
     cors_origins: str = "http://localhost:3000"
     upload_dir: str = "./uploads"
@@ -29,6 +30,14 @@ class Settings(BaseSettings):
 
 settings=Settings()
 if settings.app_env.lower()=="production":
+    if settings.mfa_encryption_key:
+        from cryptography.fernet import Fernet
+        try:
+            Fernet(settings.mfa_encryption_key.encode("ascii"))
+        except (ValueError, UnicodeEncodeError) as exc:
+            raise RuntimeError("MFA_ENCRYPTION_KEY must be a valid Fernet key") from exc
+    else:
+        raise RuntimeError("Production requires MFA_ENCRYPTION_KEY for encrypted authenticator secrets")
     if settings.jwt_secret_key=="unsafe-development-secret-change-this" or len(settings.jwt_secret_key)<32:
         raise RuntimeError("Production requires a unique JWT_SECRET_KEY of at least 32 characters")
     if "*" in settings.cors_origin_list:
