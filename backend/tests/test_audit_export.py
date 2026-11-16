@@ -389,3 +389,55 @@ def test_audit_export_locks_tenant_writers_before_verifying_chain(monkeypatch):
 
     assert result == {"status": "no_events", "after_id": 12, "event_count": 0}
     assert calls == ["lock", "verify"]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "boolean_event_count",
+        "boolean_first_event_id",
+        "boolean_last_event_id",
+        "boolean_retention",
+        "non_hex_anchor",
+        "uppercase_event_hash",
+        "naive_event_timestamp",
+        "naive_export_timestamp",
+        "empty_export_id",
+        "empty_signing_key_id",
+        "non_dict_event",
+    ],
+)
+def test_export_document_verifier_rejects_noncanonical_signed_metadata(mutation):
+    document, keyring = _signed_valid_chain_document()
+    tampered = json.loads(json.dumps(document))
+    if mutation == "boolean_event_count":
+        tampered["event_count"] = True
+    elif mutation == "boolean_first_event_id":
+        tampered["first_event_id"] = True
+    elif mutation == "boolean_last_event_id":
+        tampered["last_event_id"] = True
+    elif mutation == "boolean_retention":
+        tampered["retention_days"] = True
+    elif mutation == "non_hex_anchor":
+        tampered["first_previous_hash"] = "g" * 64
+        tampered["events"][0]["previous_hash"] = "g" * 64
+    elif mutation == "uppercase_event_hash":
+        tampered["events"][0]["event_hash"] = tampered["events"][0]["event_hash"].upper()
+    elif mutation == "naive_event_timestamp":
+        tampered["events"][0]["created_at"] = "2026-11-16T00:00:00"
+    elif mutation == "naive_export_timestamp":
+        tampered["exported_at"] = "2026-11-16T00:00:00"
+    elif mutation == "empty_export_id":
+        tampered["export_id"] = ""
+    elif mutation == "empty_signing_key_id":
+        tampered["signing_key_id"] = ""
+    else:
+        tampered["events"][0] = None
+
+    payload = {
+        key: value for key, value in tampered.items()
+        if key not in ("signature", "payload_sha256", "signature_algorithm")
+    }
+    digest, signature = audit_export.sign_audit_payload(payload, keyring["verify-key-v1"])
+    tampered.update(payload_sha256=digest, signature=signature)
+    assert not audit_export.verify_audit_export_document(tampered, keyring)
