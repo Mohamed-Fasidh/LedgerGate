@@ -193,6 +193,71 @@ def upgrade() -> None:
         """)
 
 
+    # Protect the other direction as well: a referenced parent must not be
+    # reassigned to a different tenant after valid child rows already exist.
+    op.execute("""
+        CREATE OR REPLACE FUNCTION public.ledgergate_prevent_tenant_reassignment()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $
+        BEGIN
+            IF OLD.tenant_id IS NOT DISTINCT FROM NEW.tenant_id THEN
+                RETURN NEW;
+            END IF;
+
+            IF TG_TABLE_NAME = 'users' THEN
+                IF EXISTS (SELECT 1 FROM public.invoices WHERE created_by_user_id = OLD.id AND tenant_id <> NEW.tenant_id)
+                   OR EXISTS (SELECT 1 FROM public.approval_policies WHERE created_by_user_id = OLD.id AND tenant_id <> NEW.tenant_id)
+                   OR EXISTS (SELECT 1 FROM public.invoice_approvals WHERE approver_user_id = OLD.id AND tenant_id <> NEW.tenant_id)
+                   OR EXISTS (SELECT 1 FROM public.auth_sessions WHERE user_id = OLD.id AND tenant_id <> NEW.tenant_id)
+                   OR EXISTS (SELECT 1 FROM public.password_reset_tokens WHERE user_id = OLD.id AND tenant_id <> NEW.tenant_id)
+                   OR EXISTS (SELECT 1 FROM public.email_verification_tokens WHERE user_id = OLD.id AND tenant_id <> NEW.tenant_id) THEN
+                    RAISE EXCEPTION 'cannot reassign user tenant while tenant-owned references exist'
+                        USING ERRCODE = '23514';
+                END IF;
+
+            ELSIF TG_TABLE_NAME = 'suppliers' THEN
+                IF EXISTS (SELECT 1 FROM public.purchase_orders WHERE supplier_id = OLD.id AND tenant_id <> NEW.tenant_id)
+                   OR EXISTS (SELECT 1 FROM public.invoices WHERE supplier_id = OLD.id AND tenant_id <> NEW.tenant_id) THEN
+                    RAISE EXCEPTION 'cannot reassign supplier tenant while tenant-owned references exist'
+                        USING ERRCODE = '23514';
+                END IF;
+
+            ELSIF TG_TABLE_NAME = 'purchase_orders' THEN
+                IF EXISTS (SELECT 1 FROM public.invoices WHERE purchase_order_id = OLD.id AND tenant_id <> NEW.tenant_id) THEN
+                    RAISE EXCEPTION 'cannot reassign purchase-order tenant while tenant-owned references exist'
+                        USING ERRCODE = '23514';
+                END IF;
+
+            ELSIF TG_TABLE_NAME = 'approval_policies' THEN
+                IF EXISTS (SELECT 1 FROM public.invoices WHERE approval_policy_id = OLD.id AND tenant_id <> NEW.tenant_id)
+                   OR EXISTS (SELECT 1 FROM public.invoice_approvals WHERE policy_id = OLD.id AND tenant_id <> NEW.tenant_id) THEN
+                    RAISE EXCEPTION 'cannot reassign approval-policy tenant while tenant-owned references exist'
+                        USING ERRCODE = '23514';
+                END IF;
+
+            ELSIF TG_TABLE_NAME = 'invoices' THEN
+                IF EXISTS (SELECT 1 FROM public.invoice_approvals WHERE invoice_id = OLD.id AND tenant_id <> NEW.tenant_id) THEN
+                    RAISE EXCEPTION 'cannot reassign invoice tenant while tenant-owned references exist'
+                        USING ERRCODE = '23514';
+                END IF;
+            END IF;
+            RETURN NEW;
+        END;
+        $;
+    """)
+
+    for table in ("users", "suppliers", "purchase_orders", "approval_policies", "invoices"):
+        op.execute(f"DROP TRIGGER IF EXISTS ledgergate_prevent_tenant_reassignment ON public.{table}")
+        op.execute(f"""
+            CREATE TRIGGER ledgergate_prevent_tenant_reassignment
+            BEFORE UPDATE OF tenant_id
+            ON public.{table}
+            FOR EACH ROW
+            EXECUTE FUNCTION public.ledgergate_prevent_tenant_reassignment()
+        """)
+
+
 def downgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
@@ -206,4 +271,7 @@ def downgrade() -> None:
         "purchase_orders",
     ):
         op.execute(f"DROP TRIGGER IF EXISTS ledgergate_same_tenant_reference ON public.{table}")
+    for table in ("invoices", "approval_policies", "purchase_orders", "suppliers", "users"):
+        op.execute(f"DROP TRIGGER IF EXISTS ledgergate_prevent_tenant_reassignment ON public.{table}")
+    op.execute("DROP FUNCTION IF EXISTS public.ledgergate_prevent_tenant_reassignment()")
     op.execute("DROP FUNCTION IF EXISTS public.ledgergate_enforce_same_tenant_reference()")
