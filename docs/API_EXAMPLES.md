@@ -162,3 +162,15 @@ Example response:
 ```
 
 An already inactive member returns `already_deactivated`. Deactivation is tenant-scoped; a user ID from another workspace returns HTTP 404. Deactivated accounts cannot sign in or refresh sessions.
+
+
+## Tenant administrator: list workspace members
+
+List only the authenticated administrator's tenant members. The response is paginated (maximum 200 per page) and deliberately excludes password hashes, MFA secrets, and recovery-code hashes:
+
+```http
+GET /api/v1/users?limit=100&offset=0
+Authorization: Bearer <tenant_admin_access_token>
+```
+
+Each member entry includes ID, email, role, active status, MFA-enabled status, and creation time. Use the member ID with `POST /api/v1/users/{user_id}/deactivate` to deactivate a non-admin member.
