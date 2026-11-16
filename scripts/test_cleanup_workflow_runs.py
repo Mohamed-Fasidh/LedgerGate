@@ -17,7 +17,7 @@ import sys
 
 args = sys.argv[1:]
 with open(os.environ["FAKE_GH_LOG"], "a", encoding="utf-8") as log:
-    log.write(json.dumps(args) + "\\n")
+    log.write(json.dumps(args) + "\n")
 
 if "--paginate" in args:
     # Simulate the jq selection applied by the real gh CLI.
