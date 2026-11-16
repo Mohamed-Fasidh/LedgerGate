@@ -5,7 +5,7 @@
 - Admin, analyst, and reviewer role checks.
 - Application tenant filters plus PostgreSQL RLS with FORCE ROW LEVEL SECURITY for tenant-owned tables.
 - Authenticated tenant context set on the DB session and reset before pooled connections are released.
-- PostgreSQL trigger preventing audit-event updates and deletes.
+- PostgreSQL trigger preventing audit-event updates and deletes; per-tenant SHA-256 hash chaining with an admin verification endpoint (tamper-evident within the database, not a substitute for external WORM).
 - Invoice creator attribution, maker-checker enforcement, configurable amount-based sequential approval stages, per-stage role requirements, unique approver records, invoice-level policy snapshots, and SQLAlchemy optimistic version checks on concurrent decisions.
 - Tenant-authorized invoice file download from local development storage or a private S3-compatible bucket.
 - ClamAV INSTREAM scanning before storage; scanner unavailability fails closed.
@@ -23,7 +23,7 @@
 1. Identity: SSO/OIDC, MFA, email verification, password reset, refresh-token rotation, revocation, persistent login throttling, and session/device controls.
 2. Database: create separate migration and runtime roles. Runtime must not own tables and must not have BYPASSRLS. Grant only required privileges and run RLS tests as the exact runtime role.
 3. Files: production S3-compatible private object storage and ClamAV scanning are implemented as adapters, but cloud IAM/bucket policy, KMS encryption, retention/deletion, short-lived signed download URLs, and access logging must be configured and independently verified. Content sniffing and PDF parser resource limits still need strengthening.
-4. Audit: export append-only events to independently administered WORM storage, cryptographically sign/hash-chain events, centralize log retention, and monitor privileged actions. The DB trigger is defense-in-depth, not WORM.
+4. Audit: export append-only events to independently administered WORM storage, cryptographically sign/hash-chain events, centralize log retention, and monitor privileged actions. Per-tenant SHA-256 chaining and an admin verification endpoint are implemented; external WORM export and signing keys remain outstanding. The DB trigger is defense-in-depth, not WORM.
 5. Financial controls: implement configurable dual-approval thresholds (the current code enforces maker-checker only), extend idempotency to all remaining state-changing endpoints, add approval policy versioning, and maintain reconciliation review. Invoice-create idempotency and optimistic invoice versioning are present.
 6. Infrastructure: TLS, secure headers, rate limiting, WAF, secret manager, key rotation, network isolation, DB backups, point-in-time recovery, and restore drills.
 7. Assurance: threat model, SAST/DAST, dependency scanning, penetration testing, load tests, privacy/legal review, and incident response plan.
