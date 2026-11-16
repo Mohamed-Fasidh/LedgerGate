@@ -168,3 +168,10 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Added matching SQLAlchemy model metadata and regression assertions that verify the composite indexes are declared.
 - Supplier and purchase-order dropdowns now page through 100 records with Previous/Next controls.
 - CI run [43846321589](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43846321589) passed all three jobs before the supplier/PO selector and index changes. The latest migration and index changes require their own complete CI pass.
+
+
+## Idempotency cleanup index — 2026-11-16
+
+- Added migration `0019_idempotency_cleanup_index` and matching model metadata for the tenant/time/ID index used by bounded idempotency-retention cleanup.
+- Added a regression test that asserts the composite index column order matches the cleanup query's tenant filter and oldest-first ordering.
+- CI run [43847150797](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43847150797) passed all jobs on the previous PR head before this migration. The new migration and test require a fresh full CI pass.
