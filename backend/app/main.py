@@ -87,6 +87,15 @@ def _registration_lock_key(namespace: str, value_hash: str) -> int:
     return int.from_bytes(digest[:8], byteorder="big", signed=True)
 
 
+def _login_attempt_hash(value: str) -> str:
+    # Login telemetry contains only keyed identifiers, never raw identities or IPs.
+    return hmac.new(
+        settings.jwt_secret_key.encode("utf-8"),
+        b"ledgergate:login-hash:v1:" + value.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 def _record_registration_attempt(db: Session, email: str, remote_ip: str, now: datetime | None = None) -> int | None:
     """Persist and enforce distributed registration limits; return Retry-After when blocked."""
     attempted_at = now or datetime.now(timezone.utc)
@@ -190,11 +199,20 @@ def login(
 ):
     _require_allowed_origin(request)
     normalized_email = username.strip().lower()
-    email_hash = hashlib.sha256(normalized_email.encode("utf-8")).hexdigest()
     remote_ip = request.client.host if request.client else "unknown"
-    ip_hash = hashlib.sha256(remote_ip.encode("utf-8")).hexdigest()
+    email_hash = _login_attempt_hash(normalized_email)
+    ip_hash = _login_attempt_hash(remote_ip)
     now = datetime.now(timezone.utc)
     window_start = now - timedelta(minutes=15)
+    if db.get_bind().dialect.name == "postgresql":
+        # Serialize by both identity and source address across API replicas.
+        # Stable lock ordering prevents deadlocks when requests share either key.
+        from sqlalchemy import text as sql_text
+        for lock_key in sorted({
+            _registration_lock_key("login-email", email_hash),
+            _registration_lock_key("login-ip", ip_hash),
+        }):
+            db.execute(sql_text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
     failed_query = db.query(LoginAttempt).filter(
         LoginAttempt.succeeded.is_(False),
         LoginAttempt.attempted_at >= window_start,
@@ -207,7 +225,16 @@ def login(
         if oldest_at.tzinfo is None:
             oldest_at = oldest_at.replace(tzinfo=timezone.utc)
         retry_after = max(1, 900 - int((now - oldest_at).total_seconds()))
+        db.rollback()
         raise HTTPException(429, "Too many login attempts. Try again later.", headers={"Retry-After": str(retry_after)})
+    # Opportunistically prune old records in bounded batches.
+    stale_ids = [
+        row[0] for row in db.query(LoginAttempt.id)
+        .filter(LoginAttempt.attempted_at < now - timedelta(hours=24))
+        .order_by(LoginAttempt.id.asc()).limit(250).all()
+    ]
+    if stale_ids:
+        db.query(LoginAttempt).filter(LoginAttempt.id.in_(stale_ids)).delete(synchronize_session=False)
 
     user = db.query(User).filter(User.email == normalized_email).with_for_update().first()
     password_valid = bool(user and verify_password(password, user.hashed_password))
