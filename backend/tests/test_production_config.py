@@ -17,7 +17,13 @@ def production_settings(**overrides):
         "storage_backend": "s3",
         "s3_bucket": "ledgergate-private",
         "clamav_host": "clamav.internal",
-        "db_runtime_password": "r" * 48,\n        "email_smtp_host": "smtp.example.com",\n        "email_smtp_port": 587,\n        "email_smtp_username": "ledgergate@example.com",\n        "email_smtp_password": "smtp-secret",\n        "email_from_address": "LedgerGate <no-reply@example.com>",\n        "public_app_url": "https://app.example.com",
+        "db_runtime_password": "r" * 48,
+        "email_smtp_host": "smtp.example.com",
+        "email_smtp_port": 587,
+        "email_smtp_username": "ledgergate@example.com",
+        "email_smtp_password": "smtp-secret",
+        "email_from_address": "LedgerGate <no-reply@example.com>",
+        "public_app_url": "https://app.example.com",
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)
