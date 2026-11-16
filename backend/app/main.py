@@ -398,6 +398,9 @@ def create_invoice(payload:InvoiceIn,idempotency_key:str|None=Header(default=Non
             if not _same_idempotent_request(existing,"create",fingerprint) or (not existing.idempotency_request_hash and not matches(existing)):
                 raise HTTPException(409,"Idempotency key was already used with a different request")
             return invoice_view(existing)
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,"invoice.create",fingerprint)
+        if cached is not None:
+            return cached
     if payload.supplier_id and not db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Supplier not found")
     if payload.purchase_order_id:
         po=db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first()
@@ -406,9 +409,12 @@ def create_invoice(payload:InvoiceIn,idempotency_key:str|None=Header(default=Non
     db.add(obj)
     try:
         db.flush()
+        response=invoice_view(obj)
+        if idempotency_key:
+            _store_idempotency_response(db,user.tenant_id,idempotency_key,"invoice.create",fingerprint,response)
         record_event(db,user,"invoice",obj.id,"created",{"invoice_number":obj.invoice_number,"idempotent":bool(idempotency_key)})
         db.commit(); db.refresh(obj)
-        return invoice_view(obj)
+        return response
     except IntegrityError:
         db.rollback()
         if idempotency_key:
@@ -416,6 +422,8 @@ def create_invoice(payload:InvoiceIn,idempotency_key:str|None=Header(default=Non
             if existing and _same_idempotent_request(existing,"create",fingerprint) and (existing.idempotency_request_hash or matches(existing)):
                 return invoice_view(existing)
             if existing: raise HTTPException(409,"Idempotency key was already used with a different request")
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,"invoice.create",fingerprint)
+            if cached is not None: return cached
         raise HTTPException(409,"Invoice conflicts with an existing record")
 
 @app.get("/api/v1/invoices")
@@ -450,6 +458,9 @@ async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Head
             if _same_idempotent_request(existing,"upload",fingerprint):
                 return invoice_view(existing)
             raise HTTPException(409,"Idempotency key was already used with a different request")
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,"invoice.upload",fingerprint)
+        if cached is not None:
+            return cached
     temp_path=None
     stored_location=None
     try:
@@ -472,9 +483,12 @@ async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Head
     db.add(obj)
     try:
         db.flush()
+        response=invoice_view(obj)
+        if idempotency_key:
+            _store_idempotency_response(db,user.tenant_id,idempotency_key,"invoice.upload",fingerprint,response)
         record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":content_hash,"bytes":len(content),"idempotent":bool(idempotency_key)})
         db.commit(); db.refresh(obj)
-        return invoice_view(obj)
+        return response
     except IntegrityError:
         db.rollback()
         if stored_location:
@@ -484,6 +498,8 @@ async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Head
             if existing and _same_idempotent_request(existing,"upload",fingerprint):
                 return invoice_view(existing)
             if existing: raise HTTPException(409,"Idempotency key was already used with a different request")
+            cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,"invoice.upload",fingerprint)
+            if cached is not None: return cached
         raise HTTPException(409,"Invoice upload conflicts with an existing record")
     except Exception:
         db.rollback()
