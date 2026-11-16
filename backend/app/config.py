@@ -46,6 +46,8 @@ if settings.app_env.lower()=="production":
         raise RuntimeError("Production requires AUDIT_WORM_BUCKET with S3 Object Lock enabled")
     if len(settings.audit_export_signing_key) < 32:
         raise RuntimeError("Production requires AUDIT_EXPORT_SIGNING_KEY with at least 32 characters")
+    if not settings.audit_export_signing_key_id.strip():
+        raise RuntimeError("Production requires AUDIT_EXPORT_SIGNING_KEY_ID")
     if settings.audit_worm_retention_days < 1 or settings.audit_worm_retention_days > 3650:
         raise RuntimeError("AUDIT_WORM_RETENTION_DAYS must be between 1 and 3650")
     if settings.jwt_secret_key=="unsafe-development-secret-change-this" or len(settings.jwt_secret_key)<32:
