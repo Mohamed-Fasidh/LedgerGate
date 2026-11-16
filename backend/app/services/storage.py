@@ -27,20 +27,20 @@ def scan_with_clamav(content: bytes) -> None:
     try:
         with socket.create_connection((settings.clamav_host, settings.clamav_port), timeout=settings.clamav_timeout_seconds) as sock:
             sock.settimeout(settings.clamav_timeout_seconds)
-            sock.sendall(b"zINSTREAM\\0")
+            sock.sendall(b"zINSTREAM\0")
             for offset in range(0, len(content), 64 * 1024):
                 chunk = content[offset:offset + 64 * 1024]
                 sock.sendall(struct.pack("!I", len(chunk)) + chunk)
             sock.sendall(struct.pack("!I", 0))
             response = b""
-            while not response.endswith(b"\\0"):
+            while not response.endswith(b"\0"):
                 part = sock.recv(4096)
                 if not part:
                     break
                 response += part
     except (OSError, TimeoutError) as exc:
         raise StorageUnavailable("Malware scanner is unavailable; upload rejected") from exc
-    result = response.decode("utf-8", errors="replace").strip("\\0 ")
+    result = response.decode("utf-8", errors="replace").strip("\0 ")
     if result.endswith(" FOUND"):
         raise MalwareDetected("Uploaded document was identified as malware")
     if not result.endswith(" OK"):
