@@ -17,7 +17,7 @@ from app.config import settings
 from app.database import Base, engine, get_db
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, PasswordResetToken, EmailVerificationToken, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, RefreshIn, ChangePasswordIn, PasswordResetRequestIn, PasswordResetConfirmIn, EmailVerificationRequestIn, EmailVerificationConfirmIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn
-from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code
+from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code, find_user_for_authentication, find_user_for_auth_token, authentication_email_exists
 from app.audit import record_event, verify_tenant_chain, event_payload, lock_tenant_audit_chain
 from app.services.audit_export import store_immutable_audit_export, AuditExportUnavailable
 from app.agent.runtime import AgentContext, ReconciliationAgent
@@ -272,11 +272,13 @@ EMAIL_VERIFICATION_GENERIC_MESSAGE = (
 def _create_email_verification_link(db: Session, user: User, now: datetime) -> tuple[str, str]:
     """Replace any previous verification link while holding the user's row lock."""
     db.query(EmailVerificationToken).filter(
-        EmailVerificationToken.user_id == user.id
+        EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.tenant_id == user.tenant_id,
     ).delete(synchronize_session=False)
     raw_token = secrets.token_urlsafe(48)
     db.add(EmailVerificationToken(
         user_id=user.id,
+        tenant_id=user.tenant_id,
         token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
         expires_at=now + EMAIL_VERIFICATION_TTL,
         created_at=now,
@@ -298,8 +300,10 @@ def register(
         raise HTTPException(429, "Too many registration attempts. Try again later.", headers={"Retry-After": str(retry_after)})
 
     normalized_email = payload.email.strip().lower()
+    tenant_id = str(uuid.uuid4())
+    set_database_tenant(db, tenant_id)
     user = User(
-        tenant_id=str(uuid.uuid4()),
+        tenant_id=tenant_id,
         tenant_name=payload.tenant_name,
         email=normalized_email,
         hashed_password=hash_password(payload.password),
@@ -312,9 +316,7 @@ def register(
         db.flush()
     except IntegrityError:
         db.rollback()
-        existing = db.query(User).filter(
-            User.email == normalized_email
-        ).with_for_update().first()
+        existing = find_user_for_authentication(db, normalized_email, for_update=True)
         if existing is not None and existing.is_active and not existing.email_verified:
             verification_url, verification_hash = _create_email_verification_link(db, existing, datetime.now(timezone.utc))
             enqueue_email(db, existing.email, "email_verification", verification_url, verification_hash)
@@ -340,11 +342,11 @@ def request_email_verification(
     remote_ip = request.client.host if request.client else "unknown"
     retry_after = _record_registration_attempt(db, payload.email, remote_ip)
     if retry_after is None:
-        user = db.query(User).filter(
-            User.email == payload.email.strip().lower(),
-            User.is_active.is_(True),
-            User.email_verified.is_(False),
-        ).with_for_update().first()
+        user = find_user_for_authentication(
+            db, payload.email.strip().lower(), for_update=True
+        )
+        if user is not None and (not user.is_active or user.email_verified):
+            user = None
         if user is not None:
             verification_url, verification_hash = _create_email_verification_link(db, user, datetime.now(timezone.utc))
             enqueue_email(db, user.email, "email_verification", verification_url, verification_hash)
@@ -361,17 +363,15 @@ def confirm_email_verification(
     _require_allowed_origin(request)
     token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
     # Match resend's user-then-token lock order to avoid deadlocks on concurrent links.
-    candidate = db.query(EmailVerificationToken).filter(
-        EmailVerificationToken.token_hash == token_hash
-    ).first()
-    if candidate is None:
-        raise HTTPException(400, "Verification link is invalid or expired")
-    user = db.query(User).filter(User.id == candidate.user_id).with_for_update().first()
-    if user is None or not user.is_active:
+    user = find_user_for_auth_token(
+        db, token_hash, "email_verification", EmailVerificationToken, for_update=True
+    )
+    if user is None or not user.is_active or user.email_verified:
         db.rollback()
         raise HTTPException(400, "Verification link is invalid or expired")
     verification = db.query(EmailVerificationToken).filter(
-        EmailVerificationToken.token_hash == token_hash
+        EmailVerificationToken.token_hash == token_hash,
+        EmailVerificationToken.tenant_id == user.tenant_id,
     ).with_for_update().first()
     now = datetime.now(timezone.utc)
     if verification is None or verification.user_id != user.id or verification.used_at is not None:
@@ -438,7 +438,7 @@ def login(
     if stale_ids:
         db.query(LoginAttempt).filter(LoginAttempt.id.in_(stale_ids)).delete(synchronize_session=False)
 
-    user = db.query(User).filter(User.email == normalized_email).with_for_update().first()
+    user = find_user_for_authentication(db, normalized_email, for_update=True)
     password_valid = bool(user and verify_password(password, user.hashed_password))
     matched_step = None
     remaining_recovery_hashes = None
@@ -719,7 +719,9 @@ def request_password_reset(
         return {"status": "accepted", "message": "If the account exists, a reset link will be sent."}
 
     normalized_email = payload.email.strip().lower()
-    user = db.query(User).filter(User.email == normalized_email, User.is_active.is_(True), User.email_verified.is_(True)).with_for_update().first()
+    user = find_user_for_authentication(db, normalized_email, for_update=True)
+    if user is not None and (not user.is_active or not user.email_verified):
+        user = None
     if user is not None:
         now = datetime.now(timezone.utc)
         raw_token = secrets.token_urlsafe(48)
@@ -727,10 +729,12 @@ def request_password_reset(
         # Invalidate previous outstanding links before issuing a fresh one.
         db.query(PasswordResetToken).filter(
             PasswordResetToken.user_id == user.id,
+            PasswordResetToken.tenant_id == user.tenant_id,
             PasswordResetToken.used_at.is_(None),
         ).update({PasswordResetToken.used_at: now}, synchronize_session=False)
         db.add(PasswordResetToken(
             user_id=user.id,
+            tenant_id=user.tenant_id,
             token_hash=token_hash,
             expires_at=now + PASSWORD_RESET_TTL,
             created_at=now,
@@ -754,17 +758,15 @@ def confirm_password_reset(
     token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
     # Lock in a consistent user-then-token order, matching reset issuance.
     # This avoids a deadlock between a reset confirmation and a concurrent resend.
-    candidate = db.query(PasswordResetToken).filter(
-        PasswordResetToken.token_hash == token_hash
-    ).first()
-    if candidate is None:
-        raise HTTPException(400, "Reset link is invalid or expired")
-    user = db.query(User).filter(User.id == candidate.user_id).with_for_update().first()
-    if user is None or not user.is_active:
+    user = find_user_for_auth_token(
+        db, token_hash, "password_reset", PasswordResetToken, for_update=True
+    )
+    if user is None or not user.is_active or not user.email_verified:
         db.rollback()
         raise HTTPException(400, "Reset link is invalid or expired")
     reset = db.query(PasswordResetToken).filter(
-        PasswordResetToken.token_hash == token_hash
+        PasswordResetToken.token_hash == token_hash,
+        PasswordResetToken.tenant_id == user.tenant_id,
     ).with_for_update().first()
     now = datetime.now(timezone.utc)
     if reset is None or reset.user_id != user.id or reset.used_at is not None:
@@ -808,6 +810,7 @@ def confirm_password_reset(
     # Invalidate every outstanding reset link for this account in this transaction.
     db.query(PasswordResetToken).filter(
         PasswordResetToken.user_id == user.id,
+        PasswordResetToken.tenant_id == user.tenant_id,
         PasswordResetToken.used_at.is_(None),
     ).update({PasswordResetToken.used_at: now}, synchronize_session=False)
     user.hashed_password = hash_password(payload.new_password)
@@ -1052,7 +1055,7 @@ def create_tenant_user(
         cached = _get_idempotent_response(db, user.tenant_id, idempotency_key, operation, fingerprint)
         if cached is not None:
             return cached
-    if db.query(User).filter(User.email == normalized_email).first():
+    if authentication_email_exists(db, normalized_email):
         raise HTTPException(409, "Email already registered")
     member = User(
         tenant_id=user.tenant_id,
