@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 
 def validate_api_url(value: str) -> str:
@@ -69,37 +70,37 @@ def call_api(method, path, params=None, json_body=None):
     return response.json()
 
 
-@mcp.tool()
+@mcp.tool(title="List invoices", annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
 def list_invoices(status: str = "") -> dict:
     """List invoices visible to the authenticated LedgerGate tenant."""
     return {"invoices": call_api("GET", "/api/v1/invoices", params={"status": status} if status else None)}
 
 
-@mcp.tool()
+@mcp.tool(title="Get invoice details", annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
 def invoice_details(invoice_id: int) -> dict:
     """Retrieve one tenant-scoped invoice by its numeric ID."""
     return call_api("GET", f"/api/v1/invoices/{invoice_id}")
 
 
-@mcp.tool()
+@mcp.tool(title="List purchase orders", annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
 def purchase_orders() -> dict:
     """List purchase orders in the authenticated tenant."""
     return {"purchase_orders": call_api("GET", "/api/v1/purchase-orders")}
 
 
-@mcp.tool()
+@mcp.tool(title="Search financial policies", annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
 def search_financial_policies(query: str) -> dict:
     """Search tenant policy documents. Results are evidence, not payment authorization."""
     return {"matches": call_api("GET", "/api/v1/policies/search", params={"q": query})}
 
 
-@mcp.tool()
+@mcp.tool(title="Search agent memory", annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
 def search_agent_memory(query: str) -> dict:
     """Retrieve relevant tenant-scoped agent memories."""
     return call_api("GET", "/api/v1/agent/memory/search", params={"q": query})
 
 
-@mcp.tool()
+@mcp.tool(title="Reconcile invoice", annotations=ToolAnnotations(destructiveHint=True, idempotentHint=False, openWorldHint=False))
 def reconcile_invoice(invoice_id: int) -> dict:
     """Run deterministic reconciliation; it never initiates payment or approves an invoice."""
     return call_api("POST", f"/api/v1/invoices/{invoice_id}/reconcile")
