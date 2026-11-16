@@ -185,3 +185,38 @@ def test_overlap_lookup_is_tenant_scoped_and_uses_half_open_bounds(max_amount, e
     assert any("approval_policies.max_amount" in item for item in rendered)
     if max_amount is not None:
         assert any("approval_policies.min_amount" in item for item in rendered)
+
+
+def test_approval_policy_create_rechecks_idempotency_after_tenant_lock(monkeypatch):
+    from decimal import Decimal
+    from types import SimpleNamespace
+    import app.main as main
+
+    replay = {"id": 31, "name": "Existing policy", "is_active": True}
+    calls = []
+    def lookup(db, tenant_id, key, operation, fingerprint):
+        calls.append(("lookup", len(calls)))
+        return None if len(calls) == 1 else replay
+    def lock(db, tenant_id):
+        calls.append(("lock", tenant_id))
+
+    monkeypatch.setattr(main, "_get_idempotent_response", lookup)
+    monkeypatch.setattr(main, "_lock_approval_policy_ranges", lock)
+
+    payload = SimpleNamespace(
+        model_dump=lambda: {"name": "Existing policy", "min_amount": "0", "max_amount": None,
+                            "approval_steps": [["reviewer"]]},
+        name="Existing policy",
+        min_amount=Decimal("0.00"),
+        max_amount=None,
+        approval_steps=[["reviewer"]],
+    )
+    result = main.create_approval_policy(
+        payload=payload,
+        idempotency_key="policy-create-0001",
+        db=object(),
+        user=SimpleNamespace(id=7, tenant_id="tenant-a"),
+    )
+
+    assert result == replay
+    assert [item[0] for item in calls] == ["lookup", "lock", "lookup"]
