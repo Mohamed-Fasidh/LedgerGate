@@ -1,0 +1,69 @@
+"""Guard the API router against accidentally public business endpoints."""
+import ast
+from pathlib import Path
+
+MAIN = Path(__file__).resolve().parents[1] / "app" / "main.py"
+PUBLIC_API_ROUTES = {
+    "/api/v1/auth/register",
+    "/api/v1/auth/token",
+    "/api/v1/auth/refresh",
+    "/api/v1/auth/logout",
+}
+
+
+def _call_name(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _has_auth_dependency(function):
+    for argument in function.args.args + function.args.kwonlyargs:
+        default = None
+        positional = function.args.args
+        if argument in positional:
+            index = positional.index(argument)
+            defaults_start = len(positional) - len(function.args.defaults)
+            if index >= defaults_start:
+                default = function.args.defaults[index - defaults_start]
+        else:
+            index = function.args.kwonlyargs.index(argument)
+            default = function.args.kw_defaults[index]
+        if not isinstance(default, ast.Call) or _call_name(default.func) != "Depends":
+            continue
+        if not default.args:
+            continue
+        dependency = default.args[0]
+        if _call_name(dependency) in {"get_current_user", "require_roles"}:
+            return True
+    return False
+
+
+def test_all_business_api_routes_require_an_authenticated_role():
+    tree = ast.parse(MAIN.read_text(encoding="utf-8"), filename=str(MAIN))
+    unprotected = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call):
+                continue
+            if not isinstance(decorator.func, ast.Attribute):
+                continue
+            if not isinstance(decorator.func.value, ast.Name) or decorator.func.value.id != "app":
+                continue
+            if not decorator.args or not isinstance(decorator.args[0], ast.Constant):
+                continue
+            path = decorator.args[0].value
+            if not isinstance(path, str) or not path.startswith("/api/v1/"):
+                continue
+            if path in PUBLIC_API_ROUTES:
+                continue
+            if not _has_auth_dependency(node):
+                unprotected.append(f"{path} ({node.name})")
+    assert not unprotected, (
+        "Business API routes must depend on get_current_user or require_roles; "
+        "public exceptions must be explicitly reviewed: " + ", ".join(sorted(unprotected))
+    )
