@@ -174,3 +174,18 @@ Authorization: Bearer <tenant_admin_access_token>
 ```
 
 Each member entry includes ID, email, role, active status, MFA-enabled status, and creation time. Use the member ID with `POST /api/v1/users/{user_id}/deactivate` to deactivate a non-admin member.
+
+
+### Change a workspace member's role
+
+Only tenant administrators can change active, non-admin members between the analyst and reviewer roles. The operation revokes the member's active refresh sessions and records an audit event:
+
+```http
+PATCH /api/v1/users/21/role
+Authorization: Bearer <tenant_admin_access_token>
+Content-Type: application/json
+
+{"role": "reviewer"}
+```
+
+A role change returns the new role and number of revoked sessions. Administrator roles cannot be changed through this endpoint; deactivated accounts must be reactivated through a separate, controlled lifecycle process before their role can be changed.
