@@ -13,9 +13,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, Role, InvoiceStatus
-from app.schemas import RegisterIn, TokenOut, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn
-from app.security import hash_password, verify_password, create_access_token, get_current_user, require_roles
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, Role, InvoiceStatus
+from app.schemas import RegisterIn, TokenOut, RefreshIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn
+from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles
 from app.audit import record_event, verify_tenant_chain
 from app.agent.runtime import AgentContext, ReconciliationAgent
 from app.services.document_extraction import extract_file
@@ -28,6 +28,21 @@ from app.services.storage import store_invoice, read_invoice, delete_invoice, sc
 app=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
 app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type","Idempotency-Key"])
 
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+def _issue_token_pair(db: Session, user: User, family_id: str | None = None):
+    token_id = str(uuid.uuid4())
+    family = family_id or str(uuid.uuid4())
+    refresh_token, expires_at = create_refresh_token(user, token_id, family)
+    db.add(AuthSession(
+        tenant_id=user.tenant_id, user_id=user.id, token_id=token_id,
+        token_hash=_token_hash(refresh_token), family_id=family, expires_at=expires_at,
+    ))
+    return {"access_token": create_access_token(user), "refresh_token": refresh_token}
+
+
+
 @app.get("/health")
 def health(): return {"status":"ok","service":"ledgergate-api"}
 
@@ -39,7 +54,7 @@ def register(payload:RegisterIn,db:Session=Depends(get_db)):
     try: db.commit()
     except IntegrityError: db.rollback(); raise HTTPException(409,"Account already exists")
     db.refresh(user)
-    return {"access_token":create_access_token(user)}
+    tokens=_issue_token_pair(db,user); db.commit(); return tokens
 
 @app.post("/api/v1/auth/token",response_model=TokenOut)
 def login(request:Request,username:str=Form(...),password:str=Form(...),db:Session=Depends(get_db)):
@@ -66,9 +81,91 @@ def login(request:Request,username:str=Form(...),password:str=Form(...),db:Sessi
     db.add(LoginAttempt(email_hash=email_hash,ip_hash=ip_hash,succeeded=authenticated,attempted_at=now))
     db.commit()
     if not authenticated: raise HTTPException(401,"Incorrect email or password")
-    return {"access_token":create_access_token(user)}
+    tokens=_issue_token_pair(db,user); db.commit(); return tokens
 
-@app.post("/api/v1/users")
+
+
+@app.post("/api/v1/auth/refresh", response_model=TokenOut)
+def refresh_session(payload: RefreshIn, db: Session = Depends(get_db)):
+    unauthorized = HTTPException(401, "Invalid or expired refresh token")
+    try:
+        claims = decode_refresh_token(payload.refresh_token)
+        user_id = int(claims["sub"])
+        tenant_id = claims["tenant"]
+        token_id = claims["jti"]
+        family_id = claims["family"]
+    except Exception:
+        raise unauthorized
+    try:
+        set_database_tenant(db, tenant_id)
+    except ValueError:
+        raise unauthorized
+    token_hash = _token_hash(payload.refresh_token)
+    session = db.query(AuthSession).filter(
+        AuthSession.tenant_id == tenant_id,
+        AuthSession.user_id == user_id,
+        AuthSession.token_id == token_id,
+        AuthSession.token_hash == token_hash,
+    ).with_for_update().first()
+    if not session:
+        raise unauthorized
+    now = datetime.now(timezone.utc)
+    expires_at = session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if session.revoked_at is not None:
+        # Reuse of a rotated token indicates possible theft: revoke the whole family.
+        db.query(AuthSession).filter(
+            AuthSession.tenant_id == tenant_id,
+            AuthSession.family_id == family_id,
+            AuthSession.revoked_at.is_(None),
+        ).update({AuthSession.revoked_at: now}, synchronize_session=False)
+        db.commit()
+        raise unauthorized
+    if expires_at <= now:
+        session.revoked_at = now
+        db.commit()
+        raise unauthorized
+    user = db.query(User).filter(
+        User.id == user_id, User.tenant_id == tenant_id, User.is_active.is_(True)
+    ).first()
+    if not user:
+        session.revoked_at = now
+        db.commit()
+        raise unauthorized
+    session.revoked_at = now
+    tokens = _issue_token_pair(db, user, family_id=family_id)
+    replacement = db.query(AuthSession).filter(
+        AuthSession.tenant_id == tenant_id,
+        AuthSession.token_hash == _token_hash(tokens["refresh_token"]),
+    ).first()
+    session.replaced_by_token_id = replacement.token_id if replacement else None
+    db.commit()
+    return tokens
+
+
+@app.post("/api/v1/auth/logout")
+def logout(payload: RefreshIn, db: Session = Depends(get_db)):
+    unauthorized = HTTPException(401, "Invalid refresh token")
+    try:
+        claims = decode_refresh_token(payload.refresh_token)
+        tenant_id = claims["tenant"]
+        user_id = int(claims["sub"])
+        token_id = claims["jti"]
+        set_database_tenant(db, tenant_id)
+    except Exception:
+        raise unauthorized
+    session = db.query(AuthSession).filter(
+        AuthSession.tenant_id == tenant_id,
+        AuthSession.user_id == user_id,
+        AuthSession.token_id == token_id,
+        AuthSession.token_hash == _token_hash(payload.refresh_token),
+    ).first()
+    if session and session.revoked_at is None:
+        session.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+    return {"status": "logged_out"}
+\n@app.post("/api/v1/users")
 def create_tenant_user(email:str,password:str=Form(...),role:str=Form("analyst"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin"))):
     if len(password)<12 or len(password)>72: raise HTTPException(400,"Password must be 12-72 characters")
     if role not in ("analyst","reviewer"): raise HTTPException(400,"Only analyst or reviewer accounts can be created here")
