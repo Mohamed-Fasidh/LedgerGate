@@ -39,6 +39,16 @@ Subsequent changes added tenant-member deactivation, audit and approval-policy a
 
 CI validates automated repository checks. It does not provision cloud resources, validate production secrets/IAM policies, prove disaster recovery, or replace an independent security assessment.
 
+
+## Additional audit-export and recovery hardening (PR #5)
+
+- Audit export attempts now use a unique UUID in the signed document and S3 object key, including when the same event range is exported again. This avoids reusing an Object Lock key on retries.
+- Added an independent export verifier that checks the signing-key ID/HMAC, export format and metadata, tenant consistency, ascending event IDs, event count, first/last event metadata, and every event's previous-hash and calculated hash.
+- Added regression coverage for valid exports, tampered event hashes and links, cross-tenant events, inconsistent metadata, unknown keys, and malformed verifier inputs.
+- Documented reconciliation for immutable S3 objects that may be left unreferenced if the database commit fails after a successful object write.
+- Added PostgreSQL backup and disposable restore-drill scripts with archive validation and SHA-256 checksums. CI checks their Bash syntax; a real restore drill still needs to be executed against an isolated database environment.
+- CI run [43825372024](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43825372024) passed backend, frontend, and Docker for the backup/restore scripts and operations documentation. Later audit-verifier changes are awaiting their own CI result.
+
 ## Remaining work before production
 
 ### Application and identity
