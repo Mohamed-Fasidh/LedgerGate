@@ -1148,6 +1148,15 @@ def _approval_ranges_overlap(first_min:Decimal,first_max:Decimal|None,second_min
     # Ranges are half-open: [minimum, maximum). Adjacent boundaries do not overlap.
     return (first_max is None or second_min<first_max) and (second_max is None or first_min<second_max)
 
+def _lock_approval_policy_ranges(db: Session, tenant_id: str) -> None:
+    """Serialize policy range changes within a tenant on PostgreSQL."""
+    bind = getattr(db, "bind", None)
+    if bind is not None and bind.dialect.name == "postgresql":
+        db.execute(
+            sql_text("SELECT pg_advisory_xact_lock(hashtext(:tenant_id), hashtext('approval_policy_ranges'))"),
+            {"tenant_id": tenant_id},
+        )
+
 def _resolve_invoice_approval_plan(db:Session,inv:Invoice,user:User):
     if inv.approval_steps_snapshot:
         return inv.approval_steps_snapshot
@@ -1192,6 +1201,7 @@ def create_approval_policy(payload:ApprovalPolicyIn,idempotency_key:str|None=Hea
     _validate_approval_steps(payload.approval_steps)
     if payload.max_amount is not None and payload.max_amount<=payload.min_amount:
         raise HTTPException(400,"max_amount must be greater than min_amount")
+    _lock_approval_policy_ranges(db, user.tenant_id)
     existing=db.query(ApprovalPolicy).filter(ApprovalPolicy.tenant_id==user.tenant_id,ApprovalPolicy.is_active.is_(True)).all()
     for policy in existing:
         if _approval_ranges_overlap(payload.min_amount,payload.max_amount,policy.min_amount,policy.max_amount):
@@ -1240,6 +1250,7 @@ def deactivate_approval_policy(policy_id:int,idempotency_key:str|None=Header(def
     if idempotency_key:
         cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
         if cached is not None: return cached
+    _lock_approval_policy_ranges(db, user.tenant_id)
     policy=db.query(ApprovalPolicy).filter(ApprovalPolicy.id==policy_id,ApprovalPolicy.tenant_id==user.tenant_id).with_for_update().first()
     if not policy: raise HTTPException(404,"Approval policy not found")
     if not policy.is_active:
