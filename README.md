@@ -12,7 +12,7 @@ LedgerGate is a production-oriented reference implementation for invoice intake,
 - MCP-compatible tool server entry point for invoice/PO lookup and policy retrieval.
 - Hybrid retrieval foundation (PostgreSQL full-text + pgvector-ready schema) and evaluation harness.
 - Next.js dashboard starter with invoice review views.
-- Docker Compose for PostgreSQL, API, and web application.
+- Docker Compose for PostgreSQL, API, web application, ClamAV, and a separate durable account-email worker.
 - Alembic migrations, tests, sample environment, and operational documentation.
 
 ## Quick start
@@ -35,6 +35,8 @@ For local development without Docker:
 6. Approve or reject only through an authorized human reviewer.
 
 ## Security notes
+- Account verification and password-reset emails are transactionally queued in an encrypted PostgreSQL outbox and delivered by a separate worker with bounded retries and crash recovery.
+- Set a dedicated `EMAIL_OUTBOX_ENCRYPTION_KEY` (Fernet key) and protect it separately from JWT and MFA keys. The worker provides at-least-once delivery; a crash after SMTP accepts a message but before the sent-state commit can cause a duplicate.
 - Set unique high-entropy `JWT_SECRET_KEY` and `APP_ENCRYPTION_KEY` values.
 - Use HTTPS behind a trusted reverse proxy.
 - Use managed PostgreSQL, encrypted object storage, managed secrets, backups, and restricted network access in production.
