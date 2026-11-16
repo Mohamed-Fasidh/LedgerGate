@@ -110,3 +110,37 @@ def test_empty_audit_chain_reports_no_verified_head():
     result = verify_tenant_chain(DB(), "tenant-a")
     assert result["valid"] is True
     assert result["last_event_id"] is None
+
+
+def test_tenant_audit_chain_lock_is_transaction_scoped_for_postgres():
+    from types import SimpleNamespace
+    from app.audit import lock_tenant_audit_chain
+
+    class DB:
+        bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, statement, params):
+            self.calls.append((str(statement), params))
+
+    db = DB()
+    lock_tenant_audit_chain(db, "tenant-a")
+
+    assert len(db.calls) == 1
+    assert "pg_advisory_xact_lock" in db.calls[0][0]
+    assert db.calls[0][1] == {"tenant_id": "tenant-a"}
+
+
+def test_tenant_audit_chain_lock_is_skipped_for_non_postgres():
+    from types import SimpleNamespace
+    from app.audit import lock_tenant_audit_chain
+
+    class DB:
+        bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+
+        def execute(self, *args, **kwargs):
+            raise AssertionError("PostgreSQL advisory lock must not run on SQLite")
+
+    lock_tenant_audit_chain(DB(), "tenant-a")
