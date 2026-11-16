@@ -69,3 +69,21 @@ def test_production_requires_explicit_audit_signing_key_id():
 def test_production_rejects_unapproved_jwt_algorithms(algorithm):
     with pytest.raises(RuntimeError, match="JWT_ALGORITHM must be HS256"):
         validate_production_settings(production_settings(jwt_algorithm=algorithm))
+
+
+@pytest.mark.parametrize(
+    "overrides, message",
+    [
+        ({"clamav_port": 0}, "CLAMAV_PORT"),
+        ({"clamav_port": 65536}, "CLAMAV_PORT"),
+        ({"clamav_timeout_seconds": 0}, "CLAMAV_TIMEOUT_SECONDS"),
+        ({"clamav_timeout_seconds": 121}, "CLAMAV_TIMEOUT_SECONDS"),
+        ({"max_upload_mb": 0}, "MAX_UPLOAD_MB"),
+        ({"max_upload_mb": 101}, "MAX_UPLOAD_MB"),
+        ({"access_token_expire_minutes": 0}, "ACCESS_TOKEN_EXPIRE_MINUTES"),
+        ({"access_token_expire_minutes": 61}, "ACCESS_TOKEN_EXPIRE_MINUTES"),
+    ],
+)
+def test_production_rejects_unsafe_resource_and_token_limits(overrides, message):
+    with pytest.raises(RuntimeError, match=message):
+        validate_production_settings(production_settings(**overrides))
