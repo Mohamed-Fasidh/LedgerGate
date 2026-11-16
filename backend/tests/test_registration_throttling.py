@@ -27,7 +27,7 @@ def test_registration_allows_five_attempts_per_email_then_throttles(db):
         assert _record_registration_attempt(db, "Person@example.com", "192.0.2.10", now) is None
     retry_after = _record_registration_attempt(db, "person@example.com", "192.0.2.11", now)
     assert retry_after == 900
-    assert db.query(RegistrationAttempt).count() == 6
+    assert db.query(RegistrationAttempt).count() == 5
 
 
 def test_registration_ip_limit_is_shared_across_distinct_emails(db):
@@ -77,3 +77,15 @@ def test_registration_advisory_lock_keys_are_stable_signed_bigints():
     assert first == _registration_lock_key("email", "a" * 64)
     assert -(2**63) <= first < 2**63
     assert first != _registration_lock_key("ip", "a" * 64)
+
+
+
+def test_blocked_registration_attempts_do_not_grow_throttle_table(db):
+    now = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
+    for _ in range(5):
+        _record_registration_attempt(db, "person@example.com", "192.0.2.40", now)
+    for _ in range(50):
+        assert _record_registration_attempt(
+            db, "person@example.com", "192.0.2.40", now
+        ) == 900
+    assert db.query(RegistrationAttempt).count() == 5
