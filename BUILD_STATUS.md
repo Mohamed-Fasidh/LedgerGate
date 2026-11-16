@@ -2,6 +2,15 @@
 
 Last checked: 2026-11-16
 
+## Latest verification — 2026-11-16
+
+- PR #6 (redacted agent runtime errors), PR #7 (redacted invalid tool arguments), PR #8 (bounded tenant retrieval), PR #9 (avoid duplicate ClamAV scanning after a successful upload scan), and PR #10 (require verified PostgreSQL TLS in production) are merged into `main`.
+- PR #10 CI run [43885039107](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43885039107) passed backend, frontend, and Docker checks before merge.
+- Post-merge main CI run [43885803935](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43885803935) passed all three jobs on merge commit `cb4f71dce844301e72bf1d4f90b23976f30ad671`.
+- Production PostgreSQL connections now require `sslmode=verify-full` and an explicit `sslrootcert` CA bundle path. Staging must still verify the mounted CA certificate and actual managed-database hostname/certificate chain.
+- PR #11 proposes a 500-character maximum for agent-memory search input and a 20-result cap, with tenant-isolation and input-boundary regression tests. Its CI is pending; it is not yet merged.
+- Passing repository CI is not production certification. Staging deployment, cloud integration, external SMTP receipt, Object Lock/IAM verification, restore drills, independent security testing, and operational acceptance remain outstanding.
+
 ## Current verified state — main branch
 
 - PR #4 and PR #5 are both **merged** into `main`. PR #5 merge commit: `f50bdf6b23c9d882e8cf67ef45e2024971f6bdb3`.
