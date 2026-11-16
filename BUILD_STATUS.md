@@ -96,3 +96,10 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - API readiness hardening: added `/ready`, which checks PostgreSQL with `SELECT 1` and verifies configured ClamAV TCP reachability; returns 503 when a required dependency is unavailable. `/health` remains a lightweight liveness check. Compose now gates frontend startup on dependency-aware API readiness. Regression tests cover healthy dependencies, database failure, scanner failure, and development without a configured scanner. S3 connectivity/permissions remain an integration-test gate.
 
 - Additional runtime restrictions: local Compose now applies `no-new-privileges` and drops all Linux capabilities for API and frontend containers; CI asserts both services retain these settings.
+
+
+## ClamAV protocol response hardening (PR #5)
+
+- Upload scanning now caps the ClamAV daemon's status response at 4 KiB. An oversized response is rejected as a scanner failure instead of being accumulated without a bound in API memory.
+- Added regression coverage for a valid NUL-terminated response, an oversized response, and an unterminated response. All malformed scanner responses fail closed.
+- Latest previously verified full CI run: [43832704393](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43832704393), all three jobs passed before this incremental change. This change requires its own CI run.
