@@ -69,7 +69,7 @@ def test_password_reset_request_response_does_not_disclose_unknown_account(monke
 
 
 def test_password_reset_request_stores_only_hash_and_sends_expiring_link(monkeypatch):
-    user = SimpleNamespace(id=7, email="person@example.com", is_active=True)
+    user = SimpleNamespace(id=7, email="person@example.com", is_active=True, email_verified=True)
     db = _DB(user=user)
     sent = []
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
