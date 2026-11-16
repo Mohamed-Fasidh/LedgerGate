@@ -49,6 +49,7 @@ def test_disabling_mfa_revokes_sessions_and_clears_auth_cookies(monkeypatch):
         mfa_last_used_step=10,
         mfa_recovery_code_hashes=["unused-hash"],
         hashed_password="password-hash",
+        auth_token_version=0,
     )
     user = SimpleNamespace(id=42, tenant_id="tenant-a")
     events = []
@@ -98,6 +99,7 @@ def test_disabling_mfa_revokes_sessions_and_clears_auth_cookies(monkeypatch):
 
     assert result == {"status": "disabled", "revoked_sessions": 2}
     assert revoked == [("tenant-a", 42)]
+    assert locked_user.auth_token_version == 1
     assert locked_user.mfa_enabled is False
     assert locked_user.mfa_secret_encrypted is None
     assert locked_user.mfa_recovery_code_hashes == []
