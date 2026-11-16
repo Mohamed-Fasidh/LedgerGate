@@ -35,8 +35,10 @@ Configure all values through the cloud secret manager or protected deployment en
 - `AUDIT_WORM_BUCKET` with S3 versioning and Object Lock enabled.
 - Unique `AUDIT_EXPORT_SIGNING_KEY` and `AUDIT_EXPORT_SIGNING_KEY_ID`, protected and rotated under a documented key-custody process.
 - Approved `AUDIT_WORM_RETENTION_DAYS` within the supported 1–3650 day range.
+- Authenticated SMTP account-recovery delivery: `EMAIL_SMTP_HOST`, `EMAIL_SMTP_PORT=587`, `EMAIL_SMTP_USERNAME`, `EMAIL_SMTP_PASSWORD`, and `EMAIL_FROM_ADDRESS`.
+- `PUBLIC_APP_URL` set to the HTTPS public application origin used to construct password-reset links.
 
-Production startup deliberately fails if required encryption, audit WORM, or JWT settings are absent/invalid. Do not disable these checks to make a deployment start.
+Production startup deliberately fails if required encryption, audit WORM, SMTP account-recovery, HTTPS public-app URL, or JWT settings are absent/invalid. Do not disable these checks to make a deployment start.
 
 ## 4. Database release process
 
