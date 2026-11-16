@@ -2,7 +2,7 @@ import uuid, hashlib, tempfile
 from io import BytesIO
 from urllib.parse import quote
 from pathlib import Path
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Header
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -90,15 +90,34 @@ def invoice_view(x):
     return {"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"created_at":x.created_at.isoformat()}
 
 @app.post("/api/v1/invoices")
-def create_invoice(payload:InvoiceIn,db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+def create_invoice(payload:InvoiceIn,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    if idempotency_key is not None and (len(idempotency_key)<8 or len(idempotency_key)>128 or not idempotency_key.isascii() or any(ord(c)<33 or ord(c)>126 for c in idempotency_key)):
+        raise HTTPException(400,"Idempotency-Key must be 8-128 printable ASCII characters")
+    def matches(existing):
+        return all(getattr(existing,k)==v for k,v in payload.model_dump().items())
+    if idempotency_key:
+        existing=db.query(Invoice).filter(Invoice.tenant_id==user.tenant_id,Invoice.idempotency_key==idempotency_key).first()
+        if existing:
+            if not matches(existing): raise HTTPException(409,"Idempotency key was already used with a different request")
+            return invoice_view(existing)
     if payload.supplier_id and not db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Supplier not found")
-    po=None
     if payload.purchase_order_id:
         po=db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first()
         if not po: raise HTTPException(404,"Purchase order not found")
-    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,**payload.model_dump()); db.add(obj); db.flush()
-    record_event(db,user,"invoice",obj.id,"created",{"invoice_number":obj.invoice_number}); db.commit(); db.refresh(obj)
-    return invoice_view(obj)
+    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,idempotency_key=idempotency_key,**payload.model_dump())
+    db.add(obj)
+    try:
+        db.flush()
+        record_event(db,user,"invoice",obj.id,"created",{"invoice_number":obj.invoice_number,"idempotent":bool(idempotency_key)})
+        db.commit(); db.refresh(obj)
+        return invoice_view(obj)
+    except IntegrityError:
+        db.rollback()
+        if idempotency_key:
+            existing=db.query(Invoice).filter(Invoice.tenant_id==user.tenant_id,Invoice.idempotency_key==idempotency_key).first()
+            if existing and matches(existing): return invoice_view(existing)
+            if existing: raise HTTPException(409,"Idempotency key was already used with a different request")
+        raise HTTPException(409,"Invoice conflicts with an existing record")
 
 @app.get("/api/v1/invoices")
 def list_invoices(status:str|None=None,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
