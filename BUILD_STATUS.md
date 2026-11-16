@@ -4,8 +4,10 @@ Last checked: 2026-11-16
 
 ## Latest full CI verification — 2026-11-16
 
-- GitHub Actions run [43866324051](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43866324051) completed successfully on PR #5 head `b4eee14e99bde3fff43674fb788066b735ff3da8`.
-- Backend, frontend, and Docker jobs all completed with success. Docker included operational-script and cleanup-safety tests, production startup/migration guards, PostgreSQL backup/restore checks, non-root and health checks, Compose validation, and both image builds.
+- GitHub Actions run [43868511911](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/43868511911) completed successfully on PR #5 head `00a1ef2baf1b37f671f155348fc08950986e8275`.
+- Backend migrations, restricted runtime-role bootstrap, Python compilation, and the full pytest suite passed. Frontend dependency audit and Next.js production build passed. Docker operational checks, Compose validation, and both image builds passed.
+- Password recovery uses hashed single-use reset tokens with a 30-minute expiry, generic responses, request throttling, optional MFA verification, audit logging, and access/refresh session revocation.
+- SMTP delivery uses authenticated STARTTLS on port 587. Production startup requires SMTP and HTTPS public-app configuration; actual provider delivery and mailbox verification remain external deployment checks.
 - Exactly one workflow-run cleanup schedule is retained: `.github/workflows/cleanup-unsuccessful-runs.yml`, every five minutes. It targets completed failed and cancelled runs only. GitHub Actions scheduled workflows do not support a one-minute cadence.
 - PR #5 remains open and unmerged. This CI result verifies repository automation only; it is not staging or production deployment evidence.
 
