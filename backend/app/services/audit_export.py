@@ -2,7 +2,6 @@
 import hashlib
 import hmac
 import json
-import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.config import settings
@@ -51,6 +50,8 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
     retention = settings.audit_worm_retention_days if retention_days is None else retention_days
     if not bucket:
         raise AuditExportUnavailable("AUDIT_WORM_BUCKET is not configured")
+    if not settings.audit_export_signing_key_id.strip():
+        raise AuditExportUnavailable("AUDIT_EXPORT_SIGNING_KEY_ID is not configured")
     if len(signing_key) < 32:
         raise AuditExportUnavailable("AUDIT_EXPORT_SIGNING_KEY must contain at least 32 characters")
     if retention < 1 or retention > 3650:
@@ -79,6 +80,7 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
         "tenant_id": tenant_id,
         "exported_at": now.isoformat(),
         "retention_days": retention,
+        "signing_key_id": settings.audit_export_signing_key_id,
         "first_event_id": events[0]["id"],
         "last_event_id": events[-1]["id"],
         "event_count": len(events),
@@ -96,7 +98,7 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
     body = canonical_json(document)
     key = (
         f"tenants/{tenant_id}/audit-exports/"
-        f"{now.strftime('%Y%m%dT%H%M%SZ')}-{events[0]['id']}-{events[-1]['id']}-{uuid.uuid4().hex}.json"
+        f"{now.strftime('%Y%m%dT%H%M%SZ')}-{events[0]['id']}-{events[-1]['id']}-{digest[:16]}.json"
     )
     try:
         client.put_object(
