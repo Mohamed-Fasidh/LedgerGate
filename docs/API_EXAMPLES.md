@@ -85,3 +85,15 @@ Authorization: Bearer <access_token>
 ```
 
 The endpoint returns the number of refresh sessions revoked. Existing access tokens remain valid until their short expiry; use short access-token lifetimes and refresh-token revocation together.
+
+
+## Expired refresh-session retention
+
+A tenant administrator can remove expired refresh-session rows after an investigation grace period. The default grace period is 30 days after token expiry; the endpoint never selects unexpired sessions, and deletion is tenant-scoped and audit logged:
+
+```http
+POST /api/v1/maintenance/auth-sessions/cleanup?retention_days=30&batch_size=1000
+Authorization: Bearer <access_token>
+```
+
+`retention_days` is the number of days to retain a session after its `expires_at` timestamp (0–3,650). Batches are limited to 10,000 rows; repeat while `has_more` is true. Run this endpoint periodically from an authenticated tenant maintenance process. It is not a scheduler.
