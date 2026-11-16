@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, Role, InvoiceStatus
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, RefreshIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn
 from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code
 from app.audit import record_event, verify_tenant_chain, event_payload
@@ -66,6 +66,71 @@ def _require_csrf(request: Request):
         raise HTTPException(403, "CSRF validation failed")
 
 
+REGISTRATION_WINDOW = timedelta(minutes=15)
+REGISTRATION_EMAIL_LIMIT = 5
+REGISTRATION_IP_LIMIT = 20
+REGISTRATION_ATTEMPT_RETENTION = timedelta(hours=24)
+
+
+def _registration_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _registration_lock_key(namespace: str, value_hash: str) -> int:
+    digest = hashlib.sha256(f"ledgergate:registration:{namespace}:{value_hash}".encode("ascii")).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+
+def _record_registration_attempt(db: Session, email: str, remote_ip: str, now: datetime | None = None) -> int | None:
+    """Persist and enforce distributed registration limits; return Retry-After when blocked."""
+    attempted_at = now or datetime.now(timezone.utc)
+    email_hash = _registration_hash(email.strip().lower())
+    ip_hash = _registration_hash(remote_ip or "unknown")
+    bind = db.get_bind()
+    if bind.dialect.name == "postgresql":
+        # Serialize checks for the same email/IP across API replicas. Acquire locks
+        # in stable order so concurrent requests cannot deadlock each other.
+        from sqlalchemy import text as sql_text
+        for lock_key in sorted({
+            _registration_lock_key("email", email_hash),
+            _registration_lock_key("ip", ip_hash),
+        }):
+            db.execute(sql_text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+
+    window_start = attempted_at - REGISTRATION_WINDOW
+    email_query = db.query(RegistrationAttempt).filter(
+        RegistrationAttempt.email_hash == email_hash,
+        RegistrationAttempt.attempted_at >= window_start,
+    )
+    ip_query = db.query(RegistrationAttempt).filter(
+        RegistrationAttempt.ip_hash == ip_hash,
+        RegistrationAttempt.attempted_at >= window_start,
+    )
+    email_count = email_query.count()
+    ip_count = ip_query.count()
+    retry_after = None
+    if email_count >= REGISTRATION_EMAIL_LIMIT or ip_count >= REGISTRATION_IP_LIMIT:
+        relevant_query = email_query if email_count >= REGISTRATION_EMAIL_LIMIT else ip_query
+        oldest = relevant_query.order_by(RegistrationAttempt.attempted_at.asc()).first()
+        oldest_at = oldest.attempted_at if oldest else window_start
+        if oldest_at.tzinfo is None:
+            oldest_at = oldest_at.replace(tzinfo=timezone.utc)
+        retry_after = max(1, int((oldest_at + REGISTRATION_WINDOW - attempted_at).total_seconds()))
+
+    # Keep this pre-authentication table bounded without a separate scheduler.
+    stale_ids = [
+        row[0] for row in db.query(RegistrationAttempt.id)
+        .filter(RegistrationAttempt.attempted_at < attempted_at - REGISTRATION_ATTEMPT_RETENTION)
+        .order_by(RegistrationAttempt.id.asc()).limit(250).all()
+    ]
+    if stale_ids:
+        db.query(RegistrationAttempt).filter(RegistrationAttempt.id.in_(stale_ids)).delete(synchronize_session=False)
+
+    db.add(RegistrationAttempt(email_hash=email_hash, ip_hash=ip_hash, attempted_at=attempted_at))
+    db.commit()
+    return retry_after
+
+
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -88,6 +153,10 @@ def health(): return {"status":"ok","service":"ledgergate-api"}
 @app.post("/api/v1/auth/register",response_model=TokenOut)
 def register(payload:RegisterIn,request:Request,response:Response,db:Session=Depends(get_db)):
     _require_allowed_origin(request)
+    remote_ip = request.client.host if request.client else "unknown"
+    retry_after = _record_registration_attempt(db, payload.email, remote_ip)
+    if retry_after is not None:
+        raise HTTPException(429, "Too many registration attempts. Try again later.", headers={"Retry-After": str(retry_after)})
     tenant_id=str(uuid.uuid4())
     user=User(tenant_id=tenant_id,tenant_name=payload.tenant_name,email=payload.email.lower(),hashed_password=hash_password(payload.password),role=Role.admin)
     db.add(user)
