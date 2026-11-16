@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import re
+import secrets
 import struct
 import time
 from cryptography.fernet import Fernet, InvalidToken
@@ -120,4 +121,28 @@ def matching_totp_step(secret: str, code: str | None, *, now: float | None = Non
         expected = f"{binary % 1_000_000:06d}"
         if hmac.compare_digest(expected, code):
             return step
+    return None
+
+
+def generate_mfa_recovery_codes(count: int = 10) -> list[str]:
+    if count < 1 or count > 20:
+        raise ValueError("Recovery-code count must be between 1 and 20")
+    return [secrets.token_hex(6).upper() for _ in range(count)]
+
+
+def hash_mfa_recovery_code(code: str) -> str:
+    normalized = re.sub(r"[-\\s]", "", code).upper()
+    return hashlib.sha256(normalized.encode("ascii", errors="ignore")).hexdigest()
+
+
+def consume_mfa_recovery_code(hashes: list[str] | None, code: str | None) -> list[str] | None:
+    """Return the remaining hashes when one valid code is consumed, else None."""
+    if not code or not re.fullmatch(r"[A-Fa-f0-9\\-\\s]{12,20}", code):
+        return None
+    candidate = hash_mfa_recovery_code(code)
+    remaining = list(hashes or [])
+    for index, stored_hash in enumerate(remaining):
+        if hmac.compare_digest(candidate, stored_hash):
+            del remaining[index]
+            return remaining
     return None
