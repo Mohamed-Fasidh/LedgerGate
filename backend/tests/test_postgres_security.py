@@ -303,13 +303,131 @@ def test_tenant_reference_migration_covers_all_business_relationship_tables():
     ).read_text(encoding="utf-8")
     assert "ledgergate_enforce_same_tenant_reference" in migration
     assert "DO $$" in migration
-    assert "\n        $$;" in migration
-    for table in ("purchase_orders", "invoices", "approval_policies", "invoice_approvals"):
+    assert "\\n        $$;" in migration
+    guarded_tables = (
+        "purchase_orders",
+        "invoices",
+        "approval_policies",
+        "invoice_approvals",
+        "auth_sessions",
+        "password_reset_tokens",
+        "email_verification_tokens",
+    )
+    for table in guarded_tables:
         assert f'"{table}"' in migration
     assert "BEFORE INSERT OR UPDATE" in migration
     assert "USING ERRCODE = '23503'" in migration
     assert "Existing cross-tenant references must be reconciled" in migration
+    assert "cross-tenant or missing identity user reference" in migration
     assert "LEFT JOIN public.suppliers" in migration
     assert "LEFT JOIN public.purchase_orders" in migration
     assert "LEFT JOIN public.users" in migration
     assert "LEFT JOIN public.approval_policies" in migration
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_runtime_role_cannot_attach_another_tenants_user_to_identity_records():
+    """Session and recovery records must belong to the referenced user's tenant."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    Session = sessionmaker(bind=engine)
+    suffix = uuid.uuid4().hex
+    tenant_a = "identity-a-" + suffix
+    tenant_b = "identity-b-" + suffix
+    email_a = f"identity-a-{suffix}@example.invalid"
+    email_b = f"identity-b-{suffix}@example.invalid"
+    user_a_id = None
+    user_b_id = None
+
+    try:
+        with engine.begin() as admin:
+            user_a_id = admin.execute(text("""
+                INSERT INTO public.users
+                    (tenant_id, tenant_name, email, hashed_password, role, is_active, email_verified, created_at)
+                VALUES (:tenant, 'Test Workspace', :email, 'not-a-real-password-hash', 'analyst', true, true, now())
+                RETURNING id
+            """), {"tenant": tenant_a, "email": email_a}).scalar_one()
+            user_b_id = admin.execute(text("""
+                INSERT INTO public.users
+                    (tenant_id, tenant_name, email, hashed_password, role, is_active, email_verified, created_at)
+                VALUES (:tenant, 'Test Workspace', :email, 'not-a-real-password-hash', 'analyst', true, true, now())
+                RETURNING id
+            """), {"tenant": tenant_b, "email": email_b}).scalar_one()
+
+        invalid_inserts = (
+            (
+                "auth_sessions",
+                """
+                INSERT INTO public.auth_sessions
+                    (tenant_id, user_id, token_id, token_hash, family_id, expires_at, created_at)
+                VALUES (:tenant, :user_id, :token_id, :token_hash, :family_id, now() + interval '1 hour', now())
+                """,
+            ),
+            (
+                "password_reset_tokens",
+                """
+                INSERT INTO public.password_reset_tokens
+                    (tenant_id, user_id, token_hash, expires_at, created_at)
+                VALUES (:tenant, :user_id, :token_hash, now() + interval '1 hour', now())
+                """,
+            ),
+            (
+                "email_verification_tokens",
+                """
+                INSERT INTO public.email_verification_tokens
+                    (tenant_id, user_id, token_hash, expires_at, created_at)
+                VALUES (:tenant, :user_id, :token_hash, now() + interval '1 hour', now())
+                """,
+            ),
+        )
+
+        for table_name, statement in invalid_inserts:
+            values = {
+                "tenant": tenant_a,
+                "user_id": user_b_id,
+                "token_id": str(uuid.uuid4()),
+                "token_hash": hashlib.sha256(f"{table_name}-{suffix}".encode()).hexdigest(),
+                "family_id": str(uuid.uuid4()),
+            }
+            with Session() as runtime:
+                runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+                runtime.execute(
+                    text("SELECT set_config('app.tenant_id', :tenant, true)"),
+                    {"tenant": tenant_a},
+                )
+                with pytest.raises(Exception, match="cross-tenant or missing identity user reference"):
+                    runtime.execute(text(statement), values)
+                runtime.rollback()
+
+        # A correctly scoped session remains permitted.
+        with Session() as runtime:
+            runtime.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            runtime.execute(
+                text("SELECT set_config('app.tenant_id', :tenant, true)"),
+                {"tenant": tenant_a},
+            )
+            runtime.execute(text("""
+                INSERT INTO public.auth_sessions
+                    (tenant_id, user_id, token_id, token_hash, family_id, expires_at, created_at)
+                VALUES (:tenant, :user_id, :token_id, :token_hash, :family_id, now() + interval '1 hour', now())
+            """), {
+                "tenant": tenant_a,
+                "user_id": user_a_id,
+                "token_id": str(uuid.uuid4()),
+                "token_hash": hashlib.sha256(f"valid-session-{suffix}".encode()).hexdigest(),
+                "family_id": str(uuid.uuid4()),
+            })
+            runtime.commit()
+    finally:
+        with engine.begin() as admin:
+            if user_a_id is not None or user_b_id is not None:
+                ids = [value for value in (user_a_id, user_b_id) if value is not None]
+                for table_name in ("auth_sessions", "password_reset_tokens", "email_verification_tokens"):
+                    admin.execute(
+                        text(f"DELETE FROM public.{table_name} WHERE user_id = ANY(:ids)"),
+                        {"ids": ids},
+                    )
+                admin.execute(
+                    text("DELETE FROM public.users WHERE id = ANY(:ids)"),
+                    {"ids": ids},
+                )
+        engine.dispose()
