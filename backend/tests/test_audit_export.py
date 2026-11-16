@@ -55,6 +55,7 @@ def test_audit_export_is_signed_and_written_in_compliance_mode(monkeypatch):
     document = json.loads(args["Body"])
 
     assert result["object_lock_mode"] == "COMPLIANCE"
+    assert result["version_id"] == "version-123"
     assert args["ObjectLockMode"] == "COMPLIANCE"
     assert args["ServerSideEncryption"] == "AES256"
     assert args["Bucket"] == "ledgergate-audit-worm"
@@ -62,6 +63,8 @@ def test_audit_export_is_signed_and_written_in_compliance_mode(monkeypatch):
     assert document["event_count"] == 1
     assert document["signing_key_id"] == settings.audit_export_signing_key_id
     assert audit_export.verify_audit_export_signature(document, settings.audit_export_signing_key)
+    tampered_algorithm = dict(document, signature_algorithm="MD5")
+    assert not audit_export.verify_audit_export_signature(tampered_algorithm, settings.audit_export_signing_key)
     assert not audit_export.verify_audit_export_signature(document, "different-signing-key-which-is-long-enough")
 
 
