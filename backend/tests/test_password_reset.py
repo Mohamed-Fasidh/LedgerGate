@@ -72,7 +72,7 @@ def test_password_reset_request_stores_only_hash_and_sends_expiring_link(monkeyp
     user = SimpleNamespace(id=7, email="person@example.com", is_active=True, email_verified=True)
     db = _DB(user=user)
     queued = []
-    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url: queued.append((email, kind, url)))
+    monkeypatch.setattr(main, "enqueue_email", lambda db, email, kind, url, token_hash: queued.append((email, kind, url, token_hash)))
     monkeypatch.setattr(main, "_record_registration_attempt", lambda *args: None)
     monkeypatch.setattr(settings, "public_app_url", "https://app.example.com")
     result = main.request_password_reset(
