@@ -139,3 +139,74 @@ def test_admin_deactivation_cannot_deactivate_another_admin(monkeypatch):
         main.deactivate_tenant_user(22, db=DB(), user=actor)
     assert blocked.value.status_code == 409
     assert member.is_active is True
+
+
+def test_admin_member_directory_is_tenant_scoped_paginated_and_minimal():
+    from types import SimpleNamespace
+    import app.main as main
+    from app.models import Role, User
+
+    member = SimpleNamespace(
+        id=31, tenant_id="tenant-a", email="member@example.test",
+        role=Role.reviewer, is_active=False, mfa_enabled=True,
+        created_at=datetime(2026, 11, 16, tzinfo=timezone.utc),
+        hashed_password="must-never-be-returned",
+        mfa_secret_encrypted="must-never-be-returned",
+    )
+    captured = {}
+
+    class Query:
+        def filter(self, *conditions):
+            captured["conditions"] = conditions
+            return self
+        def order_by(self, *columns):
+            captured["order"] = columns
+            return self
+        def offset(self, value):
+            captured["offset"] = value
+            return self
+        def limit(self, value):
+            captured["limit"] = value
+            return self
+        def all(self):
+            return [member]
+
+    class DB:
+        def query(self, model):
+            assert model is User
+            return Query()
+
+    actor = SimpleNamespace(id=7, tenant_id="tenant-a", role=Role.admin)
+    result = main.list_tenant_users(limit=25, offset=50, db=DB(), user=actor)
+
+    assert result == [{
+        "id": 31,
+        "email": "member@example.test",
+        "role": "reviewer",
+        "is_active": False,
+        "mfa_enabled": True,
+        "created_at": "2026-11-16T00:00:00+00:00",
+    }]
+    assert captured["limit"] == 25
+    assert captured["offset"] == 50
+    rendered = [str(condition) for condition in captured["conditions"]]
+    assert any("users.tenant_id" in item for item in rendered)
+    assert all("hashed_password" not in key and "mfa_secret" not in key for key in result[0])
+
+
+def test_admin_member_directory_rejects_invalid_pagination():
+    import app.main as main
+    from fastapi import HTTPException
+    import pytest
+
+    class DB:
+        def query(self, model):
+            raise AssertionError("Invalid pagination must be rejected before querying")
+
+    actor = SimpleNamespace(id=7, tenant_id="tenant-a")
+    with pytest.raises(HTTPException) as too_many:
+        main.list_tenant_users(limit=201, offset=0, db=DB(), user=actor)
+    assert too_many.value.status_code == 400
+    with pytest.raises(HTTPException) as negative_offset:
+        main.list_tenant_users(limit=10, offset=-1, db=DB(), user=actor)
+    assert negative_offset.value.status_code == 400
