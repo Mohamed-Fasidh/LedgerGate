@@ -54,18 +54,20 @@ def test_postgresql_schema_matches_frozen_baseline_and_all_following_revisions()
     expected_columns = {
         "users": {
             "tenant_id", "tenant_name", "email", "mfa_enabled",
-            "mfa_secret_encrypted", "email_verified", "auth_token_version",
-            "mfa_recovery_code_hashes",
+            "mfa_secret_encrypted", "mfa_enabled_at", "mfa_last_used_step",
+            "email_verified", "auth_token_version", "mfa_recovery_code_hashes",
         },
         "invoices": {
             "extraction_fields", "reconciliation", "created_by_user_id",
             "version", "idempotency_key", "idempotency_operation",
             "idempotency_request_hash", "approval_policy_id",
-            "approval_policy_version", "required_approvals_snapshot",
-            "approval_threshold_snapshot",
+            "approval_steps_snapshot", "approval_stage",
         },
         "audit_events": {"previous_hash", "event_hash"},
-        "auth_sessions": {"refresh_token_hash", "refresh_expires_at"},
+        "auth_sessions": {
+            "token_id", "token_hash", "family_id", "expires_at",
+            "revoked_at", "replaced_by_token_id",
+        },
         "password_reset_tokens": {
             "tenant_id", "token_hash", "expires_at", "used_at",
         },
@@ -92,7 +94,7 @@ def test_postgresql_schema_matches_frozen_baseline_and_all_following_revisions()
             item["name"]
             for item in inspector.get_unique_constraints("approval_policies")
         }
-        assert "uq_approval_policy_tenant_currency_version" in unique_constraints
+        assert "uq_tenant_approval_policy_name" in unique_constraints
 
         enum_values = connection.execute(text("""
             SELECT t.typname, e.enumlabel
