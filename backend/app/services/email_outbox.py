@@ -9,7 +9,7 @@ from sqlalchemy import and_, or_
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import OutboundEmail
+from app.models import OutboundEmail, EmailVerificationToken, PasswordResetToken
 from app.services.email import send_email_verification_email, send_password_reset_email
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ def _decrypt_payload(encrypted_payload: str) -> dict:
     raise RuntimeError("Email outbox decryption keys are not configured")
 
 
-def enqueue_email(db, recipient: str, message_type: str, url: str) -> OutboundEmail:
+def enqueue_email(db, recipient: str, message_type: str, url: str, token_hash: str) -> OutboundEmail:
     """Add the encrypted message to the caller's transaction; caller commits atomically."""
     if message_type not in ALLOWED_TYPES:
         raise ValueError("Unsupported account email type")
@@ -65,6 +65,7 @@ def enqueue_email(db, recipient: str, message_type: str, url: str) -> OutboundEm
         recipient=recipient,
         message_type=message_type,
         encrypted_payload=payload,
+        token_hash=token_hash,
         status="pending",
         attempts=0,
         max_attempts=MAX_ATTEMPTS,
@@ -109,14 +110,25 @@ def process_one(session_factory=SessionLocal, sender=_send, now=None) -> bool:
             row = db.get(OutboundEmail, row_id)
             if row is None or row.status != "sending":
                 return True
+            # Do not send a link that was invalidated by a resend or has expired.
+            token_model = EmailVerificationToken if row.message_type == "email_verification" else PasswordResetToken
+            token = db.query(token_model).filter(
+                token_model.token_hash == row.token_hash,
+                token_model.used_at.is_(None),
+                token_model.expires_at > now,
+            ).first() if row.token_hash else True
+            if not token:
+                row.status = "cancelled"
+                row.locked_at = None
+                db.commit()
+                return True
             # Copy only what is needed outside the database session.
             message = OutboundEmail(
                 recipient=row.recipient,
                 message_type=row.message_type,
                 encrypted_payload=row.encrypted_payload,
+                token_hash=row.token_hash,
             )
-            attempt = row.attempts
-            max_attempts = row.max_attempts
         sender(message)
     except Exception as exc:
         with session_factory() as db:
