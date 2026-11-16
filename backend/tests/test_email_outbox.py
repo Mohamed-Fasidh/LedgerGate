@@ -1,0 +1,112 @@
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from cryptography.fernet import Fernet
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.config import settings
+from app.models import OutboundEmail
+from app.services.email_outbox import enqueue_email, process_one, _cipher
+
+
+@pytest.fixture
+def db_factory(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "email_outbox_encryption_key", Fernet.generate_key().decode())
+    engine = create_engine(f"sqlite:///{tmp_path / 'outbox.db'}")
+    OutboundEmail.__table__.create(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    yield factory
+    engine.dispose()
+
+
+def _enqueue(factory, url="https://app.example.com/#verify_email_token=one-time-secret"):
+    with factory() as db:
+        row = enqueue_email(db, "person@example.com", "email_verification", url)
+        row_id = row.id
+        db.commit()
+        return row_id
+
+
+def test_outbox_encrypts_url_and_persists_message(db_factory):
+    url = "https://app.example.com/#reset_token=high-entropy-secret"
+    with db_factory() as db:
+        row = enqueue_email(db, "person@example.com", "password_reset", url)
+        db.commit()
+        assert row.status == "pending"
+        assert row.attempts == 0
+        assert url not in row.encrypted_payload
+        assert _cipher().decrypt(row.encrypted_payload.encode()).decode().find(url) >= 0
+
+
+def test_worker_sends_and_marks_message_sent(db_factory):
+    row_id = _enqueue(db_factory)
+    delivered = []
+    assert process_one(db_factory, sender=lambda row: delivered.append((row.recipient, row.message_type)))
+    with db_factory() as db:
+        row = db.get(OutboundEmail, row_id)
+        assert (row.status, row.attempts, row.sent_at is not None) == ("sent", 1, True)
+        assert row.locked_at is None
+    assert delivered == [("person@example.com", "email_verification")]
+
+
+def test_worker_retries_with_backoff_then_succeeds(db_factory):
+    row_id = _enqueue(db_factory)
+    now = datetime.now(timezone.utc)
+
+    def fail(_row):
+        raise TimeoutError("SMTP unavailable")
+
+    assert process_one(db_factory, sender=fail, now=now)
+    with db_factory() as db:
+        row = db.get(OutboundEmail, row_id)
+        assert row.status == "pending"
+        assert row.attempts == 1
+        assert row.last_error == "TimeoutError"
+        assert row.next_attempt_at.replace(tzinfo=timezone.utc) == now + timedelta(seconds=30)
+
+    assert process_one(db_factory, sender=lambda _row: pytest.fail("retry ran before due time"), now=now + timedelta(seconds=29)) is False
+    assert process_one(db_factory, sender=lambda _row: None, now=now + timedelta(seconds=30))
+    with db_factory() as db:
+        row = db.get(OutboundEmail, row_id)
+        assert row.status == "sent"
+        assert row.attempts == 2
+        assert row.last_error is None
+
+
+def test_worker_moves_exhausted_message_to_dead_letter(db_factory):
+    row_id = _enqueue(db_factory)
+    with db_factory() as db:
+        row = db.get(OutboundEmail, row_id)
+        row.max_attempts = 1
+        db.commit()
+
+    assert process_one(db_factory, sender=lambda _row: (_ for _ in ()).throw(ConnectionError()), now=datetime.now(timezone.utc))
+    with db_factory() as db:
+        row = db.get(OutboundEmail, row_id)
+        assert row.status == "dead"
+        assert row.attempts == 1
+        assert row.last_error == "ConnectionError"
+
+
+def test_worker_recovers_abandoned_sending_lease(db_factory):
+    row_id = _enqueue(db_factory)
+    now = datetime.now(timezone.utc)
+    with db_factory() as db:
+        row = db.get(OutboundEmail, row_id)
+        row.status = "sending"
+        row.attempts = 1
+        row.locked_at = now - timedelta(seconds=301)
+        db.commit()
+
+    assert process_one(db_factory, sender=lambda _row: None, now=now)
+    with db_factory() as db:
+        row = db.get(OutboundEmail, row_id)
+        assert row.status == "sent"
+        assert row.attempts == 2
+
+
+def test_outbox_rejects_unknown_message_type(db_factory):
+    with db_factory() as db:
+        with pytest.raises(ValueError, match="Unsupported"):
+            enqueue_email(db, "person@example.com", "arbitrary", "https://example.com")
