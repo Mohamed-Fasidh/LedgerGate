@@ -134,6 +134,12 @@ def _signed_valid_chain_document():
     }, {"verify-key-v1": key}
 
 
+@pytest.mark.parametrize("document,keyring", [(None, {}), ([], {}), ({}, None), ({}, [])])
+def test_export_verifiers_reject_malformed_top_level_inputs(document, keyring):
+    assert not audit_export.verify_audit_export_signature_with_keyring(document, keyring)
+    assert not audit_export.verify_audit_export_document(document, keyring)
+
+
 def test_export_document_verifier_checks_signature_and_full_event_chain():
     document, keyring = _signed_valid_chain_document()
     assert audit_export.verify_audit_export_document(document, keyring)
