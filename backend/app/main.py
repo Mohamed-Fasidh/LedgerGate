@@ -96,6 +96,18 @@ def _login_attempt_hash(value: str) -> str:
     ).hexdigest()
 
 
+def _lock_login_attempt_keys(db: Session, email_hash: str, ip_hash: str) -> None:
+    """Serialize login failure checks for a shared email or IP across API replicas."""
+    if db.get_bind().dialect.name != "postgresql":
+        return
+    from sqlalchemy import text as sql_text
+    for lock_key in sorted({
+        _registration_lock_key("login-email", email_hash),
+        _registration_lock_key("login-ip", ip_hash),
+    }):
+        db.execute(sql_text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+
+
 def _record_registration_attempt(db: Session, email: str, remote_ip: str, now: datetime | None = None) -> int | None:
     """Persist and enforce distributed registration limits; return Retry-After when blocked."""
     attempted_at = now or datetime.now(timezone.utc)
@@ -204,15 +216,8 @@ def login(
     ip_hash = _login_attempt_hash(remote_ip)
     now = datetime.now(timezone.utc)
     window_start = now - timedelta(minutes=15)
-    if db.get_bind().dialect.name == "postgresql":
-        # Serialize by both identity and source address across API replicas.
-        # Stable lock ordering prevents deadlocks when requests share either key.
-        from sqlalchemy import text as sql_text
-        for lock_key in sorted({
-            _registration_lock_key("login-email", email_hash),
-            _registration_lock_key("login-ip", ip_hash),
-        }):
-            db.execute(sql_text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+    # The locks remain held until the login-attempt transaction commits.
+    _lock_login_attempt_keys(db, email_hash, ip_hash)
     failed_query = db.query(LoginAttempt).filter(
         LoginAttempt.succeeded.is_(False),
         LoginAttempt.attempted_at >= window_start,
