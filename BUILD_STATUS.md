@@ -43,6 +43,7 @@ CI validates automated repository checks. It does not provision cloud resources,
 ## Additional audit-export and recovery hardening (PR #5)
 
 - Audit export attempts now use a unique UUID in the signed document and S3 object key, including when the same event range is exported again. This avoids reusing an Object Lock key on retries.
+- Added an offline `python -m scripts.verify_audit_export` CLI that validates downloaded exports against a protected operator keyring file, enforces restrictive POSIX keyring permissions, and returns automation-friendly exit codes. Added valid, tampered, insecure-permission, and malformed-keyring tests.
 - Added an independent export verifier that checks the signing-key ID/HMAC, export format and metadata, tenant consistency, ascending event IDs, event count, first/last event metadata, and every event's previous-hash and calculated hash.
 - Added regression coverage for valid exports, tampered event hashes and links, cross-tenant events, inconsistent metadata, unknown keys, and malformed verifier inputs.
 - Documented reconciliation for immutable S3 objects that may be left unreferenced if the database commit fails after a successful object write.
