@@ -506,6 +506,31 @@ def logout_all_sessions(response: Response, db: Session = Depends(get_db), user:
     return {"status": "logged_out_everywhere", "revoked_sessions": revoked_count}
 
 
+@app.get("/api/v1/users")
+def list_tenant_users(
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_roles("admin")),
+):
+    if limit < 1 or limit > 200 or offset < 0:
+        raise HTTPException(400, "Limit must be 1-200 and offset must be non-negative")
+    members = db.query(User).filter(
+        User.tenant_id == user.tenant_id,
+    ).order_by(User.created_at.desc(), User.id.desc()).offset(offset).limit(limit).all()
+    return [
+        {
+            "id": member.id,
+            "email": member.email,
+            "role": member.role.value,
+            "is_active": member.is_active,
+            "mfa_enabled": member.mfa_enabled,
+            "created_at": member.created_at.isoformat() if member.created_at else None,
+        }
+        for member in members
+    ]
+
+
 @app.post("/api/v1/users")
 def create_tenant_user(
     email: str,
