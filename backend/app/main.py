@@ -1,4 +1,4 @@
-import uuid, hashlib
+import uuid, hashlib, os
 from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
@@ -123,8 +123,8 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
     try: upload_dir.chmod(0o700)
     except OSError: pass
     safe_name=f"{uuid.uuid4().hex}{suffix}"; path=upload_dir/safe_name
-    fd=__import__("os").open(path, __import__("os").O_WRONLY | __import__("os").O_CREAT | __import__("os").O_EXCL, 0o600)
-    with __import__("os").fdopen(fd, "wb") as stored_file: stored_file.write(content)
+    fd=os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as stored_file: stored_file.write(content)
     try: extracted,fields=extract_file(str(path),suffix)
     except Exception as exc:
         path.unlink(missing_ok=True); raise HTTPException(422,f"Document extraction failed: {type(exc).__name__}")
