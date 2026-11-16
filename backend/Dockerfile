@@ -9,4 +9,4 @@ RUN mkdir -p /app/uploads
 EXPOSE 8000
 COPY scripts/ ./scripts/
 RUN chmod 0555 ./scripts/bootstrap_runtime_role.sh
-CMD ["sh", "-c", "alembic upgrade head && ./scripts/bootstrap_runtime_role.sh && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
