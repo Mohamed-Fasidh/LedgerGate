@@ -117,6 +117,16 @@ class AuditEvent(Base):
     previous_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     event_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
 
+class RegistrationAttempt(Base):
+    """Privacy-preserving registration throttle events; raw email/IP are never stored."""
+    __tablename__ = "registration_attempts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    ip_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc, index=True)
+    __table_args__ = (Index("ix_registration_attempts_email_time", "email_hash", "attempted_at"), Index("ix_registration_attempts_ip_time", "ip_hash", "attempted_at"))
+
+
 class LoginAttempt(Base):
     __tablename__ = "login_attempts"
     id: Mapped[int] = mapped_column(primary_key=True)
