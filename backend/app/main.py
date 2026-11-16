@@ -1,4 +1,4 @@
-import uuid, hashlib, tempfile
+import uuid, hashlib, tempfile, json
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from urllib.parse import quote
@@ -22,10 +22,10 @@ from app.services.retrieval import retrieve_policy, retrieve_business_records
 from app.services.evaluation import run_evaluation
 from app.services.model_router import explain_findings, ModelUnavailable
 from app.services.memory import remember, recall
-from app.services.storage import store_invoice, read_invoice, scan_with_clamav, MalwareDetected, StorageUnavailable
+from app.services.storage import store_invoice, read_invoice, delete_invoice, scan_with_clamav, MalwareDetected, StorageUnavailable
 
 app=FastAPI(title="LedgerGate API",version="1.1.0",description="Enterprise financial verification and agent reliability platform")
-app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type"])
+app.add_middleware(CORSMiddleware,allow_origins=settings.cors_origin_list,allow_credentials=True,allow_methods=["GET","POST","PATCH","DELETE"],allow_headers=["Authorization","Content-Type","Idempotency-Key"])
 
 @app.get("/health")
 def health(): return {"status":"ok","service":"ledgergate-api"}
@@ -112,22 +112,42 @@ def list_pos(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
 def invoice_view(x):
     return {"id":x.id,"invoice_number":x.invoice_number,"supplier_id":x.supplier_id,"purchase_order_id":x.purchase_order_id,"currency":x.currency,"amount":float(x.amount) if x.amount is not None else None,"invoice_date":x.invoice_date,"status":x.status.value,"file_name":x.file_name,"extraction_fields":x.extraction_fields or {},"reconciliation":x.reconciliation or {},"created_at":x.created_at.isoformat()}
 
+def _validate_idempotency_key(key: str | None) -> None:
+    if key is not None and (len(key)<8 or len(key)>128 or not key.isascii() or any(ord(c)<33 or ord(c)>126 for c in key)):
+        raise HTTPException(400,"Idempotency-Key must be 8-128 printable ASCII characters")
+
+def _request_fingerprint(operation: str, payload: dict) -> str:
+    canonical = json.dumps({"operation":operation,"payload":payload},sort_keys=True,separators=(",",":"),ensure_ascii=True,default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+def _same_idempotent_request(existing: Invoice, operation: str, fingerprint: str) -> bool:
+    # Older create-invoice keys predate operation/fingerprint columns; retain
+    # backwards compatibility for those records without replaying them as uploads.
+    existing_operation = existing.idempotency_operation or "create"
+    if existing_operation != operation:
+        return False
+    if existing.idempotency_request_hash:
+        return existing.idempotency_request_hash == fingerprint
+    return operation == "create"
+
 @app.post("/api/v1/invoices")
 def create_invoice(payload:InvoiceIn,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
-    if idempotency_key is not None and (len(idempotency_key)<8 or len(idempotency_key)>128 or not idempotency_key.isascii() or any(ord(c)<33 or ord(c)>126 for c in idempotency_key)):
-        raise HTTPException(400,"Idempotency-Key must be 8-128 printable ASCII characters")
+    _validate_idempotency_key(idempotency_key)
+    payload_data=payload.model_dump()
+    fingerprint=_request_fingerprint("create",payload_data)
     def matches(existing):
-        return all(getattr(existing,k)==v for k,v in payload.model_dump().items())
+        return all(getattr(existing,k)==v for k,v in payload_data.items())
     if idempotency_key:
         existing=db.query(Invoice).filter(Invoice.tenant_id==user.tenant_id,Invoice.idempotency_key==idempotency_key).first()
         if existing:
-            if not matches(existing): raise HTTPException(409,"Idempotency key was already used with a different request")
+            if not _same_idempotent_request(existing,"create",fingerprint) or (not existing.idempotency_request_hash and not matches(existing)):
+                raise HTTPException(409,"Idempotency key was already used with a different request")
             return invoice_view(existing)
     if payload.supplier_id and not db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Supplier not found")
     if payload.purchase_order_id:
-        po=db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first()
+        po=db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,Supplier.tenant_id==user.tenant_id).first()
         if not po: raise HTTPException(404,"Purchase order not found")
-    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,idempotency_key=idempotency_key,**payload.model_dump())
+    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,idempotency_key=idempotency_key,idempotency_operation="create" if idempotency_key else None,idempotency_request_hash=fingerprint if idempotency_key else None,**payload_data)
     db.add(obj)
     try:
         db.flush()
@@ -138,7 +158,8 @@ def create_invoice(payload:InvoiceIn,idempotency_key:str|None=Header(default=Non
         db.rollback()
         if idempotency_key:
             existing=db.query(Invoice).filter(Invoice.tenant_id==user.tenant_id,Invoice.idempotency_key==idempotency_key).first()
-            if existing and matches(existing): return invoice_view(existing)
+            if existing and _same_idempotent_request(existing,"create",fingerprint) and (existing.idempotency_request_hash or matches(existing)):
+                return invoice_view(existing)
             if existing: raise HTTPException(409,"Idempotency key was already used with a different request")
         raise HTTPException(409,"Invoice conflicts with an existing record")
 
@@ -157,15 +178,25 @@ def get_invoice(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_
     return invoice_view(x)
 
 @app.post("/api/v1/invoices/upload")
-async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
+    _validate_idempotency_key(idempotency_key)
     suffix=Path(file.filename or "").suffix.lower()
     if suffix not in {".pdf",".txt"}: raise HTTPException(415,"Only PDF and TXT files are accepted")
     content=await file.read(settings.max_upload_mb*1024*1024+1)
     if len(content)>settings.max_upload_mb*1024*1024: raise HTTPException(413,"File too large")
     if not content: raise HTTPException(400,"Empty file")
-    # Basic signature validation; production should additionally scan with AV and use private object storage.
     if suffix==".pdf" and not content.startswith(b"%PDF"): raise HTTPException(415,"File content is not a valid PDF")
+    safe_filename=Path(file.filename or "document").name
+    content_hash=hashlib.sha256(content).hexdigest()
+    fingerprint=_request_fingerprint("upload",{"filename":safe_filename,"suffix":suffix,"content_sha256":content_hash})
+    if idempotency_key:
+        existing=db.query(Invoice).filter(Invoice.tenant_id==user.tenant_id,Invoice.idempotency_key==idempotency_key).first()
+        if existing:
+            if _same_idempotent_request(existing,"upload",fingerprint):
+                return invoice_view(existing)
+            raise HTTPException(409,"Idempotency key was already used with a different request")
     temp_path=None
+    stored_location=None
     try:
         scan_with_clamav(content)
         with tempfile.NamedTemporaryFile(delete=False,suffix=suffix) as tmp:
@@ -182,9 +213,28 @@ async def upload_invoice(file:UploadFile=File(...),db:Session=Depends(get_db),us
         if temp_path:
             Path(temp_path).unlink(missing_ok=True)
     candidate=fields.get("invoice_number") or f"UNCONFIRMED-{uuid.uuid4().hex[:10].upper()}"
-    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.EXTRACTION_REVIEW,file_name=Path(file.filename or "document").name,file_path=stored_location,extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
-    db.add(obj); db.flush(); record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":hashlib.sha256(content).hexdigest(),"bytes":len(content)}); db.commit(); db.refresh(obj)
-    return invoice_view(obj)
+    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,idempotency_key=idempotency_key,idempotency_operation="upload" if idempotency_key else None,idempotency_request_hash=fingerprint if idempotency_key else None,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.EXTRACTION_REVIEW,file_name=safe_filename,file_path=stored_location,extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
+    db.add(obj)
+    try:
+        db.flush()
+        record_event(db,user,"invoice",obj.id,"uploaded",{"file_name":obj.file_name,"sha256":content_hash,"bytes":len(content),"idempotent":bool(idempotency_key)})
+        db.commit(); db.refresh(obj)
+        return invoice_view(obj)
+    except IntegrityError:
+        db.rollback()
+        if stored_location:
+            delete_invoice(user.tenant_id,stored_location)
+        if idempotency_key:
+            existing=db.query(Invoice).filter(Invoice.tenant_id==user.tenant_id,Invoice.idempotency_key==idempotency_key).first()
+            if existing and _same_idempotent_request(existing,"upload",fingerprint):
+                return invoice_view(existing)
+            if existing: raise HTTPException(409,"Idempotency key was already used with a different request")
+        raise HTTPException(409,"Invoice upload conflicts with an existing record")
+    except Exception:
+        db.rollback()
+        if stored_location:
+            delete_invoice(user.tenant_id,stored_location)
+        raise
 
 @app.get("/api/v1/invoices/{invoice_id}/file")
 def download_invoice_file(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
