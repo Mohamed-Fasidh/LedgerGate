@@ -45,6 +45,24 @@ def verify_audit_export_signature(document: dict, signing_key: str) -> bool:
     )
 
 
+def verify_audit_export_signature_with_keyring(document: dict, keyring: dict[str, str]) -> bool:
+    """Verify an export with a key selected by its immutable signing key ID.
+
+    Keep retired verification keys available for at least the retention period
+    of exports signed with them. The keyring is supplied by the caller so key
+    custody and secret-manager integration remain outside this module.
+    """
+    key_id = document.get("signing_key_id")
+    if not isinstance(key_id, str) or not key_id or not isinstance(keyring, dict):
+        return False
+    signing_key = keyring.get(key_id)
+    if not isinstance(signing_key, str) or len(signing_key) < 32:
+        return False
+    try:
+        return verify_audit_export_signature(document, signing_key)
+    except (AuditExportUnavailable, TypeError, ValueError):
+        return False
+
 def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retention_days: int | None = None) -> dict:
     bucket = settings.audit_worm_bucket.strip()
     signing_key = settings.audit_export_signing_key
