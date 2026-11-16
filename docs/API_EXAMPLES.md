@@ -24,7 +24,7 @@ curl -X POST http://localhost:8000/api/v1/invoices/1/reconcile -H "Authorization
 
 ## Bounded collection listing
 
-Tenant collection endpoints return at most 100 records by default. Use `limit` (1–200) and `offset` (zero or greater) to page through results. Every query remains scoped to the authenticated tenant. The same pagination parameters are available on suppliers, purchase orders, invoices, approval policies, and workspace users.
+Tenant collection endpoints return at most 100 records by default. Use `limit` (1–200) and `offset` (zero or greater) to page through results. Every query remains scoped to the authenticated tenant. The same pagination parameters are available on suppliers, purchase orders, invoices, approval policies, workspace users, and audit events.
 
 ```bash
 # First 100 invoices
@@ -39,6 +39,12 @@ curl 'http://localhost:8000/api/v1/invoices?status=pending&limit=100&offset=100'
 curl 'http://localhost:8000/api/v1/suppliers?limit=50&offset=0' \
   -H "Authorization: Bearer $TOKEN"
 curl 'http://localhost:8000/api/v1/purchase-orders?limit=50&offset=0' \
+  -H "Authorization: Bearer $TOKEN"
+
+# Workspace members (administrator) and audit history
+curl 'http://localhost:8000/api/v1/users?limit=100&offset=0' \
+  -H "Authorization: Bearer $TOKEN"
+curl 'http://localhost:8000/api/v1/audit-events?limit=100&offset=100' \
   -H "Authorization: Bearer $TOKEN"
 ```
 
