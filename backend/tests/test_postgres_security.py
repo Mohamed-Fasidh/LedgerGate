@@ -79,6 +79,10 @@ def test_every_tenant_table_has_forced_rls_and_tenant_policy():
         "policy_documents",
         "agent_memories",
         "audit_events",
+        "approval_policies",
+        "invoice_approvals",
+        "auth_sessions",
+        "idempotency_records",
     )
     try:
         with engine.connect() as connection:
