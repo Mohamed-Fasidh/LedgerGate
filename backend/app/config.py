@@ -10,6 +10,15 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     upload_dir: str = "./uploads"
     max_upload_mb: int = 15
+    storage_backend: str = "local"
+    s3_bucket: str = ""
+    s3_region: str = "ap-south-1"
+    s3_endpoint_url: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    clamav_host: str = ""
+    clamav_port: int = 3310
+    clamav_timeout_seconds: int = 20
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
@@ -22,3 +31,8 @@ if settings.app_env.lower()=="production":
         raise RuntimeError("Production requires a unique JWT_SECRET_KEY of at least 32 characters")
     if "*" in settings.cors_origin_list:
         raise RuntimeError("Wildcard CORS is forbidden in production")
+    if settings.storage_backend.lower() != "s3" or not settings.s3_bucket:
+        raise RuntimeError("Production requires S3-compatible private object storage and S3_BUCKET")
+    if not settings.clamav_host:
+        raise RuntimeError("Production requires CLAMAV_HOST for malware scanning")
+
