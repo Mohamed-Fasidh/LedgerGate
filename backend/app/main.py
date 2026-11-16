@@ -1837,6 +1837,7 @@ def add_agent_memory(content:str,memory_type:str="episodic",idempotency_key:str|
 @app.get("/api/v1/agent/memory/search")
 def search_agent_memory(q:str,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     if len(q.strip())<2: raise HTTPException(400,"Query must contain at least two characters")
+    if len(q)>500: raise HTTPException(400,"Query exceeds the 500-character limit")
     return {"memories":recall(db,user.tenant_id,q)}
 
 @app.post("/api/v1/invoices/{invoice_id}/explain")
