@@ -20,7 +20,7 @@ def upgrade() -> None:
     # Operators must reconcile these rows explicitly rather than silently
     # carrying cross-tenant references into the protected schema.
     op.execute("""
-        DO $
+        DO $$
         BEGIN
             IF EXISTS (
                 SELECT 1 FROM public.purchase_orders child
@@ -68,7 +68,7 @@ def upgrade() -> None:
                 RAISE EXCEPTION 'Existing cross-tenant references must be reconciled before migration 0027';
             END IF;
         END;
-        $;
+        $$;
     """)
 
     op.execute("""
