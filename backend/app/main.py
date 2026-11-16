@@ -1051,7 +1051,7 @@ def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_ke
         raise HTTPException(409,"Invoice extraction confirmation conflicted with another request")
 
 @app.post("/api/v1/invoices/{invoice_id}/reconcile",response_model=ReconcileOut)
-def reconcile(invoice_id:int,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(get_current_user)):
+def reconcile(invoice_id:int,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
     _validate_idempotency_key(idempotency_key)
     operation=f"invoice.reconcile:{invoice_id}:{user.id}"
     fingerprint=_request_fingerprint(operation,{})
