@@ -147,6 +147,14 @@ def test_production_requires_verified_postgresql_tls():
         "https://app.example.com#",
         "https://app.example.com\\\\evil",
         "https://app.example.com/ path",
+        "https://10.0.0.1",
+        "https://192.168.1.10",
+        "https://169.254.1.1",
+        "https://127.1",
+        "https://2130706433",
+        "https://localhost.localdomain",
+        "https://bad_host.example.com",
+        "https://[::ffff:127.0.0.1]",
     ],
 )
 def test_production_rejects_non_origin_public_app_urls(public_url):
@@ -194,6 +202,14 @@ def test_production_accepts_plain_email_from_address():
         " https://app.example.com",
         "https://app.example.com\n",
         "https://",
+        "https://10.0.0.1",
+        "https://192.168.1.10",
+        "https://169.254.1.1",
+        "https://127.1",
+        "https://2130706433",
+        "https://localhost.localdomain",
+        "https://bad_host.example.com",
+        "https://[::ffff:127.0.0.1]",
     ],
 )
 def test_production_rejects_malformed_cors_origins(origin):
