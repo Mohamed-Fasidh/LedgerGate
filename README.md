@@ -11,7 +11,7 @@ LedgerGate is a production-oriented reference implementation for invoice intake,
 - Custom deterministic agent state machine with validated tool calls and explicit human-review escalation.
 - Optional bounded LLM task planner and read-only orchestrator. Plans are schema-validated against an explicit read-only tool allowlist, then executed sequentially under the ToolExecutor's fixed authenticated tenant context with step limits, cooperative cancellation, and a deadline between calls. This in-process coordinator is not durable and cannot interrupt a synchronous database call already in progress; it cannot approve or mutate financial records.
 - MCP-compatible tool server entry point for invoice/PO lookup and policy retrieval. See [MCP integration and security setup](docs/MCP_INTEGRATION.md) for local stdio configuration, token handling, HTTPS requirements, and tool side effects.
-- Hybrid retrieval foundation (PostgreSQL full-text + pgvector-ready schema) and evaluation harness.
+- Tenant-scoped deterministic lexical/fuzzy retrieval baseline and a versioned agent-evaluation harness. Neural embedding/vector retrieval is not yet implemented; see the documented research limitations.
 - Next.js dashboard starter with invoice review views.
 - Docker Compose for PostgreSQL, API, web application, ClamAV, and a separate durable account-email worker.
 - Alembic migrations, tests, sample environment, and operational documentation.
@@ -65,6 +65,15 @@ See `docs/ARCHITECTURE.md`, `docs/SECURITY.md`, `docs/EMAIL_OUTBOX.md`, and `doc
 
 The backend includes a shared bounded client for Ollama and OpenAI-compatible vLLM, with streaming, timeouts, transient retries, queue backpressure, token/latency usage, optional Prometheus/GPU telemetry, and benchmark JSON/CSV output. Install optional benchmark tools with `pip install -r backend/requirements-inference.txt`; model-serving runtimes remain separate from the API image. See [Inference engineering and benchmarks](docs/INFERENCE_ENGINEERING.md). No GPU or live-provider performance results are claimed unless produced by an actual benchmark run.
 
+
+## Research and evaluation
+
+- [Transformer from scratch](research/transformer/README.md): educational GPT-style decoder implemented in PyTorch.
+- [Reinforcement-learning experiments](research/reinforcement-learning/README.md): policy gradients, actor-critic, PPO/GAE, and educational GRPO.
+- [Agent evaluation](research/agent-evaluation/README.md): versioned deterministic datasets, evaluator CLI, JSON/CSV reports, and optional live backend contracts.
+- [Vizuara workshops](docs/workshops/README.md): four 15–20 minute teaching plans.
+
+Run the deterministic agent-evaluation suite from its package directory with `python -m pip install -e ".[test]"`, then `python -m eval_framework.cli run --ci --output-dir outputs/local`. The included fixture scores are evaluator contract checks, not production LLM accuracy.
 
 ## Vizuara teaching workshops
 
