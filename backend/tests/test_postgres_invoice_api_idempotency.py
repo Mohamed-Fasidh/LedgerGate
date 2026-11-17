@@ -2,6 +2,7 @@
 
 import os
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
@@ -31,9 +32,18 @@ def test_concurrent_invoice_decision_http_requests_replay_same_idempotent_respon
     )
     from app.security import create_access_token
 
-    engine = create_engine(os.environ["TEST_POSTGRES_URL"], pool_size=5, max_overflow=0)
+    application_name = "ledgergate-invoice-api-" + uuid.uuid4().hex[:12]
+    engine = create_engine(
+        os.environ["TEST_POSTGRES_URL"],
+        pool_size=5,
+        max_overflow=0,
+        connect_args={"application_name": application_name},
+    )
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     tenant_id = "invoice-api-race-" + uuid.uuid4().hex
+    trigger_suffix = uuid.uuid4().hex[:12]
+    trigger_name = "invoice_api_delay_" + trigger_suffix
+    function_name = "invoice_api_delay_fn_" + trigger_suffix
     suffix = uuid.uuid4().hex
     creator = User(
         tenant_id=tenant_id,
