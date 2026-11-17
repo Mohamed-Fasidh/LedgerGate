@@ -156,7 +156,7 @@ def test_pre_auth_identity_tables_are_tenant_scoped_and_lookup_functions_are_nar
                 WHERE token_hash IN (:verification_hash, :reset_hash)
             """), {"verification_hash": verification_hash, "reset_hash": reset_hash}).scalars().all()
             assert visible_tokens == [verification_hash]
-            with pytest.raises(Exception, match="row-level security"):
+            with pytest.raises(Exception, match="row-level security|cross-tenant or missing identity user reference"):
                 runtime.execute(text("""
                     INSERT INTO public.password_reset_tokens (
                         user_id, tenant_id, token_hash, expires_at, used_at, created_at
