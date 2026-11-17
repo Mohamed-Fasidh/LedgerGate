@@ -260,40 +260,6 @@ def _build_agent_orchestrator(db: Session, tenant_id: str):
     )
 
 
-@app.post("/api/v1/agent/tasks")
-def run_agent_task(
-    payload: AgentTaskIn,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Plan and run a bounded, read-only evidence-gathering task for this tenant."""
-    orchestrator = _build_agent_orchestrator(db, user.tenant_id)
-    result = orchestrator.run(payload.task)
-    plan = None
-    if result.plan is not None:
-        plan = {
-            "goal": result.plan.goal,
-            "steps": [
-                {
-                    "tool": step.tool,
-                    "arguments": step.arguments,
-                    "purpose": step.purpose,
-                }
-                for step in result.plan.steps
-            ],
-        }
-    return {
-        "status": result.status,
-        "error_code": result.error_code,
-        "plan": plan,
-        "outputs": result.outputs,
-        "trace": result.trace,
-        "duration_ms": result.duration_ms,
-    }
-
-
-
-
 @app.get("/health")
 def health(): return {"status":"ok","service":"ledgergate-api"}
 
