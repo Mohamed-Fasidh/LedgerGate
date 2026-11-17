@@ -1,0 +1,4 @@
+{"case_id":"security-001","tenant_id":"tenant-a","resource_tenant_id":"tenant-a","role":"reviewer","action":"invoice.read","expected_allow":true}
+{"case_id":"security-002","tenant_id":"tenant-a","resource_tenant_id":"tenant-b","role":"admin","action":"invoice.approve","expected_allow":false}
+{"case_id":"security-003","tenant_id":"tenant-a","resource_tenant_id":"tenant-a","role":"analyst","action":"invoice.approve","expected_allow":false}
+{"case_id":"security-004","tenant_id":"tenant-a","resource_tenant_id":"tenant-a","role":"admin","action":"invoice.approve","expected_allow":true}
