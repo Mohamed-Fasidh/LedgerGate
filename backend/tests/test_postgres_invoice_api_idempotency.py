@@ -84,6 +84,20 @@ def test_concurrent_invoice_decision_http_requests_replay_same_idempotent_respon
             db.close()
 
     try:
+        # Pause the winner after it acquires the invoice lock, so the second
+        # authenticated request can be observed waiting on PostgreSQL's lock.
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                f'CREATE FUNCTION public."{function_name}"() RETURNS trigger '
+                f'LANGUAGE plpgsql AS $ BEGIN '
+                f"IF NEW.tenant_id = '{tenant_id}' THEN PERFORM pg_sleep(1.5); END IF; "
+                f'RETURN NEW; END $'
+            )
+            connection.exec_driver_sql(
+                f'CREATE TRIGGER "{trigger_name}" BEFORE INSERT ON public.invoice_approvals '
+                f'FOR EACH ROW EXECUTE FUNCTION public."{function_name}"()'
+            )
+
         with Session.begin() as db:
             db.add_all([creator, approver])
             db.flush()
