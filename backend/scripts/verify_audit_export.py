@@ -17,13 +17,47 @@ from typing import Sequence
 from app.services.audit_export import verify_audit_export_document
 
 
+MAX_EXPORT_FILE_BYTES = 10 * 1024 * 1024
+MAX_KEYRING_FILE_BYTES = 1024 * 1024
+
+
+def _reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_nonstandard_constant(value):
+    raise ValueError(f"non-standard JSON numeric constant: {value}")
+
+
 def _read_json(path: Path, *, secret: bool = False):
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("verifier input must be a regular file, not a symbolic link")
     if secret and os.name == "posix":
-        mode = stat.S_IMODE(path.stat().st_mode)
+        file_stat = path.stat()
+        mode = stat.S_IMODE(file_stat.st_mode)
+        if file_stat.st_uid != os.getuid():
+            raise ValueError("keyring file must be owned by the current operator account")
         if mode & 0o077:
             raise ValueError("keyring file permissions are too broad; run chmod 600 on the file")
-    with path.open("r", encoding="utf-8") as stream:
-        return json.load(stream)
+    maximum = MAX_KEYRING_FILE_BYTES if secret else MAX_EXPORT_FILE_BYTES
+    with path.open("rb") as stream:
+        raw = stream.read(maximum + 1)
+    if len(raw) > maximum:
+        raise ValueError(f"verifier input exceeds the {maximum}-byte file limit")
+    try:
+        decoded = raw.decode("utf-8")
+        return json.loads(
+            decoded,
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_nonstandard_constant,
+        )
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("verifier input is not valid UTF-8 JSON") from exc
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -40,10 +74,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     if not isinstance(keyring, dict) or not keyring or any(
-        not isinstance(key_id, str) or not key_id or not isinstance(key, str) or len(key) < 32
+        not isinstance(key_id, str) or not key_id or len(key_id) > 128 or key_id.strip() != key_id
+        or not isinstance(key, str) or not 32 <= len(key) <= 4096
         for key_id, key in keyring.items()
     ):
-        print("ERROR: keyring must map non-empty key IDs to keys of at least 32 characters", file=sys.stderr)
+        print(
+            "ERROR: keyring must map bounded, non-empty key IDs to keys of 32-4096 characters",
+            file=sys.stderr,
+        )
         return 2
 
     if verify_audit_export_document(document, keyring):
