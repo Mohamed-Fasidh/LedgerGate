@@ -10,6 +10,10 @@
 - PR #81 was squash-merged as `c1c443b2eb1d6825804598edf12aca19678e16cf`. It bounds agent planning inference timeouts, queue wait, and retries so planning fits within the orchestrator's execution budget. Synchronous tool/database calls remain non-interruptible once started.
 - Post-merge checks for main commit `c1c443b2eb1d6825804598edf12aca19678e16cf` passed: repository CI [44089564900](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44089564900) and CodeQL [44089564958](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44089564958).
 - PR #82 was closed without merging after review showed the proposed regression test already exists in `main`. The extra duplicate test caused a pytest fixture error; no application functionality was missing and no change was needed on `main`.
+- PR #83 was squash-merged as `4e22fc2649c1b0ba0f52784122a756e220ef4c31`. It refreshed the main-branch verification record and clarified which agent/retrieval/production-readiness work remained outstanding at that point.
+- PR #84 was squash-merged as `c6ef954c0881d775b419576b8261490ddce4ad41`. It adds durable tenant-scoped asynchronous agent jobs, a PostgreSQL `SKIP LOCKED` claim function owned by a dedicated NOLOGIN/BYPASSRLS queue role, a separate agent worker, authenticated submit/status endpoints, fenced leases, crash recovery, bounded retries, and PostgreSQL integration tests.
+- PR #84 validation passed before merge: backend PostgreSQL suite (493 passed), frontend production build, Docker Compose validation and backend/frontend image builds, and CodeQL for Python and JavaScript/TypeScript. Post-merge main CI [44094261028](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44094261028) and CodeQL [44094260994](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44094260994) also passed for commit `c6ef954c0881d775b419576b8261490ddce4ad41`.
+- PR #82 was closed without merging because the proposed idempotency regression test already existed on `main`; the duplicate copy caused a CI fixture failure and no application change was missing.
 
 ## Remaining requirements and external gates
 
@@ -17,7 +21,7 @@
 
 
 - Neural embedding generation, persisted vector indexes, semantic retrieval/reranking, and retrieval quality evaluation against representative data remain incomplete. The current production retrieval path is a tenant-scoped lexical/fuzzy baseline.
-- The LLM planner/orchestrator is bounded and read-only. Durable execution state, robust retry/recovery policy, provider token/cost accounting for plans, and interruptible per-tool execution remain future work.
+- The synchronous LLM planner/orchestrator remains bounded and in-process. Durable asynchronous agent jobs are now implemented with PostgreSQL persistence, tenant RLS, a restricted cross-tenant claim function, `FOR UPDATE SKIP LOCKED`, fenced leases, crash recovery, and bounded retries. Remaining agent work includes provider token/cost accounting, interruptible per-tool execution, queue retention/operational monitoring, and production-scale load testing.
 - No actual GPU benchmark results are committed. Benchmark commands and methodology exist, but real model/hardware measurements must be generated and retained.
 - No live staging/production deployment, real external model-server load test, production cloud/S3 maintenance-role validation, disaster-recovery restoration, independent penetration test, or compliance sign-off is established by these PR checks.
 - The four Vizuara workshop plans are present; an instructor run-through and actual hardware demonstrations have not been independently validated.
