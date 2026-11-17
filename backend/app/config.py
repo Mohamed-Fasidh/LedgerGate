@@ -71,6 +71,13 @@ def validate_production_settings(config: Settings) -> None:
     if config.jwt_secret_key == "unsafe-development-secret-change-this" or len(config.jwt_secret_key) < 32:
         raise RuntimeError("Production requires a unique JWT_SECRET_KEY of at least 32 characters")
 
+    raw_origins = config.cors_origins.split(",")
+    if any(
+        raw_origin != raw_origin.strip()
+        or any(ord(char) < 32 or ord(char) == 127 for char in raw_origin)
+        for raw_origin in raw_origins
+    ):
+        raise RuntimeError("Production CORS origins must not contain surrounding whitespace or control characters")
     origins = config.cors_origin_list
     if not origins:
         raise RuntimeError("Production requires at least one explicit HTTPS CORS origin")
