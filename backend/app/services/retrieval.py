@@ -131,7 +131,8 @@ def retrieve_business_records(db: Session, tenant_id: str, query: str, limit: in
                     "id": po.id,
                     "reference": po.po_number,
                     "supplier": supplier.name if supplier else None,
-                    "amount": float(po.total_amount),
+                    # Keep exact currency precision for agent/tool consumers.
+                    "amount": str(po.total_amount) if po.total_amount is not None else None,
                     "currency": po.currency,
                     "score": score,
                 }
