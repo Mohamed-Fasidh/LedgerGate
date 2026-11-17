@@ -1,14 +1,17 @@
 # LedgerGate AI Engineering Research Suite
 
-This directory contains optional, standalone research and teaching packages that complement LedgerGate's enterprise reconciliation application. These packages are deliberately isolated from the financial transaction runtime.
+This directory contains optional research packages that complement LedgerGate's enterprise reconciliation application. Research code is deliberately isolated from the financial transaction runtime.
 
-## Planned package layout
+## Implemented packages
 
-- `transformer/` — decoder-only Transformer, byte-level tokenizer, training, checkpoints, and generation.
-- `reinforcement-learning/` — REINFORCE, actor-critic, PPO/GAE, and GRPO teaching implementations.
-- `inference/` — inference client, request metrics, benchmark harness, Prometheus exposition, and vLLM profiling helper.
-- `agent-evaluation/` — trace datasets, evaluation runner, security/financial/retrieval metrics, and comparison reports.
-- `instructor-workshops/` — four instructor-led lessons, code labs, and facilitator materials.
+- `transformer/` — GPT-style decoder-only Transformer, byte-level tokenizer, CPU training, checkpoints, generation, and unit tests.
+- `reinforcement-learning/` — REINFORCE, actor-critic, PPO/GAE, and an educational response-slot GRPO experiment.
+- `agent-evaluation/` — versioned deterministic trace datasets, evaluator CLI, financial/security/retrieval metrics, comparison reports, human-review queue, and optional live backend contracts.
+
+## Supporting engineering components
+
+- Inference client and benchmark harness live in `backend/app/services/inference/`; optional dependencies are in `backend/requirements-inference.txt`. The vLLM launch-profile helper is `scripts/vllm_profile.py`.
+- Four Vizuara teaching plans live in `docs/workshops/`; they are instructor materials rather than a separate Python package.
 
 ## Safety and integration boundary
 
@@ -16,17 +19,26 @@ The research packages are educational and experimental. They must not make payme
 
 ## Validation status
 
-Local package-level test results reported with the source bundle: **88 tests passed**. These are not evidence that the full LedgerGate repository CI, a GPU benchmark, an external model server, staging deployment, or production security review has passed. Those checks must be run independently after all source files have been integrated.
+The agent-evaluation package's dedicated GitHub Actions run validated the versioned dataset, ran package tests, and passed deterministic CI gates (run [44082141985](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44082141985)). The research Transformer and RL packages have separate CPU-oriented test workflows. These checks do not represent production model accuracy, GPU performance, external model-server integration, staging deployment, or production security review.
 
 ## Running package tests
 
-Run `python -m pytest -q` from an individual package root. The inference tests are under `inference/backend`; the workshop lab tests are under `instructor-workshops`.
+From each package root:
+
+```bash
+python -m pip install -e ".[test]"
+python -m pytest -q
+```
+
+For the agent evaluation package, run the bundled deterministic suite:
+
+```bash
+python -m eval_framework.cli validate-dataset
+python -m eval_framework.cli run --ci --output-dir outputs/local
+```
+
+The bundled evaluation fixtures are synthetic contract cases. Their pass rates must not be presented as production LLM-agent accuracy. Actual model-serving metrics remain `not_measured` until real trace files are supplied.
 
 ## Dependencies
 
-Each package has its own dependency declaration. Install dependencies only for the package being explored; do not merge research-only dependencies into the production application requirements without a separate review.
-
-
-## Teaching workshops
-
-Instructor-led 15–20 minute workshop plans are maintained in [docs/workshops](../docs/workshops/README.md), covering Transformers, agent engineering/evaluation, PPO/GRPO, and inference/GPU performance.
+Each package has its own dependency declaration. Install dependencies only for the package being explored; do not merge research-only dependencies into production application requirements without a separate review.
