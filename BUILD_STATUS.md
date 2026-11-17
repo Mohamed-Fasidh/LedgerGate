@@ -446,3 +446,12 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - Added tests covering maker-checker denial for both approval and rejection, no approval-record creation on denied attempts, and admin/reviewer-only authorization for decision endpoints.
 - Final CI run [44069011101](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44069011101) passed backend, frontend, and Docker jobs. CodeQL run [44069010977](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44069010977) passed Python and JavaScript/TypeScript analysis.
 - An earlier CI attempt failed because the tests first used a non-existent uppercase enum member; the subsequent run verified the corrected application code and tests successfully.
+
+
+## Concurrent invoice decision serialization — 2026-11-17
+
+- PR #55 merged into `main`: [Security: serialize concurrent invoice approval decisions](https://github.com/Mohamed-Fasidh/LedgerGate/pull/55).
+- Merge commit: `9d7a01f2b75b7fc7cfd7c9d864be8b15a220e63c`.
+- Approval and rejection handlers now acquire a tenant-scoped invoice row lock using SQLAlchemy `with_for_update()` before making a decision. Maker-checker regression tests assert that both decision paths request the lock.
+- CI run [44069426818](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44069426818) passed backend, frontend, and Docker jobs. CodeQL run [44069426787](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44069426787) passed Python and JavaScript/TypeScript analysis.
+- This serializes decision handlers on PostgreSQL; a dedicated multi-connection concurrency integration test is still a separate validation item.
