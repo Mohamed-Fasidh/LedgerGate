@@ -126,7 +126,7 @@ class TaskPlanner:
             raise PlanningError("Task planner exceeded the maximum step count")
 
         for step in plan.steps:
-            entry = registry.get(step.tool)
+            entry = registry.get(step.tool) if step.tool in READ_ONLY_TOOL_NAMES else None
             if entry is None:
                 raise PlanningError("Task planner selected a tool that is not allowlisted")
             schema, _handler = entry
