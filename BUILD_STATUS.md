@@ -1,5 +1,25 @@
 # LedgerGate build and production-readiness status
 
+## Latest AI engineering continuation — 2026-11-17
+
+- PR #70 was squash-merged as `abd74e0747ec61f9fcf959c828e1eb82d66f239c`. It adds four 15–20 minute Vizuara workshop plans and links them from the project guides. PR CI [44082047681](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44082047681) and CodeQL [44082047603](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44082047603) passed.
+- PR #71 was squash-merged as `62d6bde9fadf0e621a329aec7356683c83330124`. It adds the previously missing default agent-evaluation dataset (18 synthetic cases across agent, tools, retrieval, claims, recovery, multi-step, financial, and security suites), package tests, usage documentation, and a dedicated CPU-only evaluation workflow. Evaluation CI [44082141985](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44082141985), repository CI [44082142149](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44082142149), and CodeQL [44082141982](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44082141982) passed. Fixture scores are synthetic contract checks, not production agent accuracy.
+- PR #72 was squash-merged as `b4f1b9693facc54587e7ea7cae3508c876f992ee`. It replaces binary floating-point reconciliation comparisons with Decimal and preserves currency amounts as strings in agent/MCP tool payloads. Backend, frontend, Docker, and CodeQL checks passed on the PR head.
+- PR #73 was squash-merged as `0305af97b374cb9dc4650815a7470f81fe374858`. It removes a redundant cleanup workflow to prevent two independent jobs racing to delete the same run IDs. The canonical workflow is `.github/workflows/cleanup-unsuccessful-runs.yml`, using the shared cleanup script and a five-minute cron. Historical schedule-triggered run [44015570726](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44015570726) completed successfully; recent recurring five-minute execution has not been independently verified.
+- PR #74 was squash-merged as `74d2fe1ccc3d5140afadfa28fbdb58a4c44632af`. It adds an LLM task planner and sequential read-only orchestrator, strict tool schemas, bounded step/input/output limits, in-memory traces, cooperative cancellation, and deadline checks between tool calls. Backend, frontend, Docker, and CodeQL checks passed. It is not durable orchestration, has no retry policy, and cannot interrupt a synchronous database call already in progress.
+- PR #75 was squash-merged as `8f9404f2aa7a68610a9b4cd7bb8186811c37d35d`. It removes the remaining float conversion from tenant-scoped purchase-order retrieval and adds a 0.10 currency precision regression test. Backend, frontend, Docker, and CodeQL checks passed on the PR head.
+- Main HEAD after PR #75: `8f9404f2aa7a68610a9b4cd7bb8186811c37d35d`. Post-merge CodeQL run [44083968672](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44083968672) passed; post-merge repository CI [44083968660](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44083968660) was still running when this section was recorded.
+
+### Remaining requirements and external gates
+
+- Neural embedding generation, persisted vector indexes, semantic retrieval/reranking, and retrieval quality evaluation against representative data remain incomplete. The current production retrieval path is a tenant-scoped lexical/fuzzy baseline.
+- The LLM planner/orchestrator is bounded and read-only. Durable execution state, robust retry/recovery policy, provider token/cost accounting for plans, and interruptible per-tool execution remain future work.
+- No actual GPU benchmark results are committed. Benchmark commands and methodology exist, but real model/hardware measurements must be generated and retained.
+- No live staging/production deployment, real external model-server load test, production cloud/S3 maintenance-role validation, disaster-recovery restoration, independent penetration test, or compliance sign-off is established by these PR checks.
+- The four Vizuara workshop plans are present; an instructor run-through and actual hardware demonstrations have not been independently validated.
+- Repository CI and PR checks are evidence of automated test/build success, not a declaration that every Master Prompt phase or production-readiness gate is complete.
+
+
 ## Latest main verification — 2026-11-17
 
 ## Latest security continuation — 2026-11-17
