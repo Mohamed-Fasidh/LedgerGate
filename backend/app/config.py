@@ -131,7 +131,10 @@ def validate_production_settings(config: Settings) -> None:
     display_name, addr_spec = parseaddr(raw_from_address)
     try:
         parsed_address = Address(addr_spec=addr_spec)
-    except (TypeError, ValueError) as exc:
+    except Exception as exc:
+        # email.headerregistry can raise HeaderParseError (not only ValueError)
+        # for malformed mailbox syntax; normalize every parser failure to the
+        # production configuration error rather than crashing startup oddly.
         raise RuntimeError("Production requires a valid EMAIL_FROM_ADDRESS") from exc
     canonical_header = f"{display_name} <{addr_spec}>" if display_name else addr_spec
     if (
