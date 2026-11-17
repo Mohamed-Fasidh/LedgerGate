@@ -1,5 +1,38 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import ipaddress
+import re
 from urllib.parse import parse_qs, urlparse
+from email.headerregistry import Address
+from email.utils import parseaddr
+
+
+def _is_unsafe_production_hostname(hostname: str) -> bool:
+    """Reject local/private IP literals and malformed or local-only DNS names."""
+    normalized = hostname.rstrip(".").lower()
+    if not normalized or normalized != hostname.lower():
+        return True
+    if normalized in {"localhost", "localdomain"} or normalized.endswith((".localhost", ".localdomain", ".local")):
+        return True
+    try:
+        address = ipaddress.ip_address(normalized)
+    except ValueError:
+        labels = normalized.split(".")
+        if len(labels) < 2 or len(normalized) > 253:
+            return True
+        if any(
+            not label
+            or len(label) > 63
+            or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+            for label in labels
+        ):
+            return True
+        # Reject non-standard integer/octal-like IPv4 host spellings.
+        if not any(char.isalpha() for char in labels[-1]):
+            return True
+        return False
+    if getattr(address, "ipv4_mapped", None) is not None:
+        address = address.ipv4_mapped
+    return not address.is_global
 
 
 class Settings(BaseSettings):
@@ -69,21 +102,39 @@ def validate_production_settings(config: Settings) -> None:
     if config.jwt_secret_key == "unsafe-development-secret-change-this" or len(config.jwt_secret_key) < 32:
         raise RuntimeError("Production requires a unique JWT_SECRET_KEY of at least 32 characters")
 
+    raw_origins = config.cors_origins.split(",")
+    if any(
+        raw_origin != raw_origin.strip()
+        or any(ord(char) < 32 or ord(char) == 127 for char in raw_origin)
+        for raw_origin in raw_origins
+    ):
+        raise RuntimeError("Production CORS origins must not contain surrounding whitespace or control characters")
     origins = config.cors_origin_list
     if not origins:
         raise RuntimeError("Production requires at least one explicit HTTPS CORS origin")
     for origin in origins:
         parsed = urlparse(origin)
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise RuntimeError("Production CORS origins must contain valid ports") from exc
         hostname = (parsed.hostname or "").lower()
         if (
-            parsed.scheme != "https"
+            origin != origin.strip()
+            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in origin)
+            or "\\" in origin
+            or "?" in origin
+            or "#" in origin
+            or parsed.scheme != "https"
             or not parsed.netloc
-            or parsed.path != ""
+            or not hostname
+            or parsed.path not in ("", "/")
             or parsed.query
             or parsed.fragment
             or parsed.username
             or parsed.password
-            or hostname in {"localhost", "127.0.0.1", "::1"}
+            or _is_unsafe_production_hostname(hostname)
+            or (port is not None and not 1 <= port <= 65535)
         ):
             raise RuntimeError("Production CORS origins must be explicit HTTPS origins without paths or localhost")
 
@@ -119,21 +170,54 @@ def validate_production_settings(config: Settings) -> None:
         raise RuntimeError("Production requires authenticated SMTP configuration for account recovery")
     if config.email_smtp_port != 587:
         raise RuntimeError("Production SMTP must use port 587 with STARTTLS")
-    if not config.email_from_address.strip() or "@" not in config.email_from_address:
+    raw_from_address = config.email_from_address
+    if (
+        not raw_from_address
+        or raw_from_address != raw_from_address.strip()
+        or any(ord(char) < 32 or ord(char) == 127 for char in raw_from_address)
+    ):
+        raise RuntimeError("Production requires a valid EMAIL_FROM_ADDRESS")
+    display_name, addr_spec = parseaddr(raw_from_address)
+    try:
+        parsed_address = Address(addr_spec=addr_spec)
+    except Exception as exc:
+        # email.headerregistry can raise HeaderParseError (not only ValueError)
+        # for malformed mailbox syntax; normalize every parser failure to the
+        # production configuration error rather than crashing startup oddly.
+        raise RuntimeError("Production requires a valid EMAIL_FROM_ADDRESS") from exc
+    canonical_header = f"{display_name} <{addr_spec}>" if display_name else addr_spec
+    if (
+        not addr_spec
+        or parsed_address.addr_spec != addr_spec
+        or raw_from_address != canonical_header
+        or not parsed_address.domain
+        or "." not in parsed_address.domain
+    ):
         raise RuntimeError("Production requires a valid EMAIL_FROM_ADDRESS")
     public_url = urlparse(config.public_app_url)
+    try:
+        public_port = public_url.port
+    except ValueError as exc:
+        raise RuntimeError("Production PUBLIC_APP_URL must be a valid HTTPS application origin") from exc
     public_hostname = (public_url.hostname or "").lower()
     if (
-        public_url.scheme != "https"
+        config.public_app_url != config.public_app_url.strip()
+        or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in config.public_app_url)
+        or "\\" in config.public_app_url
+        or "?" in config.public_app_url
+        or "#" in config.public_app_url
+        or public_url.scheme != "https"
         or not public_url.netloc
+        or not public_hostname
+        or _is_unsafe_production_hostname(public_hostname)
         or public_url.path not in ("", "/")
         or public_url.username
         or public_url.password
         or public_url.query
         or public_url.fragment
-        or public_hostname in {"localhost", "127.0.0.1", "::1"}
+        or (public_port is not None and not 1 <= public_port <= 65535)
     ):
-        raise RuntimeError("Production PUBLIC_APP_URL must be a public HTTPS application origin without a path")
+        raise RuntimeError("Production PUBLIC_APP_URL must be a valid HTTPS application origin without paths or localhost")
     database_url = config.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
     parsed_database_url = urlparse(database_url)
     if parsed_database_url.scheme not in ("postgres", "postgresql") or parsed_database_url.username != "ledgergate_runtime":
