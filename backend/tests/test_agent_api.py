@@ -38,8 +38,12 @@ def test_agent_endpoint_requires_authentication_and_uses_only_read_only_tools():
     import ast
     from pathlib import Path
 
-    source = Path(__file__).resolve().parents[1] / "app" / "main.py"
-    tree = ast.parse(source.read_text(encoding="utf-8"))
+    backend = Path(__file__).resolve().parents[1]
+    main_source = (backend / "app" / "main.py").read_text(encoding="utf-8")
+    service_source = (backend / "app" / "agent" / "service.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(main_source)
     route = next(
         node for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef) and node.name == "run_agent_task"
@@ -53,7 +57,6 @@ def test_agent_endpoint_requires_authentication_and_uses_only_read_only_tools():
         and d.args[0].value == "/api/v1/agent/tasks"
         for d in decorators
     )
-    defaults = route.args.defaults
     assert any(
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
@@ -63,4 +66,5 @@ def test_agent_endpoint_requires_authentication_and_uses_only_read_only_tools():
         and node.args[0].id == "get_current_user"
         for node in ast.walk(route)
     )
-    assert "ToolExecutor" in source.read_text(encoding="utf-8")
+    assert "ToolExecutor" in service_source
+    assert "build_read_only_orchestrator" in service_source
