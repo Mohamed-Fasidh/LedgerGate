@@ -193,7 +193,7 @@ class ApprovalPolicy(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     tenant_id: Mapped[str] = mapped_column(String(64), index=True)
     name: Mapped[str] = mapped_column(String(120))
-    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR", server_default="INR")
     min_amount: Mapped[Decimal] = mapped_column(Numeric(14,2), default=Decimal('0.00'))
     max_amount: Mapped[Decimal | None] = mapped_column(Numeric(14,2), nullable=True)
     approval_steps: Mapped[list] = mapped_column(JSON, default=list)
