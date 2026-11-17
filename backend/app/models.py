@@ -64,7 +64,7 @@ class PurchaseOrder(Base):
     po_number: Mapped[str] = mapped_column(String(100))
     supplier_id: Mapped[int] = mapped_column(ForeignKey("suppliers.id"))
     currency: Mapped[str] = mapped_column(String(3), default="INR")
-    total_amount: Mapped[float] = mapped_column(Numeric(14,2))
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(14,2))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     __table_args__ = (
@@ -88,7 +88,7 @@ class Invoice(Base):
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id"), nullable=True)
     purchase_order_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_orders.id"), nullable=True)
     currency: Mapped[str] = mapped_column(String(3), default="INR")
-    amount: Mapped[float | None] = mapped_column(Numeric(14,2), nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(14,2), nullable=True)
     invoice_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
     status: Mapped[InvoiceStatus] = mapped_column(Enum(InvoiceStatus), default=InvoiceStatus.received)
     file_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
