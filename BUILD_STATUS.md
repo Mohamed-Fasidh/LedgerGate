@@ -436,3 +436,13 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - Merge commit: `9730a068e5c56b9d6a5d23d203e94b65a58b4a64`.
 - PostgreSQL integration coverage asserts the runtime role is a login without superuser, database/role creation, replication, inheritance, or RLS-bypass attributes; has no role memberships; and owns no objects in the public application schema.
 - CI run [44067734197](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44067734197) passed backend, frontend, and Docker. CodeQL run [44067734272](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44067734272) passed Python and JavaScript/TypeScript analysis.
+
+
+## Invoice maker-checker and status-enum hardening — 2026-11-17
+
+- PR #54 merged into `main`: [Test: enforce invoice maker-checker decision boundaries](https://github.com/Mohamed-Fasidh/LedgerGate/pull/54).
+- Merge commit: `4631cc7314d7002b80ded416f8101755dbcb3733`.
+- Code review and regression tests exposed a real runtime defect: invoice handlers referenced uppercase `InvoiceStatus` members even though the enum defines lowercase members. Corrected all `InvoiceStatus` references in `backend/app/main.py` to the canonical enum names.
+- Added tests covering maker-checker denial for both approval and rejection, no approval-record creation on denied attempts, and admin/reviewer-only authorization for decision endpoints.
+- Final CI run [44069011101](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44069011101) passed backend, frontend, and Docker jobs. CodeQL run [44069010977](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44069010977) passed Python and JavaScript/TypeScript analysis.
+- An earlier CI attempt failed because the tests first used a non-existent uppercase enum member; the subsequent run verified the corrected application code and tests successfully.
