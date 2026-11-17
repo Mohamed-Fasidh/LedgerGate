@@ -13,7 +13,7 @@ Every reconciliation is advisory. Even a clean match enters human review. No end
 
 The state machine performs deterministic checks. The allowlisted `ToolExecutor` validates tool names and strict Pydantic argument schemas before tenant-scoped data access. Tool schemas reject unexpected fields, including attempts to supply a tenant override.
 
-The optional `TaskPlanner` uses the shared Ollama/vLLM inference client to propose a bounded JSON plan. It validates every proposed tool name and argument against the executor's registry and enforces request, response, and step limits. It does not execute tools: the caller must pass each validated step to the existing executor, which retains the authenticated tenant ID. The planner is not yet a persistent multi-turn orchestration engine and must not be treated as an approval authority.
+The optional `TaskPlanner` uses the shared Ollama/vLLM inference client to propose a bounded JSON plan. It exposes only the explicit read-only tool allowlist, validates each proposed argument against strict Pydantic schemas, and enforces request, response, and step limits. `TaskOrchestrator` executes those validated read-only steps sequentially through the existing executor, which retains the authenticated tenant ID. It records an in-memory trace and supports cooperative cancellation and a deadline check between tool calls. It is not durable, does not retry, and cannot interrupt a synchronous database call already in progress. It must not be treated as an approval authority.
 
 The MCP process delegates to the same authenticated HTTP API.
 
