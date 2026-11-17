@@ -103,3 +103,17 @@ RECONCILIATION_DATABASE_URL="$RECONCILIATION_DATABASE_URL" python -m scripts.rec
 ```
 
 Deletion has a mandatory 24-hour minimum-age grace period to avoid racing uploads or invoice transactions. Objects that are too recent are reported as deferred; missing referenced objects are reported separately and are never deleted. Review the dry-run counts and confirm backups/retention requirements before enabling deletion.
+
+
+## Read-only agent task API
+
+The authenticated `POST /api/v1/agent/tasks` endpoint runs bounded evidence-gathering plans. It derives tenant scope from the access token and only exposes the allowlisted invoice lookup, purchase-order search, and policy search tools.
+
+Before enabling it, configure and verify one inference provider:
+
+- Ollama: `INFERENCE_PROVIDER=ollama`, `OLLAMA_BASE_URL`, and `OLLAMA_MODEL`.
+- vLLM: `INFERENCE_PROVIDER=vllm`, `VLLM_BASE_URL`, `VLLM_MODEL`, and `VLLM_API_KEY`.
+
+The API worker reuses one bounded inference client per process. Concurrency, queue size, queue wait, request timeout, retries, and output tokens are controlled by the `INFERENCE_*` settings documented in `docs/INFERENCE_ENGINEERING.md`. Model servers are separate services and must be deployed, network-restricted, monitored, and capacity-tested independently.
+
+Execution is capped at five read-only tool calls and 30 seconds. Cancellation/deadlines are cooperative between synchronous tool calls; they cannot interrupt a database call already in progress. The endpoint is not a durable job queue. Model output is advisory evidence only and must never replace human review or approval. Do not place secrets, payment credentials, or unrelated personal data in task descriptions.
