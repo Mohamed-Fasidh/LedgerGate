@@ -44,6 +44,10 @@ TO ledgergate_runtime;
 GRANT SELECT, INSERT, UPDATE ON TABLE public.audit_events TO ledgergate_runtime;
 
 -- Runtime needs schema-version diagnostics, never migration write access.
+-- Reassert the required append-only audit permissions after the blanket revocation.
+GRANT SELECT, INSERT, UPDATE ON TABLE public.audit_events TO ledgergate_runtime;
+REVOKE DELETE ON TABLE public.audit_events FROM ledgergate_runtime;
+
 GRANT SELECT ON TABLE public.alembic_version TO ledgergate_runtime;
 
 -- Existing application-generated IDs need sequence usage. Future sequences
