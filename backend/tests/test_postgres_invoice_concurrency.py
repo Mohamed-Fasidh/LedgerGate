@@ -6,7 +6,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 
@@ -42,6 +42,8 @@ def test_invoice_for_update_blocks_second_transaction_until_first_commits():
         def acquire_from_second_connection():
             second_started.set()
             with Session.begin() as db:
+                db.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+                db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": tenant_id})
                 locked = (
                     db.query(Invoice)
                     .filter(
@@ -56,6 +58,8 @@ def test_invoice_for_update_blocks_second_transaction_until_first_commits():
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             with Session.begin() as first:
+                first.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+                first.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": tenant_id})
                 locked = (
                     first.query(Invoice)
                     .filter(
