@@ -1,7 +1,7 @@
 import enum
 from decimal import Decimal
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, ForeignKey, Numeric, Text, Boolean, Enum, JSON, Integer, UniqueConstraint, Index
+from sqlalchemy import String, DateTime, ForeignKey, ForeignKeyConstraint, Numeric, Text, Boolean, Enum, JSON, Integer, UniqueConstraint, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -40,6 +40,7 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     __table_args__ = (
         UniqueConstraint("email", name="uq_user_email"),
+        UniqueConstraint("tenant_id", "id", name="uq_users_tenant_id_id"),
         Index("ix_users_tenant_created_id", "tenant_id", "created_at", "id"),
     )
 
@@ -52,6 +53,7 @@ class Supplier(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     __table_args__ = (
         UniqueConstraint("tenant_id", "name", name="uq_tenant_supplier_name"),
+        UniqueConstraint("tenant_id", "id", name="uq_suppliers_tenant_id_id"),
         Index("ix_suppliers_tenant_id_id", "tenant_id", "id"),
     )
 
@@ -67,6 +69,12 @@ class PurchaseOrder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     __table_args__ = (
         UniqueConstraint("tenant_id", "po_number", name="uq_tenant_po"),
+        UniqueConstraint("tenant_id", "id", name="uq_purchase_orders_tenant_id_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "supplier_id"],
+            ["suppliers.tenant_id", "suppliers.id"],
+            name="fk_purchase_orders_tenant_supplier",
+        ),
         Index("ix_purchase_orders_tenant_id_id", "tenant_id", "id"),
     )
 
@@ -100,6 +108,27 @@ class Invoice(Base):
         Index("ix_invoices_tenant_created_id", "tenant_id", "created_at", "id"),
         Index("ix_invoices_tenant_status_created_id", "tenant_id", "status", "created_at", "id"),
         UniqueConstraint("tenant_id", "idempotency_key", name="uq_invoice_tenant_idempotency"),
+        UniqueConstraint("tenant_id", "id", name="uq_invoices_tenant_id_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "supplier_id"],
+            ["suppliers.tenant_id", "suppliers.id"],
+            name="fk_invoices_tenant_supplier",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "purchase_order_id"],
+            ["purchase_orders.tenant_id", "purchase_orders.id"],
+            name="fk_invoices_tenant_purchase_order",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "created_by_user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_invoices_tenant_creator",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "approval_policy_id"],
+            ["approval_policies.tenant_id", "approval_policies.id"],
+            name="fk_invoices_tenant_approval_policy",
+        ),
     )
     __mapper_args__ = {"version_id_col": version}
 
@@ -172,6 +201,12 @@ class ApprovalPolicy(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     __table_args__ = (
         UniqueConstraint("tenant_id", "name", name="uq_tenant_approval_policy_name"),
+        UniqueConstraint("tenant_id", "id", name="uq_approval_policies_tenant_id_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "created_by_user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_approval_policies_tenant_creator",
+        ),
         Index("ix_approval_policies_tenant_min_id", "tenant_id", "min_amount", "id"),
     )
 
@@ -186,7 +221,24 @@ class InvoiceApproval(Base):
     decision: Mapped[str] = mapped_column(String(20), nullable=False)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    __table_args__ = (UniqueConstraint("tenant_id", "invoice_id", "approver_user_id", name="uq_invoice_approval_actor"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "invoice_id", "approver_user_id", name="uq_invoice_approval_actor"),
+        ForeignKeyConstraint(
+            ["tenant_id", "invoice_id"],
+            ["invoices.tenant_id", "invoices.id"],
+            name="fk_invoice_approvals_tenant_invoice",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "approver_user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_invoice_approvals_tenant_approver",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "policy_id"],
+            ["approval_policies.tenant_id", "approval_policies.id"],
+            name="fk_invoice_approvals_tenant_policy",
+        ),
+    )
 
 
 class AuthSession(Base):
@@ -205,6 +257,11 @@ class AuthSession(Base):
         Index("ix_auth_sessions_tenant_expires", "tenant_id", "expires_at"),
         Index("ix_auth_sessions_tenant_user_active_created", "tenant_id", "user_id", "revoked_at", "created_at", "id"),
         Index("ix_auth_sessions_tenant_family_active", "tenant_id", "family_id", "revoked_at"),
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_auth_sessions_tenant_user",
+        ),
     )
 
 
@@ -236,6 +293,11 @@ class PasswordResetToken(Base):
     __table_args__ = (
         Index("ix_password_reset_tokens_user_created", "user_id", "created_at"),
         Index("ix_password_reset_tokens_tenant_user", "tenant_id", "user_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_password_reset_tokens_tenant_user",
+        ),
     )
 
 
@@ -252,6 +314,11 @@ class EmailVerificationToken(Base):
     __table_args__ = (
         Index("ix_email_verification_tokens_user_created", "user_id", "created_at"),
         Index("ix_email_verification_tokens_tenant_user", "tenant_id", "user_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_email_verification_tokens_tenant_user",
+        ),
     )
 
 
