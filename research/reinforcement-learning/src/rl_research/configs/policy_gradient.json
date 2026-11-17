@@ -1,0 +1,9 @@
+{
+  "seed": 1337,
+  "episodes": 160,
+  "hidden_dim": 32,
+  "learning_rate": 0.008,
+  "gamma": 0.99,
+  "eval_interval": 10,
+  "eval_episodes": 40
+}
