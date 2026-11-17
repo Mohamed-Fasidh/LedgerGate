@@ -134,6 +134,6 @@ class AgentTaskIn(BaseModel):
     @classmethod
     def normalize_agent_task(cls, value: str) -> str:
         normalized = value.strip()
-        if not normalized:
-            raise ValueError("Task description is required")
+        if len(normalized) < 5:
+            raise ValueError("Task description must contain at least five non-whitespace characters")
         return normalized
