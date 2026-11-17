@@ -550,3 +550,11 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - Added a PostgreSQL-backed integration test proving the same idempotency key can be used independently by two tenants and each tenant receives only its own stored response.
 - The test also verifies that reusing a tenant's key for a different operation returns HTTP 409 and that the database unique constraint rejects a duplicate tenant/key pair.
 - PR-head CI [44076996980](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44076996980) passed backend, frontend, and Docker. CodeQL [44076997021](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44076997021) passed Python and JavaScript/TypeScript analysis.
+
+## Runtime RLS isolation for idempotency responses — 2026-11-17
+
+- PR #66 merged: [Test: verify runtime RLS isolates idempotency responses](https://github.com/Mohamed-Fasidh/LedgerGate/pull/66).
+- Merge commit: `378b5e8f6b4f22b7bf0ffc0ab4eac877abeb6e34`.
+- Added a PostgreSQL integration test using the restricted `ledgergate_runtime` role and transaction-local `app.tenant_id` context. It proves tenant A cannot see or replay tenant B's idempotency response, and that switching the transaction-local tenant context exposes only the newly selected tenant's record.
+- PR-head CI [44077419605](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44077419605) passed backend, frontend, and Docker. CodeQL [44077419612](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44077419612) passed Python and JavaScript/TypeScript analysis.
+- Main-branch CI [44077281589](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44077281589) and CodeQL [44077281363](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44077281363) passed for the preceding documentation update.
