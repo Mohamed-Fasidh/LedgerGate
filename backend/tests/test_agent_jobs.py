@@ -153,3 +153,168 @@ def test_claim_one_calls_only_the_narrow_database_claim_function():
     assert params["worker_id"] == "agent-worker-test"
     assert params["lease_token"] == claim["lease_token"]
     assert db.committed is True
+
+def test_process_one_executes_with_claimed_tenant_and_persists_fenced_result(monkeypatch):
+    from app.services import agent_jobs
+
+    claim_row = {"task_id": 91, "task_tenant_id": "tenant-queue-a"}
+    job = SimpleNamespace(
+        id=91,
+        tenant_id="tenant-queue-a",
+        requested_by_user_id=7,
+        task="Review invoice 91",
+        status="running",
+    )
+    captured = {"tenant_context": [], "resets": [], "factory": []}
+
+    class WorkerDB:
+        def __init__(self, *, claim=False, row=None, rowcount=1):
+            self.claim = claim
+            self.row = row
+            self.rowcount = rowcount
+            self.committed = False
+            self.update_statement = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        def execute(self, statement, *args, **kwargs):
+            if self.claim:
+                self.claim_statement = str(statement)
+                self.claim_params = args[0] if args else kwargs
+                return FakeMappings(claim_row)
+            self.update_statement = statement
+            return SimpleNamespace(rowcount=self.rowcount)
+
+        def query(self, model):
+            assert model.__name__ == "AgentTask"
+            return FakeQuery(self.row)
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            pass
+
+    claim_db = WorkerDB(claim=True)
+    worker_db = WorkerDB(row=job)
+
+    class Factory:
+        def __init__(self):
+            self.sessions = iter([claim_db, worker_db])
+
+        def __call__(self):
+            return next(self.sessions)
+
+    class FakeOrchestrator:
+        def run(self, task):
+            assert task == "Review invoice 91"
+            return SimpleNamespace(
+                status="completed",
+                error_code=None,
+                plan=None,
+                outputs=[{"step": 1, "tool": "policy_search", "output": []}],
+                trace=[],
+            )
+
+    def build_orchestrator(db, tenant_id):
+        captured["factory"].append((db, tenant_id))
+        return FakeOrchestrator()
+
+    monkeypatch.setattr(
+        agent_jobs, "set_database_tenant",
+        lambda _db, tenant: captured["tenant_context"].append(tenant),
+    )
+    monkeypatch.setattr(
+        agent_jobs, "_reset_tenant_context",
+        lambda _db: captured["resets"].append(True),
+    )
+
+    assert agent_jobs.process_one(
+        Factory(),
+        worker_id="agent-worker-test",
+        orchestrator_factory=build_orchestrator,
+    ) is True
+
+    assert captured["tenant_context"] == ["tenant-queue-a"]
+    assert captured["factory"] == [(worker_db, "tenant-queue-a")]
+    assert captured["resets"] == [True]
+    assert worker_db.update_statement is not None
+    assert "agent_tasks" in str(worker_db.update_statement)
+    assert worker_db.committed is True
+
+
+def test_process_one_discards_result_when_lease_was_replaced(monkeypatch):
+    from app.services import agent_jobs
+
+    claim_row = {"task_id": 92, "task_tenant_id": "tenant-queue-b"}
+    job = SimpleNamespace(
+        id=92,
+        tenant_id="tenant-queue-b",
+        requested_by_user_id=8,
+        task="Review invoice 92",
+        status="running",
+    )
+
+    class WorkerDB:
+        def __init__(self, *, claim=False):
+            self.claim = claim
+            self.committed = False
+            self.update_statement = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        def execute(self, statement, *args, **kwargs):
+            if self.claim:
+                return FakeMappings(claim_row)
+            self.update_statement = statement
+            return SimpleNamespace(rowcount=0)
+
+        def query(self, _model):
+            return FakeQuery(job)
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            pass
+
+    claim_db, worker_db = WorkerDB(claim=True), WorkerDB()
+
+    class Factory:
+        def __init__(self):
+            self.sessions = iter([claim_db, worker_db])
+
+        def __call__(self):
+            return next(self.sessions)
+
+    class FakeOrchestrator:
+        def run(self, _task):
+            return SimpleNamespace(
+                status="completed", error_code=None, plan=None, outputs=[], trace=[]
+            )
+
+    monkeypatch.setattr(agent_jobs, "set_database_tenant", lambda *_args: None)
+    monkeypatch.setattr(agent_jobs, "_reset_tenant_context", lambda *_args: None)
+
+    assert agent_jobs.process_one(
+        Factory(),
+        worker_id="agent-worker-stale",
+        orchestrator_factory=lambda *_args: FakeOrchestrator(),
+    ) is True
+    assert worker_db.update_statement is not None
+    assert worker_db.committed is True
+
