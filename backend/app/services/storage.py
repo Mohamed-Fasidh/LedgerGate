@@ -4,6 +4,7 @@ Local storage is intended for development only. Production config validation req
 S3-compatible storage and a configured ClamAV daemon.
 """
 import os
+import re
 import socket
 import struct
 import uuid
@@ -21,6 +22,46 @@ class StorageUnavailable(RuntimeError):
 
 
 MAX_CLAMAV_RESPONSE_BYTES = 4096
+TENANT_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
+INVOICE_OBJECT_PATTERN = re.compile(
+    r"tenants/(?P<tenant>[A-Za-z0-9_-]{1,64})/invoices/(?P<name>[0-9a-f]{32})\.(?P<suffix>pdf|txt)\Z"
+)
+
+
+def _validate_tenant_id(tenant_id: str) -> None:
+    if not isinstance(tenant_id, str) or TENANT_ID_PATTERN.fullmatch(tenant_id) is None:
+        raise ValueError("Tenant ID must be a safe, bounded storage path segment")
+
+
+def _parse_s3_invoice_location(tenant_id: str, location: str) -> tuple[str, str, str]:
+    _validate_tenant_id(tenant_id)
+    if not isinstance(location, str) or not location:
+        raise FileNotFoundError
+    try:
+        parsed = urlparse(location)
+    except ValueError as exc:
+        raise FileNotFoundError from exc
+    if (
+        parsed.scheme != "s3"
+        or parsed.netloc != settings.s3_bucket
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or "?" in location
+        or "#" in location
+        or parsed.params
+        or parsed.path.startswith("//")
+        or "\\" in location
+        or "%" in parsed.path
+    ):
+        raise FileNotFoundError
+    key = parsed.path.lstrip("/")
+    match = INVOICE_OBJECT_PATTERN.fullmatch(key)
+    if match is None or match.group("tenant") != tenant_id:
+        raise FileNotFoundError
+    return parsed.netloc, key, f".{match.group('suffix')}"
+
 
 def scan_with_clamav(content: bytes) -> None:
     if not settings.clamav_host:
@@ -67,6 +108,11 @@ def _s3_client():
     return boto3.client("s3", **kwargs)
 
 def store_invoice(tenant_id: str, suffix: str, content: bytes, *, already_scanned: bool = False) -> str:
+    _validate_tenant_id(tenant_id)
+    if suffix not in {".pdf", ".txt"}:
+        raise ValueError("Invoice storage accepts only PDF and TXT suffixes")
+    if not isinstance(content, bytes):
+        raise ValueError("Invoice content must be bytes")
     # Upload handlers scan before document extraction. Keep the default fail-closed
     # behavior for every other caller, but avoid sending the same bytes through
     # ClamAV twice on the normal upload path.
@@ -101,14 +147,11 @@ def store_invoice(tenant_id: str, suffix: str, content: bytes, *, already_scanne
 
 def delete_invoice(tenant_id: str, location: str) -> None:
     """Remove an uncommitted invoice object after a failed database insert."""
+    _validate_tenant_id(tenant_id)
     if location.startswith("s3://"):
-        parsed = urlparse(location)
-        prefix = f"tenants/{tenant_id}/invoices/"
-        key = parsed.path.lstrip("/")
-        if parsed.netloc != settings.s3_bucket or not key.startswith(prefix):
-            raise FileNotFoundError
+        bucket, key, _suffix = _parse_s3_invoice_location(tenant_id, location)
         try:
-            _s3_client().delete_object(Bucket=parsed.netloc, Key=key)
+            _s3_client().delete_object(Bucket=bucket, Key=key)
         except Exception as exc:
             raise StorageUnavailable("Private object storage cleanup failed") from exc
         return
@@ -119,13 +162,12 @@ def delete_invoice(tenant_id: str, location: str) -> None:
     file_path.unlink(missing_ok=True)
 
 def read_invoice(tenant_id: str, location: str) -> tuple[bytes, str]:
+    _validate_tenant_id(tenant_id)
     if location.startswith("s3://"):
-        parsed = urlparse(location)
-        if parsed.netloc != settings.s3_bucket or not parsed.path.lstrip("/").startswith(f"tenants/{tenant_id}/invoices/"):
-            raise FileNotFoundError
+        bucket, key, suffix = _parse_s3_invoice_location(tenant_id, location)
         body = None
         try:
-            response = _s3_client().get_object(Bucket=parsed.netloc, Key=parsed.path.lstrip("/"))
+            response = _s3_client().get_object(Bucket=bucket, Key=key)
             body = response["Body"]
             # Bound memory use even if an object was written outside the upload
             # endpoint or its metadata does not match the configured upload cap.
@@ -133,7 +175,7 @@ def read_invoice(tenant_id: str, location: str) -> tuple[bytes, str]:
             content = body.read(max_bytes + 1)
             if len(content) > max_bytes:
                 raise StorageUnavailable("Stored invoice exceeds the configured download size limit")
-            return content, Path(parsed.path).suffix.lower()
+            return content, suffix
         except StorageUnavailable:
             raise
         except Exception as exc:

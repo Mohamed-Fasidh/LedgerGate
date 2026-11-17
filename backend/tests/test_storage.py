@@ -107,7 +107,7 @@ def test_s3_invoice_read_is_bounded_and_closes_response_body(monkeypatch):
         def get_object(self, **kwargs):
             assert kwargs == {
                 "Bucket": "private-invoices",
-                "Key": "tenants/tenant-a/invoices/large.pdf",
+                "Key": "tenants/tenant-a/invoices/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf",
             }
             return {"Body": body}
     monkeypatch.setattr(storage, "_s3_client", lambda: FakeS3())
@@ -115,7 +115,7 @@ def test_s3_invoice_read_is_bounded_and_closes_response_body(monkeypatch):
     with pytest.raises(storage.StorageUnavailable, match="size limit"):
         storage.read_invoice(
             "tenant-a",
-            "s3://private-invoices/tenants/tenant-a/invoices/large.pdf",
+            "s3://private-invoices/tenants/tenant-a/invoices/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf",
         )
     assert body.closed
 
@@ -133,7 +133,7 @@ def test_s3_invoice_read_accepts_bounded_content(monkeypatch):
 
     content, suffix = storage.read_invoice(
         "tenant-a",
-        "s3://private-invoices/tenants/tenant-a/invoices/small.pdf",
+        "s3://private-invoices/tenants/tenant-a/invoices/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.pdf",
     )
     assert content == b"%PDF-small"
     assert suffix == ".pdf"
@@ -159,3 +159,83 @@ def test_storage_can_reuse_the_upload_handler_scan_result(tmp_path, monkeypatch)
     body, suffix = storage.read_invoice("tenant-a", location)
     assert body == b"already scanned invoice"
     assert suffix == ".txt"
+
+
+@pytest.mark.parametrize(
+    "tenant_id,suffix",
+    [
+        ("../tenant-b", ".pdf"),
+        ("tenant/a", ".pdf"),
+        ("tenant-a", ".pdf/../../other"),
+        ("tenant-a", ".exe"),
+    ],
+)
+def test_invoice_storage_rejects_unsafe_tenant_ids_and_suffixes_before_scanning(
+    tenant_id, suffix, monkeypatch
+):
+    monkeypatch.setattr(
+        storage,
+        "scan_with_clamav",
+        lambda _content: (_ for _ in ()).throw(AssertionError("invalid input reached scanner")),
+    )
+    with pytest.raises(ValueError):
+        storage.store_invoice(tenant_id, suffix, b"invoice")
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "s3://private-invoices/tenants/tenant-a/invoices/not-a-uuid.pdf",
+        "s3://private-invoices/tenants/tenant-b/invoices/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf",
+        "s3://private-invoices/tenants/tenant-a/invoices/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf?versionId=latest",
+        "s3://private-invoices/tenants/tenant-a/invoices/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf?",
+        "s3://private-invoices/tenants/tenant-a/invoices/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf#fragment",
+        "s3://private-invoices/tenants/tenant-a/invoices/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.pdf#",
+        "s3://private-invoices/tenants/tenant-a/invoices/%2e%2e/other.pdf",
+        "s3://private-invoices/tenants/tenant-a/invoices/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.exe",
+    ],
+)
+def test_s3_invoice_read_rejects_noncanonical_or_cross_tenant_locations(
+    location, monkeypatch
+):
+    monkeypatch.setattr(storage.settings, "storage_backend", "s3")
+    monkeypatch.setattr(storage.settings, "s3_bucket", "private-invoices")
+
+    def unexpected_client():
+        raise AssertionError("invalid object location reached S3")
+
+    monkeypatch.setattr(storage, "_s3_client", unexpected_client)
+    with pytest.raises(FileNotFoundError):
+        storage.read_invoice("tenant-a", location)
+
+
+def test_s3_invoice_delete_rejects_noncanonical_location_before_s3_call(monkeypatch):
+    monkeypatch.setattr(storage.settings, "s3_bucket", "private-invoices")
+    monkeypatch.setattr(
+        storage,
+        "_s3_client",
+        lambda: (_ for _ in ()).throw(AssertionError("invalid object location reached S3")),
+    )
+
+    with pytest.raises(FileNotFoundError):
+        storage.delete_invoice(
+            "tenant-a",
+            "s3://private-invoices/tenants/tenant-a/invoices/../../other.pdf",
+        )
+
+
+def test_s3_invoice_delete_accepts_only_canonical_tenant_object(monkeypatch):
+    monkeypatch.setattr(storage.settings, "s3_bucket", "private-invoices")
+
+    class FakeS3:
+        def delete_object(self, **kwargs):
+            assert kwargs == {
+                "Bucket": "private-invoices",
+                "Key": "tenants/tenant-a/invoices/cccccccccccccccccccccccccccccccc.txt",
+            }
+
+    monkeypatch.setattr(storage, "_s3_client", lambda: FakeS3())
+    storage.delete_invoice(
+        "tenant-a",
+        "s3://private-invoices/tenants/tenant-a/invoices/cccccccccccccccccccccccccccccccc.txt",
+    )
