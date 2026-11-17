@@ -331,3 +331,75 @@ def test_invoice_approval_plan_filters_policy_by_invoice_currency(invoice_curren
         if getattr(getattr(condition, "left", None), "name", None) == "currency"
     ]
     assert any(condition.right.value == invoice_currency for condition in currency_conditions)
+
+
+@pytest.mark.parametrize("endpoint_name", ["approve", "reject"])
+def test_invoice_maker_cannot_approve_or_reject_own_invoice(endpoint_name):
+    from types import SimpleNamespace
+    import app.main as main
+    from app.models import Invoice, InvoiceStatus, Role
+
+    invoice = SimpleNamespace(
+        id=91,
+        tenant_id="tenant-a",
+        created_by_user_id=7,
+        status=InvoiceStatus.REVIEW_REQUIRED,
+        reconciliation={"decision": "MATCHED"},
+        approval_steps_snapshot=None,
+        approval_stage=1,
+        amount=100,
+        currency="INR",
+        approval_policy_id=None,
+    )
+
+    class Query:
+        def filter(self, *conditions):
+            self.conditions = conditions
+            return self
+        def first(self):
+            return invoice
+
+    class DB:
+        def __init__(self):
+            self.added = []
+        def query(self, model):
+            assert model is Invoice
+            return Query()
+        def add(self, value):
+            self.added.append(value)
+
+    db = DB()
+    actor = SimpleNamespace(id=7, tenant_id="tenant-a", role=Role.reviewer)
+    endpoint = getattr(main, endpoint_name)
+
+    with pytest.raises(HTTPException) as error:
+        endpoint(invoice_id=91, payload=None, idempotency_key=None, db=db, user=actor)
+
+    assert error.value.status_code == 403
+    assert "creator cannot" in error.value.detail
+    assert db.added == []
+
+
+@pytest.mark.parametrize("path", [
+    "/api/v1/invoices/{invoice_id}/approve",
+    "/api/v1/invoices/{invoice_id}/reject",
+])
+def test_invoice_decision_endpoints_require_admin_or_reviewer(path):
+    from types import SimpleNamespace
+    from app.main import app
+    from app.models import Role
+
+    route = next(route for route in app.routes if getattr(route, "path", None) == path)
+    user_dependency = next(
+        dependency for dependency in route.dependant.dependencies
+        if dependency.name == "user"
+    )
+    authorize = user_dependency.call
+
+    for role in (Role.admin, Role.reviewer):
+        assert authorize(user=SimpleNamespace(role=role)) is not None
+
+    for role in (Role.analyst,):
+        with pytest.raises(HTTPException) as error:
+            authorize(user=SimpleNamespace(role=role))
+        assert error.value.status_code == 403
