@@ -343,7 +343,7 @@ def test_invoice_maker_cannot_approve_or_reject_own_invoice(endpoint_name):
         id=91,
         tenant_id="tenant-a",
         created_by_user_id=7,
-        status=InvoiceStatus.REVIEW_REQUIRED,
+        status=InvoiceStatus.review_required,
         reconciliation={"decision": "MATCHED"},
         approval_steps_snapshot=None,
         approval_stage=1,
