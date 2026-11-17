@@ -465,3 +465,14 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - Added regression coverage for both endpoints: the first idempotency lookup misses, the invoice row lock is acquired, and the second lookup returns the cached response.
 - CI run [44069886358](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44069886358) passed backend, frontend, and Docker. CodeQL run [44069886415](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44069886415) passed Python and JavaScript/TypeScript analysis.
 - A dedicated concurrent multi-connection PostgreSQL integration test remains a separate validation item.
+
+
+## Invoice extraction and reconciliation concurrency hardening — 2026-11-17
+
+- PR #57 merged into `main`: [Security: serialize invoice extraction and reconciliation transitions](https://github.com/Mohamed-Fasidh/LedgerGate/pull/57).
+- Merge commit: `ac255bc238c61c8734422d93227f8da0977d15ad`.
+- Invoice extraction confirmation and purchase-order reconciliation now acquire a tenant-scoped invoice row lock and recheck idempotency after the lock. This closes the stale-state duplicate-request window addressed for approval/rejection in PR #56.
+- Added regression tests for both transition handlers to assert lock acquisition and cached-response replay after the second idempotency lookup.
+- PR-head CI run [44070396174](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44070396174) passed backend, frontend, and Docker. PR-head CodeQL run [44070396134](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44070396134) passed Python and JavaScript/TypeScript analysis.
+- Post-merge main CI run [44070779976](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44070779976) and CodeQL run [44070779971](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44070779971) were triggered; their final results must be checked before recording post-merge verification.
+- These mock-based regression tests verify the handler locking/idempotency sequence, not true simultaneous transactions on separate PostgreSQL connections. A dedicated multi-connection PostgreSQL concurrency test remains required.
