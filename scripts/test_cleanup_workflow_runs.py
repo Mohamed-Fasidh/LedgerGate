@@ -81,11 +81,37 @@ class WorkflowCleanupTests(unittest.TestCase):
         self.assertIn("deleted 2", result.stdout.lower())
 
     def test_requires_repository_and_token(self):
+        for missing, message in (
+            ("GITHUB_REPOSITORY", "GITHUB_REPOSITORY is required"),
+            ("GH_TOKEN", "GH_TOKEN is required"),
+        ):
+            with self.subTest(missing=missing):
+                env = self.env.copy()
+                env.pop(missing)
+                result = self.run_script(env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+
+    def test_stops_when_github_delete_fails(self):
+        failing_bin = self.root / "failing-bin"
+        failing_bin.mkdir()
+        fake = failing_bin / "gh"
+        fake.write_text(
+            """#!/usr/bin/env python3
+import sys
+if "--paginate" in sys.argv:
+    print("101")
+    raise SystemExit(0)
+raise SystemExit(1)
+""",
+            encoding="utf-8",
+        )
+        fake.chmod(0o755)
         env = self.env.copy()
-        env.pop("GH_TOKEN")
+        env["PATH"] = str(failing_bin) + os.pathsep + env.get("PATH", "")
         result = self.run_script(env)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("GH_TOKEN is required", result.stderr)
+        self.assertNotIn("cleanup complete", result.stdout.lower())
 
 
 if __name__ == "__main__":

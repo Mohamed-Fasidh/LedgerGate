@@ -18,31 +18,11 @@ jobs:
   delete-unsuccessful-runs:
     runs-on: ubuntu-latest
     steps:
+      - name: Check out cleanup script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Delete completed failed and cancelled runs
         env:
           GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         shell: bash
-        run: |
-          set -euo pipefail
-
-          mapfile -t run_ids < <(
-            gh api --paginate "repos/${GH_REPO}/actions/runs?per_page=100" \
-              --jq '.workflow_runs[]
-                | select(.status == "completed")
-                | select(.conclusion == "failure"
-                      or .conclusion == "cancelled")
-                | .id'
-          )
-
-          if [ "${#run_ids[@]}" -eq 0 ]; then
-            echo "No completed failed or cancelled workflow runs to delete."
-            exit 0
-          fi
-
-          for run_id in "${run_ids[@]}"; do
-            echo "Deleting workflow run ${run_id}"
-            gh api --method DELETE "repos/${GH_REPO}/actions/runs/${run_id}"
-          done
-
-          echo "Deleted ${#run_ids[@]} unsuccessful workflow run(s)."
+        run: bash scripts/cleanup_workflow_runs.sh
