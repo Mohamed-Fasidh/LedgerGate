@@ -63,9 +63,18 @@ class ReconcileOut(BaseModel):
 
 class ApprovalPolicyIn(BaseModel):
     name: str = Field(min_length=2, max_length=120)
+    currency: str = Field(default="INR", min_length=3, max_length=3)
     min_amount: Decimal = Field(default=Decimal('0.00'), ge=0)
     max_amount: Optional[Decimal] = Field(default=None, gt=0)
     approval_steps: list[list[str]] = Field(min_length=1, max_length=5)
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_policy_currency(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if len(normalized) != 3 or not normalized.isalpha():
+            raise ValueError("Currency must be a three-letter alphabetic code")
+        return normalized
 
 class ApprovalDecisionIn(BaseModel):
     comment: Optional[str] = Field(default=None, max_length=1000)
