@@ -63,6 +63,7 @@ def test_postgresql_schema_matches_frozen_baseline_and_all_following_revisions()
             "idempotency_request_hash", "approval_policy_id",
             "approval_steps_snapshot", "approval_stage",
         },
+        "approval_policies": {"currency"},
         "audit_events": {"previous_hash", "event_hash"},
         "auth_sessions": {
             "token_id", "token_hash", "family_id", "expires_at",
@@ -88,7 +89,7 @@ def test_postgresql_schema_matches_frozen_baseline_and_all_following_revisions()
         revision = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-        assert revision == "0027_tenant_owned_references"
+        assert revision == "0028_currency_approval"
 
         unique_constraints = {
             item["name"]
