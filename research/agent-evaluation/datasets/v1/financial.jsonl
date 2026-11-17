@@ -1,0 +1,2 @@
+{"case_id":"financial-001","description":"two lines with ten percent tax and no discount","lines":[{"quantity":"2","unit_price":"10.00"},{"quantity":"1","unit_price":"5.00"}],"tax_rate":"0.10","discount":"0.00","expected_subtotal":"25.00","expected_tax":"2.50","expected_total":"27.50"}
+{"case_id":"financial-002","description":"discount applied after tax calculation","lines":[{"quantity":"3","unit_price":"12.50"}],"tax_rate":"0.08","discount":"2.00","expected_subtotal":"37.50","expected_tax":"3.00","expected_total":"38.50"}
