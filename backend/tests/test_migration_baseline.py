@@ -47,6 +47,7 @@ def test_postgresql_schema_matches_frozen_baseline_and_all_following_revisions()
         "password_reset_tokens",
         "email_verification_tokens",
         "outbound_emails",
+        "agent_tasks",
         "alembic_version",
     }
     assert expected_tables.issubset(tables)
@@ -80,6 +81,12 @@ def test_postgresql_schema_matches_frozen_baseline_and_all_following_revisions()
             "status", "attempts", "max_attempts", "next_attempt_at",
             "locked_at", "sent_at", "last_error",
         },
+        "agent_tasks": {
+            "tenant_id", "requested_by_user_id", "task", "status", "attempts",
+            "max_attempts", "available_at", "worker_id", "lease_token",
+            "locked_at", "lease_expires_at", "started_at", "finished_at",
+            "result_json", "error_code", "idempotency_key",
+        },
     }
     for table, columns in expected_columns.items():
         actual = {column["name"] for column in inspector.get_columns(table)}
@@ -89,7 +96,7 @@ def test_postgresql_schema_matches_frozen_baseline_and_all_following_revisions()
         revision = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-        assert revision == "0028_currency_approval"
+        assert revision == "0029_durable_agent_tasks"
 
         unique_constraints = {
             item["name"]
