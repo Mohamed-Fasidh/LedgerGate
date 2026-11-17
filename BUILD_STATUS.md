@@ -542,3 +542,11 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 
 - The historical open test gaps recorded under PRs #57–#61 were closed by PRs #58–#64: PostgreSQL invoice row-lock behavior, runtime-role/RLS lock behavior, concurrent audit appends, real concurrent approval/rejection HTTP requests, persisted idempotency replay, deterministic lock-wait observation, and conflicting approve/reject serialization now have integration coverage.
 - These tests run against the disposable PostgreSQL CI database. They do not substitute for production load testing, independent penetration testing, or a staging/production rollout.
+
+## Idempotency tenant isolation — 2026-11-17
+
+- PR #65 merged: [Test: verify PostgreSQL idempotency tenant isolation](https://github.com/Mohamed-Fasidh/LedgerGate/pull/65).
+- Merge commit: `e43fdf488c19974ede83f9d478c0c7482fbceb5b`.
+- Added a PostgreSQL-backed integration test proving the same idempotency key can be used independently by two tenants and each tenant receives only its own stored response.
+- The test also verifies that reusing a tenant's key for a different operation returns HTTP 409 and that the database unique constraint rejects a duplicate tenant/key pair.
+- PR-head CI [44076996980](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44076996980) passed backend, frontend, and Docker. CodeQL [44076997021](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44076997021) passed Python and JavaScript/TypeScript analysis.
