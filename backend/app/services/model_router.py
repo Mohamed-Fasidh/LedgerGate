@@ -1,41 +1,58 @@
-"""Optional inference adapter for Ollama or OpenAI-compatible vLLM.
+"""Advisory model adapter backed by the shared Ollama/vLLM inference client.
 
-The model only explains deterministic findings. It never makes the reconciliation
-decision, modifies records, approves invoices, or initiates payment.
+The model explains deterministic findings only. It never approves invoices,
+changes financial records, or initiates payment.
 """
 import os
-import httpx
 
-class ModelUnavailable(RuntimeError): pass
+from app.services.inference import InferenceClient, InferenceConfig, InferenceError
 
-def explain_findings(invoice:dict,findings:list[dict],evidence:list[dict])->dict:
-    prompt=(
+
+class ModelUnavailable(RuntimeError):
+    pass
+
+
+def _client() -> InferenceClient:
+    provider = (os.getenv("INFERENCE_PROVIDER") or os.getenv("LLM_PROVIDER", "none")).lower()
+    if provider not in {"ollama", "vllm"}:
+        raise ModelUnavailable("Set LLM_PROVIDER to 'ollama' or 'vllm' to enable advisory explanations")
+    try:
+        return InferenceClient(InferenceConfig.from_env())
+    except Exception as exc:
+        raise ModelUnavailable(f"Invalid inference configuration: {type(exc).__name__}") from exc
+
+
+def explain_findings(invoice: dict, findings: list[dict], evidence: list[dict]) -> dict:
+    prompt = (
         "You are an assistant for a finance reviewer. Explain the supplied deterministic "
         "reconciliation findings in plain language. Use only supplied evidence. Do not "
         "invent facts, make an approval decision, or authorize payment. Say when evidence "
-        "is insufficient.\\n"
-        f"Invoice: {invoice}\\nFindings: {findings}\\nEvidence: {evidence}"
+        "is insufficient.\n"
+        f"Invoice: {invoice}\nFindings: {findings}\nEvidence: {evidence}"
     )
-    provider=os.getenv("LLM_PROVIDER","none").lower()
     try:
-        if provider=="ollama":
-            base=os.getenv("OLLAMA_BASE_URL","").strip()
-            model=os.getenv("OLLAMA_MODEL","qwen2.5:3b").strip()
-            if not base: raise ModelUnavailable("OLLAMA_BASE_URL is not configured")
-            r=httpx.post(base.rstrip("/")+"/api/generate",json={"model":model,"prompt":prompt,"stream":False},timeout=45)
-            r.raise_for_status()
-            return {"provider":"ollama","model":model,"explanation":r.json().get("response","").strip()}
-        if provider=="vllm":
-            base=os.getenv("VLLM_BASE_URL","http://localhost:8001/v1").rstrip("/")
-            model=os.getenv("VLLM_MODEL","Qwen/Qwen2.5-3B-Instruct")
-            key=os.getenv("VLLM_API_KEY","EMPTY")
-            r=httpx.post(base+"/chat/completions",headers={"Authorization":f"Bearer {key}"},json={
-                "model":model,"messages":[{"role":"user","content":prompt}],"temperature":0.1,"max_tokens":500
-            },timeout=45)
-            r.raise_for_status()
-            return {"provider":"vllm","model":model,"explanation":r.json()["choices"][0]["message"]["content"]}
-        raise ModelUnavailable("Set LLM_PROVIDER to 'ollama' or 'vllm' to enable advisory explanations")
-    except ModelUnavailable:
-        raise
-    except Exception as exc:
+        result = _client().generate([{"role": "user", "content": prompt}], max_tokens=500)
+        return {
+            "provider": result.provider, "model": result.model, "explanation": result.text,
+            "usage": {
+                "prompt_tokens": result.prompt_tokens,
+                "completion_tokens": result.completion_tokens,
+                "total_tokens": result.total_tokens,
+            },
+            "latency_ms": result.end_to_end_latency_ms,
+        }
+    except InferenceError as exc:
+        raise ModelUnavailable(f"Configured model provider failed: {type(exc).__name__}") from exc
+
+
+def stream_explanation(invoice: dict, findings: list[dict], evidence: list[dict]):
+    """Yield advisory text deltas; closing the iterator cancels the provider request."""
+    prompt = (
+        "Explain the deterministic financial findings using only the supplied evidence. "
+        "Never approve, reject, modify records, or authorize payment. State uncertainty.\n"
+        f"Invoice: {invoice}\nFindings: {findings}\nEvidence: {evidence}"
+    )
+    try:
+        yield from _client().stream([{"role": "user", "content": prompt}], max_tokens=500)
+    except InferenceError as exc:
         raise ModelUnavailable(f"Configured model provider failed: {type(exc).__name__}") from exc

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ledgergate-transformer-from-scratch"
+version = "1.0.0"
+description = "An educational GPT-style decoder-only Transformer implemented directly in PyTorch."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.2"]
+
+[project.optional-dependencies]
+test = ["pytest>=7.4"]
+plot = ["matplotlib>=3.7"]
+
+[project.scripts]
+transformer-train = "transformer_from_scratch.train:main"
+transformer-generate = "transformer_from_scratch.generate:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

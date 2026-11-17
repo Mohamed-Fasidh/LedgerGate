@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_version": "1.0.0",
+  "model_version": "not-specified",
+  "retrieval": {"k_default": 3, "minimum_case_recall_at_k": 0.5},
+  "financial": {"currency_scale": 2, "rounding": "ROUND_HALF_UP", "reconciliation_tolerance": "0.01"},
+  "security": {"deny_unknown_roles": true, "deny_unknown_actions": true, "deny_tenant_mismatch": true},
+  "ci_gates": {
+    "financial_reference_oracle_accuracy": 1.0,
+    "authorization_policy_fixture_accuracy": 1.0,
+    "failure_recovery_fixture_accuracy": 1.0,
+    "multi_step_fixture_accuracy": 1.0,
+    "agent_state_fixture_accuracy": 1.0,
+    "live_reconciliation_accuracy": 1.0,
+    "live_tool_and_retrieval_contracts": "all_pass"
+  },
+  "judge": {"enabled": false, "supplementary_only": true}
+}

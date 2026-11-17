@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LedgerGate Agent Trace",
+  "type": "object",
+  "required": ["trace_id"],
+  "properties": {
+    "trace_id": {"type": "string", "minLength": 1},
+    "model_version": {"type": "string"},
+    "task_expected": {},
+    "task_completed": {},
+    "latency_ms": {"type": "number", "minimum": 0},
+    "duration_ms": {"type": "number", "minimum": 0},
+    "started_at_ms": {"type": "number", "minimum": 0},
+    "completed_at_ms": {"type": "number", "minimum": 0},
+    "input_tokens": {"type": "integer", "minimum": 0},
+    "output_tokens": {"type": "integer", "minimum": 0},
+    "tool_calls": {"type": "array", "items": {"type": "object"}},
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["evidence_available", "evidence_cited"],
+        "properties": {
+          "evidence_available": {"type": "array", "items": {"type": "string"}},
+          "evidence_cited": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "recovery_expected": {"type": "array"},
+    "recovery_observed": {"type": "array"},
+    "expected_steps": {"type": "array"},
+    "observed_steps": {"type": "array"}
+  },
+  "additionalProperties": true
+}

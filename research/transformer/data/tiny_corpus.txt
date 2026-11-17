@@ -1,0 +1,27 @@
+A small workshop stood beside a quiet river. Each morning, Mira opened its blue door and wrote a question in a notebook: what can we learn by building something ourselves?
+
+First she made a paper compass. It pointed nowhere, but it taught her that a useful instrument needs a clear purpose. Next she built a little clock. Its hands moved too quickly, so she measured the gears and tried again. Patient experiments turned guesses into observations.
+
+A curious machine does not understand a story merely because it repeats its words. It learns patterns from examples, one prediction at a time. A good learner reads the past, pays attention to the present, and never looks at the future when making its next prediction.
+
+Mira invited her friend Arun to the workshop. They arranged wooden blocks in a line. Every block carried a symbol, and every position carried a place. The symbols gave the blocks their meaning; the places told the machine how the symbols were ordered. Without both, a sentence became a bag of disconnected pieces.
+
+They built four small windows into the machine. Each window could notice a different relationship: a nearby sound, a repeated name, a useful verb, or a clue from the beginning of the sentence. The windows worked together, then passed their results through a small thinking network. The machine added each new idea to what it already knew.
+
+The friends tested a simple rule. When predicting the next block, the machine could inspect the blocks to its left, but it could not peek to the right. They covered the future with a paper screen. This made every training example honest: the answer was not visible before the prediction was made.
+
+Some experiments failed. A model with a very large step size forgot what it had learned. A model with a tiny step size learned too slowly. Mira recorded the training error and the validation error after every round. Training error described examples used for practice. Validation error described examples held back for a fair test.
+
+They saved the best machine in a checkpoint. The file contained the model settings and every learned number. Later, they loaded the checkpoint into a fresh model and checked that its predictions matched. Saving a model made an experiment repeatable; writing down its random seed made the comparison fairer.
+
+At sunset, Arun asked whether the machine had become wise. Mira smiled. It had learned a few patterns from a small collection of sentences, but it did not know the world. Its short answers were evidence of a working training loop, not proof of human understanding. They would need more data, careful evaluation, and many more experiments before making stronger claims.
+
+The next morning they planned another test. They would change one word in the prompt and observe how the continuation changed. Then they would train a second model with a different number of attention heads. They would compare both models using the same data, the same seed, and the same validation set. A useful experiment changes one thing at a time.
+
+A decoder reads a sequence from left to right. At each position it combines a token vector with a position vector. Attention compares a query with keys, turns the scores into probabilities, and uses those probabilities to combine values. The square root in the denominator keeps scores at a scale that is easier to optimize.
+
+Several attention heads use separate projections of the same hidden sequence. Their outputs are joined and projected back to the model width. A feed-forward network then transforms each position independently. Residual connections preserve a path for earlier information, while layer normalization stabilizes the scale of hidden values.
+
+The language modeling head produces one score for every token in the vocabulary. Cross entropy compares those scores with the correct next token. The optimizer changes the weights to reduce the average negative log probability of the observed continuation. Generation repeats the process: predict a distribution, choose one token, append it, and predict again.
+
+Small models are useful teaching instruments. They run on an ordinary CPU, fit in a modest checkpoint, and expose the full calculation. They are not competitive language systems. Their purpose is to make every tensor visible, every equation testable, and every training result reproducible.

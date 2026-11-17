@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "warning": "Profiles are experiment definitions, not measured results. Validate vLLM version, GPU support, model checkpoint format and available memory before launching.",
+  "profiles": [
+    {"name": "baseline_fp16", "dtype": "half", "quantization": null, "kv_cache_dtype": "auto", "gpu_memory_utilization": 0.85, "max_num_seqs": 8, "max_num_batched_tokens": 4096, "max_model_len": 4096},
+    {"name": "optimized_bf16", "dtype": "bfloat16", "quantization": null, "kv_cache_dtype": "auto", "gpu_memory_utilization": 0.90, "max_num_seqs": 16, "max_num_batched_tokens": 8192, "max_model_len": 4096},
+    {"name": "kv_cache_fp8", "dtype": "bfloat16", "quantization": null, "kv_cache_dtype": "fp8", "gpu_memory_utilization": 0.90, "max_num_seqs": 16, "max_num_batched_tokens": 8192, "max_model_len": 4096},
+    {"name": "awq_4bit", "dtype": "half", "quantization": "awq", "kv_cache_dtype": "auto", "gpu_memory_utilization": 0.90, "max_num_seqs": 16, "max_num_batched_tokens": 8192, "max_model_len": 4096},
+    {"name": "bitsandbytes_int8", "dtype": "half", "quantization": "bitsandbytes", "load_format": "bitsandbytes", "kv_cache_dtype": "auto", "gpu_memory_utilization": 0.90, "max_num_seqs": 12, "max_num_batched_tokens": 6144, "max_model_len": 4096}
+  ]
+}

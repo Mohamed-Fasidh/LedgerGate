@@ -1,0 +1,6 @@
+[
+  {"id":"plants","prompt":"Why do plants need sunlight?","target_content_ids":[0,1]},
+  {"id":"multiply","prompt":"What is 6 multiplied by 7?","target_content_ids":[2,3]},
+  {"id":"freezing","prompt":"At what temperature does water freeze?","target_content_ids":[4]},
+  {"id":"boiling","prompt":"At what temperature does water boil?","target_content_ids":[5]}
+]
