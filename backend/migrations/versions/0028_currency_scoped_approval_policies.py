@@ -22,8 +22,7 @@ def upgrade() -> None:
         ["tenant_id", "currency", "min_amount", "id"],
         unique=False,
     )
-    op.alter_column("approval_policies", "currency", server_default=None)
-
+ 
 
 def downgrade() -> None:
     op.drop_index("ix_approval_policies_tenant_currency_min_id", table_name="approval_policies")
