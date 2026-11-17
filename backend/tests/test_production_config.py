@@ -41,6 +41,7 @@ def test_production_accepts_explicit_https_origins_and_private_services():
         "https://localhost:3000",
         "https://127.0.0.1:3000",
         "https://app.example.com/dashboard",
+        "https://app.example.com/",
         "https://user:password@app.example.com",
         "*",
     ],
@@ -110,6 +111,22 @@ def test_production_requires_starttls_smtp_port():
 def test_production_requires_https_public_app_origin():
     with pytest.raises(RuntimeError, match="PUBLIC_APP_URL"):
         validate_production_settings(production_settings(public_app_url="http://app.example.com"))
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "https://app.example.com/ledgergate",
+        "https://localhost",
+        "https://127.0.0.1:3000",
+        "https://user:password@app.example.com",
+        "https://app.example.com?next=/dashboard",
+        "https://app.example.com/#section",
+    ],
+)
+def test_production_rejects_non_origin_or_local_public_app_urls(public_url):
+    with pytest.raises(RuntimeError, match="PUBLIC_APP_URL"):
+        validate_production_settings(production_settings(public_app_url=public_url))
 
 
 
