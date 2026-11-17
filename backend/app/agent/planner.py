@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.services.inference import InferenceClient, InferenceError
+from app.agent.tool_executor import READ_ONLY_TOOL_NAMES
 
 
 class PlanningError(RuntimeError):
@@ -77,6 +78,7 @@ class TaskPlanner:
         tool_schemas = {
             name: schema.model_json_schema()
             for name, (schema, _handler) in sorted(registry.items())
+            if name in READ_ONLY_TOOL_NAMES
         }
         if not tool_schemas:
             raise PlanningError("No tools are available for planning")
