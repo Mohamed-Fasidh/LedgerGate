@@ -184,7 +184,7 @@ def test_production_accepts_plain_email_from_address():
         "https://app.example.com:invalid",
         "https://app.example.com:70000",
         " https://app.example.com",
-        "https://app.example.com\\n",
+        "https://app.example.com\n",
         "https://",
     ],
 )
