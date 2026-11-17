@@ -2,12 +2,14 @@
 
 from contextlib import nullcontext
 import random
+from typing import Any
 
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from .checkpoint import save_checkpoint
+from .config import GPTConfig
 from .model import GPTLanguageModel
 
 
