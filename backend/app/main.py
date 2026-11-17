@@ -20,7 +20,7 @@ from app.schemas import RegisterIn, TokenOut, RefreshIn, ChangePasswordIn, Passw
 from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code, find_user_for_authentication, find_user_for_auth_token, authentication_email_exists
 from app.audit import record_event, verify_tenant_chain, event_payload, lock_tenant_audit_chain
 from app.services.audit_export import store_immutable_audit_export, AuditExportUnavailable
-from app.agent.runtime import AgentContext, ReconciliationAgent
+from app.agent.runtime import ReconciliationAgent, build_reconciliation_context
 from app.services.document_extraction import extract_file
 from app.services.retrieval import retrieve_policy, retrieve_business_records
 from app.services.evaluation import run_evaluation
@@ -1552,8 +1552,7 @@ def reconcile(invoice_id:int,idempotency_key:str|None=Header(default=None,alias=
     if inv.purchase_order_id:
         po=db.query(PurchaseOrder).filter(PurchaseOrder.id==inv.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first()
     duplicate=db.query(Invoice).filter(Invoice.tenant_id==user.tenant_id,Invoice.id!=inv.id,Invoice.invoice_number==inv.invoice_number,Invoice.supplier_id==inv.supplier_id).first()
-    po_data=({"po_number":po.po_number,"total_amount":float(po.total_amount),"currency":po.currency,"supplier_id":po.supplier_id} if po else None)
-    ctx=AgentContext(invoice={"invoice_number":inv.invoice_number,"amount":float(inv.amount),"currency":inv.currency,"supplier_id":inv.supplier_id},purchase_order=po_data)
+    ctx=build_reconciliation_context(inv, po)
     result=ReconciliationAgent().run(ctx)
     if duplicate: result.findings.append({"code":"POSSIBLE_DUPLICATE","severity":"high","message":f"Potential duplicate of invoice record {duplicate.id}."})
     if inv.supplier_id and po and inv.supplier_id!=po.supplier_id:
