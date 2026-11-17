@@ -63,3 +63,8 @@ See `docs/ARCHITECTURE.md`, `docs/SECURITY.md`, `docs/EMAIL_OUTBOX.md`, and `doc
 ## Inference engineering
 
 The backend includes a shared bounded client for Ollama and OpenAI-compatible vLLM, with streaming, timeouts, transient retries, queue backpressure, token/latency usage, optional Prometheus/GPU telemetry, and benchmark JSON/CSV output. Install optional benchmark tools with `pip install -r backend/requirements-inference.txt`; model-serving runtimes remain separate from the API image. See [Inference engineering and benchmarks](docs/INFERENCE_ENGINEERING.md). No GPU or live-provider performance results are claimed unless produced by an actual benchmark run.
+
+
+## Vizuara teaching workshops
+
+Four 15–20 minute teaching plans with mathematical explanations, coding demonstrations, interview questions, and exercises are available in [docs/workshops](docs/workshops/README.md). They cover Transformers from first principles, AI agent engineering and evaluation, PPO/GRPO, and LLM inference/GPU performance. Workshop materials are instructional plans; benchmark outputs must be generated on the actual hardware and model server used.
