@@ -419,3 +419,12 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - Added PostgreSQL integration assertions for the four reviewed SECURITY DEFINER authentication lookup functions: ownership by the non-login `ledgergate_auth_owner` role, its BYPASSRLS attribute, runtime EXECUTE grants, no PUBLIC EXECUTE, and no runtime membership in the owner role.
 - CI run [44066881890](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44066881890) passed backend, frontend, and Docker jobs. CodeQL run [44066881892](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44066881892) passed Python and JavaScript/TypeScript analysis.
 - These are structural privilege assertions against the disposable PostgreSQL CI database; they do not replace an independent production database penetration test.
+
+
+## Authentication lookup data-minimization regression coverage — 2026-11-17
+
+- PR #52 merged into `main`: [Test: enforce minimal authentication lookup outputs](https://github.com/Mohamed-Fasidh/LedgerGate/pull/52).
+- Merge commit: `73e919275ca0f5e4ac00d0d2d933fab03c1a6362`.
+- Added PostgreSQL integration assertions that authentication lookup functions expose only the intended identity output columns and retain a fixed `search_path` of `pg_catalog, public`.
+- CI run [44067373600](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44067373600) passed backend, frontend, and Docker jobs. CodeQL run [44067373614](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44067373614) passed Python and JavaScript/TypeScript analysis.
+- Existing end-to-end PostgreSQL coverage in `test_pre_auth_identity_rls.py` also exercises cross-tenant login/reset/verification lookup behavior, no-context RLS visibility, and post-lookup tenant-scoped reads.
