@@ -126,6 +126,29 @@ def test_concurrent_invoice_decision_http_requests_replay_same_idempotent_respon
         with ThreadPoolExecutor(max_workers=2) as executor:
             first = executor.submit(submit_approval)
             second = executor.submit(submit_approval)
+
+            deadline = time.monotonic() + 8
+            observed_lock_wait = False
+            while time.monotonic() < deadline and not (first.done() and second.done()):
+                with engine.connect() as observer:
+                    waiting = observer.execute(
+                        text(
+                            "SELECT count(*) FROM pg_stat_activity "
+                            "WHERE application_name = :application_name "
+                            "AND pid <> pg_backend_pid() "
+                            "AND wait_event_type = 'Lock' "
+                            "AND wait_event = 'transactionid'"
+                        ),
+                        {"application_name": application_name},
+                    ).scalar_one()
+                if waiting:
+                    observed_lock_wait = True
+                    break
+                time.sleep(0.025)
+
+            assert observed_lock_wait, (
+                "the competing HTTP request never waited on the invoice row lock"
+            )
             responses = [first.result(timeout=30), second.result(timeout=30)]
 
         assert [response.status_code for response in responses] == [200, 200]
