@@ -2,6 +2,7 @@
 
 import os
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
@@ -31,9 +32,18 @@ def test_concurrent_invoice_decision_http_requests_replay_same_idempotent_respon
     )
     from app.security import create_access_token
 
-    engine = create_engine(os.environ["TEST_POSTGRES_URL"], pool_size=5, max_overflow=0)
+    application_name = "ledgergate-invoice-api-" + uuid.uuid4().hex[:12]
+    engine = create_engine(
+        os.environ["TEST_POSTGRES_URL"],
+        pool_size=5,
+        max_overflow=0,
+        connect_args={"application_name": application_name},
+    )
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     tenant_id = "invoice-api-race-" + uuid.uuid4().hex
+    trigger_suffix = uuid.uuid4().hex[:12]
+    trigger_name = "invoice_api_delay_" + trigger_suffix
+    function_name = "invoice_api_delay_fn_" + trigger_suffix
     suffix = uuid.uuid4().hex
     creator = User(
         tenant_id=tenant_id,
@@ -84,6 +94,20 @@ def test_concurrent_invoice_decision_http_requests_replay_same_idempotent_respon
             db.close()
 
     try:
+        # Pause the winner after it acquires the invoice lock, so the second
+        # authenticated request can be observed waiting on PostgreSQL's lock.
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                f'CREATE FUNCTION public."{function_name}"() RETURNS trigger '
+                f'LANGUAGE plpgsql AS $$ BEGIN '
+                f"IF NEW.tenant_id = '{tenant_id}' THEN PERFORM pg_sleep(1.5); END IF; "
+                f'RETURN NEW; END $$'
+            )
+            connection.exec_driver_sql(
+                f'CREATE TRIGGER "{trigger_name}" BEFORE INSERT ON public.invoice_approvals '
+                f'FOR EACH ROW EXECUTE FUNCTION public."{function_name}"()'
+            )
+
         with Session.begin() as db:
             db.add_all([creator, approver])
             db.flush()
@@ -112,6 +136,29 @@ def test_concurrent_invoice_decision_http_requests_replay_same_idempotent_respon
         with ThreadPoolExecutor(max_workers=2) as executor:
             first = executor.submit(submit_approval)
             second = executor.submit(submit_approval)
+
+            deadline = time.monotonic() + 8
+            observed_lock_wait = False
+            while time.monotonic() < deadline and not (first.done() and second.done()):
+                with engine.connect() as observer:
+                    waiting = observer.execute(
+                        text(
+                            "SELECT count(*) FROM pg_stat_activity "
+                            "WHERE application_name = :application_name "
+                            "AND pid <> pg_backend_pid() "
+                            "AND wait_event_type = 'Lock' "
+                            "AND wait_event = 'transactionid'"
+                        ),
+                        {"application_name": application_name},
+                    ).scalar_one()
+                if waiting:
+                    observed_lock_wait = True
+                    break
+                time.sleep(0.025)
+
+            assert observed_lock_wait, (
+                "the competing HTTP request never waited on the invoice row lock"
+            )
             responses = [first.result(timeout=30), second.result(timeout=30)]
 
         assert [response.status_code for response in responses] == [200, 200]
@@ -163,6 +210,13 @@ def test_concurrent_invoice_decision_http_requests_replay_same_idempotent_respon
         else:
             main.app.dependency_overrides[main.get_db] = original_override
         try:
+            with engine.begin() as connection:
+                connection.exec_driver_sql(
+                    f'DROP TRIGGER IF EXISTS "{trigger_name}" ON public.invoice_approvals'
+                )
+                connection.exec_driver_sql(
+                    f'DROP FUNCTION IF EXISTS public."{function_name}"()'
+                )
             with Session.begin() as db:
                 if invoice_id is not None:
                     db.query(IdempotencyRecord).filter(
