@@ -1,4 +1,4 @@
-"""Concurrent authenticated invoice approval requests must replay one durable result."""
+"""Concurrent authenticated invoice decisions must replay one durable result."""
 
 import os
 import threading
@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker
 )
 @pytest.mark.parametrize(("decision", "expected_status", "audit_action"), [("approve", "approved", "human_approved"), ("reject", "rejected", "human_rejected")])
 def test_concurrent_invoice_decision_http_requests_replay_same_idempotent_response(monkeypatch, decision, expected_status, audit_action):
-    """Exercise the real API, auth dependency, PostgreSQL locks, and persisted replay."""
+    """Exercise real approval/rejection APIs, auth, PostgreSQL locks, and replay."""
     from app import main
     from app.audit import verify_tenant_chain
     from app.models import (
