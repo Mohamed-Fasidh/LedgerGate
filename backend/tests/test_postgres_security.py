@@ -182,6 +182,14 @@ def test_runtime_role_uses_explicit_grants_without_future_default_access():
         "email_verification_tokens",
         "outbound_emails",
     }
+    delete_allowed_tables = {
+        "registration_attempts",
+        "login_attempts",
+        "auth_sessions",
+        "idempotency_records",
+        "email_verification_tokens",
+        "outbound_emails",
+    }
 
     try:
         with engine.begin() as connection:
@@ -205,7 +213,7 @@ def test_runtime_role_uses_explicit_grants_without_future_default_access():
                       has_table_privilege('ledgergate_runtime', :table_name, 'UPDATE'),
                       has_table_privilege('ledgergate_runtime', :table_name, 'DELETE')
                 """), {"table_name": f"public.{table}"}).one()
-                expected = (True, True, True, False) if table == "audit_events" else (True, True, True, True)
+                expected = (True, True, True, table in delete_allowed_tables)
                 assert tuple(privileges) == expected, table
 
             migration_table = connection.execute(text("""

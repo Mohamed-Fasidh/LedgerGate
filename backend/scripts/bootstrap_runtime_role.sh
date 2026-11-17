@@ -21,7 +21,7 @@ GRANT USAGE ON SCHEMA public TO ledgergate_runtime;
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ledgergate_runtime;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM ledgergate_runtime;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
+GRANT SELECT, INSERT, UPDATE ON TABLE
   public.users,
   public.suppliers,
   public.purchase_orders,
@@ -40,9 +40,19 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.outbound_emails
 TO ledgergate_runtime;
 
+-- Runtime deletion is limited to bounded retention/cleanup tables. Business
+-- records, user accounts, approvals, password-reset tokens, and audit evidence
+-- remain non-deletable by the application role.
+GRANT DELETE ON TABLE
+  public.registration_attempts,
+  public.login_attempts,
+  public.auth_sessions,
+  public.idempotency_records,
+  public.email_verification_tokens,
+  public.outbound_emails
+TO ledgergate_runtime;
+
 -- Runtime needs schema-version diagnostics, never migration write access.
--- Audit evidence is append-only: remove runtime deletion permission.
-REVOKE DELETE ON TABLE public.audit_events FROM ledgergate_runtime;
 
 GRANT SELECT ON TABLE public.alembic_version TO ledgergate_runtime;
 
