@@ -86,6 +86,7 @@ def test_every_tenant_table_has_forced_rls_and_tenant_policy():
         "users",
         "password_reset_tokens",
         "email_verification_tokens",
+        "agent_tasks",
     )
     try:
         with engine.connect() as connection:
@@ -181,6 +182,7 @@ def test_runtime_role_uses_explicit_grants_without_future_default_access():
         "password_reset_tokens",
         "email_verification_tokens",
         "outbound_emails",
+        "agent_tasks",
     }
     delete_allowed_tables = {
         "registration_attempts",
@@ -357,3 +359,39 @@ def test_runtime_database_role_cannot_escalate_privileges():
             assert owned_objects == []
     finally:
         engine.dispose()
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_agent_queue_function_has_narrow_bypassrls_owner_and_runtime_grants():
+    """Only the fixed claim function can cross tenant RLS for queue claiming."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    try:
+        with engine.connect() as connection:
+            function = connection.execute(text("""
+                SELECT p.prosecdef, owner.rolname, owner.rolcanlogin,
+                       owner.rolsuper, owner.rolbypassrls,
+                       has_function_privilege('ledgergate_runtime', p.oid, 'EXECUTE'),
+                       EXISTS (
+                         SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+                         WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+                       ),
+                       pg_has_role('ledgergate_runtime', 'ledgergate_agent_queue_owner', 'MEMBER')
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid = p.pronamespace
+                JOIN pg_roles owner ON owner.oid = p.proowner
+                WHERE n.nspname = 'public'
+                  AND p.proname = 'claim_agent_task'
+                  AND pg_get_function_identity_arguments(p.oid) = 'p_worker_id text, p_lease_token text, p_lease_seconds integer'
+            """)).one()
+            assert tuple(function) == (True, "ledgergate_agent_queue_owner", False, False, True, True, False, False)
+
+            owner_acl = connection.execute(text("""
+                SELECT
+                  has_table_privilege('ledgergate_agent_queue_owner', 'public.agent_tasks', 'SELECT'),
+                  has_table_privilege('ledgergate_agent_queue_owner', 'public.agent_tasks', 'UPDATE'),
+                  has_table_privilege('ledgergate_agent_queue_owner', 'public.agent_tasks', 'INSERT'),
+                  has_table_privilege('ledgergate_agent_queue_owner', 'public.agent_tasks', 'DELETE')
+            """)).one()
+            assert tuple(owner_acl) == (True, True, False, False)
+    finally:
+        engine.dispose()
+
