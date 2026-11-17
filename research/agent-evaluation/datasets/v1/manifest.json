@@ -1,0 +1,6 @@
+{
+  "name": "LedgerGate deterministic agent evaluation fixtures",
+  "dataset_version": "1.0.0",
+  "description": "Small, transparent, synthetic fixtures for evaluator contract tests. Not production model performance data.",
+  "files": {}
+}
