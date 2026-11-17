@@ -514,4 +514,31 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - Added a PostgreSQL-backed integration test that sends two authenticated approval requests concurrently through the real FastAPI route and dependencies, using the restricted `ledgergate_runtime` role and tenant RLS.
 - The test verifies both HTTP requests return the same successful response and exactly one approval, one durable idempotency record, and one human-approval audit event are persisted; it also verifies the tenant audit chain.
 - PR-head CI run [44074094376](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074094376) passed backend (including the new PostgreSQL API test), frontend, and Docker. CodeQL run [44074094403](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074094403) passed Python and JavaScript/TypeScript analysis.
-- Post-merge CI [44074379659](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074379659) and CodeQL [44074379438](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074379438) were triggered and are pending.
+- Post-merge CI [44074379659](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074379659) was cancelled by a subsequent main-branch update; CodeQL [44074379438](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074379438) passed. Subsequent post-merge CI and CodeQL runs for PRs #62, #63, and #64 passed.
+
+## Concurrent invoice decision HTTP replay and conflict validation — 2026-11-17
+
+- PR #62 merged: [Test: cover concurrent invoice rejection API idempotency](https://github.com/Mohamed-Fasidh/LedgerGate/pull/62).
+- Merge commit: `c5afcfe0f75f33d5dff7edc0f78a21c45531877e`.
+- Extended the real PostgreSQL/FastAPI concurrency test to exercise both approval and rejection duplicate requests. It asserts the competing request waits on the invoice lock, both same-decision requests receive identical successful responses, and only one decision row, idempotency record, and matching audit event are persisted.
+- PR-head CI [44074596064](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074596064) and CodeQL [44074596006](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074596006) passed. Post-merge CI [44074896867](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074896867) and CodeQL [44074896897](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074896897) passed.
+
+## Deterministic PostgreSQL contention in concurrent invoice APIs — 2026-11-17
+
+- PR #63 merged: [Test: observe PostgreSQL row-lock waits in concurrent invoice APIs](https://github.com/Mohamed-Fasidh/LedgerGate/pull/63).
+- Merge commit: `41a90166cca62e5ff48e21f17d82048c09fc1dad`.
+- Strengthened the approval/rejection API integration test with a temporary tenant-filtered PostgreSQL trigger that pauses the winning transaction after invoice-lock acquisition. The test inspects `pg_stat_activity` and requires the competing HTTP request to be waiting on the PostgreSQL transaction lock before the winner proceeds.
+- PR-head CI [44075455061](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44075455061) and CodeQL [44075454867](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44075454867) passed. Post-merge CI [44075758582](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44075758582) and CodeQL [44075758589](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44075758589) passed.
+
+## Conflicting concurrent invoice decisions — 2026-11-17
+
+- PR #64 merged: [Test: prevent conflicting concurrent invoice decisions](https://github.com/Mohamed-Fasidh/LedgerGate/pull/64).
+- Merge commit: `8bc0d68c67a43d37c58027666e060fac7902097b`.
+- Added a PostgreSQL-backed test that sends authenticated approve and reject requests simultaneously for the same invoice, proves one request waits on the row lock, and asserts exactly one request succeeds while the other receives HTTP 409.
+- The persisted state contains one decision, one idempotency record, and one audit event, and the tenant audit chain remains valid.
+- PR-head CI [44075962159](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44075962159) and CodeQL [44075962146](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44075962146) passed. Post-merge CI [44076196441](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44076196441) and CodeQL [44076196447](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44076196447) passed.
+
+## Current invoice concurrency validation
+
+- The historical open test gaps recorded under PRs #57–#61 were closed by PRs #58–#64: PostgreSQL invoice row-lock behavior, runtime-role/RLS lock behavior, concurrent audit appends, real concurrent approval/rejection HTTP requests, persisted idempotency replay, deterministic lock-wait observation, and conflicting approve/reject serialization now have integration coverage.
+- These tests run against the disposable PostgreSQL CI database. They do not substitute for production load testing, independent penetration testing, or a staging/production rollout.
