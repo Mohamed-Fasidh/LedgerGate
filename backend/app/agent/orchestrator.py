@@ -12,7 +12,7 @@ from threading import Event
 from typing import Any
 
 from app.agent.planner import PlanningError, TaskPlan, TaskPlanner
-from app.agent.tool_executor import READ_ONLY_TOOL_NAMES, ToolError, ToolExecutor
+from app.agent.tool_executor import READ_ONLY_TOOL_NAMES, ToolExecutor
 
 
 @dataclass
