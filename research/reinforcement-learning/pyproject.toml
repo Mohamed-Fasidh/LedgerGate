@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ledgergate-rl-research"
+version = "0.1.0"
+description = "Educational, reproducible policy-gradient, PPO and GRPO experiments"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.1", "numpy>=1.24"]
+
+[project.optional-dependencies]
+research = ["matplotlib>=3.7", "numpy>=1.24"]
+test = ["pytest>=7.4", "matplotlib>=3.7", "numpy>=1.24"]
+
+[project.scripts]
+rl-research = "rl_research.run_all:main"
+rl-grpo = "rl_research.algorithms.grpo:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.setuptools.package-data]
+rl_research = ["configs/*.json", "data/*.json"]
