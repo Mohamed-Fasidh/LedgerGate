@@ -41,7 +41,6 @@ def test_production_accepts_explicit_https_origins_and_private_services():
         "https://localhost:3000",
         "https://127.0.0.1:3000",
         "https://app.example.com/dashboard",
-        "https://app.example.com/",
         "https://user:password@app.example.com",
         "*",
     ],
@@ -113,22 +112,6 @@ def test_production_requires_https_public_app_origin():
         validate_production_settings(production_settings(public_app_url="http://app.example.com"))
 
 
-@pytest.mark.parametrize(
-    "public_url",
-    [
-        "https://app.example.com/ledgergate",
-        "https://localhost",
-        "https://127.0.0.1:3000",
-        "https://user:password@app.example.com",
-        "https://app.example.com?next=/dashboard",
-        "https://app.example.com/#section",
-    ],
-)
-def test_production_rejects_non_origin_or_local_public_app_urls(public_url):
-    with pytest.raises(RuntimeError, match="PUBLIC_APP_URL"):
-        validate_production_settings(production_settings(public_app_url=public_url))
-
-
 
 def test_production_requires_dedicated_valid_email_outbox_encryption_key():
     with pytest.raises(RuntimeError, match="EMAIL_OUTBOX_ENCRYPTION_KEY"):
@@ -146,3 +129,89 @@ def test_production_requires_verified_postgresql_tls():
         validate_production_settings(
             production_settings(database_url="postgresql+psycopg://ledgergate_runtime:runtime-password@db.internal:5432/ledgergate?sslmode=verify-full")
         )
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "https://app.example.com/dashboard",
+        "https://app.example.com/path/",
+        "https://localhost:3000",
+        "https://127.0.0.1:8000",
+        "https://user:password@app.example.com",
+        "https://app.example.com?next=/login",
+        "https://app.example.com#fragment",
+        "https://app.example.com:invalid",
+        "https://app.example.com:70000",
+        "https://app.example.com?",
+        "https://app.example.com#",
+        "https://app.example.com\\\\evil",
+        "https://app.example.com/ path",
+        "https://10.0.0.1",
+        "https://192.168.1.10",
+        "https://169.254.1.1",
+        "https://127.1",
+        "https://2130706433",
+        "https://localhost.localdomain",
+        "https://bad_host.example.com",
+        "https://[::ffff:127.0.0.1]",
+    ],
+)
+def test_production_rejects_non_origin_public_app_urls(public_url):
+    with pytest.raises(RuntimeError, match="PUBLIC_APP_URL"):
+        validate_production_settings(production_settings(public_app_url=public_url))
+
+
+def test_production_allows_trailing_slash_on_public_app_origin():
+    validate_production_settings(production_settings(public_app_url="https://app.example.com/"))
+
+
+@pytest.mark.parametrize(
+    "from_address",
+    [
+        "",
+        "not-an-email",
+        "missing-domain@",
+        "@example.com",
+        "two@@example.com",
+        "no-reply@example.com\\nBcc: attacker@example.com",
+        "no-reply@example.com, attacker@example.com",
+        "LedgerGate <not-an-email>",
+        "LedgerGate <no-reply@example.com> trailing",
+        "no-reply@localhost",
+    ],
+)
+def test_production_rejects_malformed_or_injected_email_from_addresses(from_address):
+    with pytest.raises(RuntimeError, match="EMAIL_FROM_ADDRESS"):
+        validate_production_settings(production_settings(email_from_address=from_address))
+
+
+def test_production_accepts_plain_email_from_address():
+    validate_production_settings(production_settings(email_from_address="no-reply@example.com"))
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://app.example.com:invalid",
+        "https://app.example.com:70000",
+        "https://app.example.com?",
+        "https://app.example.com#",
+        "https://app.example.com\\\\evil",
+        "https://app example.com",
+        " https://app.example.com",
+        "https://app.example.com\n",
+        "https://",
+        "https://10.0.0.1",
+        "https://192.168.1.10",
+        "https://169.254.1.1",
+        "https://127.1",
+        "https://2130706433",
+        "https://localhost.localdomain",
+        "https://bad_host.example.com",
+        "https://[::ffff:127.0.0.1]",
+    ],
+)
+def test_production_rejects_malformed_cors_origins(origin):
+    with pytest.raises(RuntimeError, match="CORS origins"):
+        validate_production_settings(production_settings(cors_origins=origin))
