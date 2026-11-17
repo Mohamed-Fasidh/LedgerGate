@@ -36,5 +36,22 @@ class ContainerHardeningTests(unittest.TestCase):
         self.assertIn('socket.create_connection', api)
 
 
+    def test_frontend_security_headers_are_configured_for_all_routes(self):
+        config = (ROOT / "frontend" / "next.config.ts").read_text()
+        required_headers = {
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Permissions-Policy": "camera=(), geolocation=(), microphone=()",
+            "Cross-Origin-Opener-Policy": "same-origin",
+        }
+        for name, value in required_headers.items():
+            with self.subTest(header=name):
+                self.assertIn(f"key: '{name}'", config)
+                self.assertIn(f"value: '{value}'", config)
+        self.assertIn("source: '/:path*'", config)
+        self.assertIn("headers: securityHeaders", config)
+
+
 if __name__ == "__main__":
     unittest.main()
