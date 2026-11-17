@@ -1,4 +1,5 @@
 import uuid, hashlib, tempfile, json, secrets, hmac, socket, logging
+from threading import Lock
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -16,11 +17,15 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, PasswordResetToken, EmailVerificationToken, Role, InvoiceStatus
-from app.schemas import RegisterIn, TokenOut, RefreshIn, ChangePasswordIn, PasswordResetRequestIn, PasswordResetConfirmIn, EmailVerificationRequestIn, EmailVerificationConfirmIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn, AgentTaskIn
+from app.schemas import RegisterIn, TokenOut, RefreshIn, ChangePasswordIn, PasswordResetRequestIn, PasswordResetConfirmIn, EmailVerificationRequestIn, EmailVerificationConfirmIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn, AgentTaskIn, AgentTaskIn
 from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code, find_user_for_authentication, find_user_for_auth_token, authentication_email_exists
 from app.audit import record_event, verify_tenant_chain, event_payload, lock_tenant_audit_chain
 from app.services.audit_export import store_immutable_audit_export, AuditExportUnavailable
 from app.agent.runtime import ReconciliationAgent, build_reconciliation_context
+from app.agent.tool_executor import ToolExecutor
+from app.agent.planner import TaskPlanner
+from app.agent.orchestrator import TaskOrchestrator
+from app.services.inference import InferenceClient, InferenceConfig
 from app.agent.service import run_read_only_task
 from app.services.document_extraction import extract_file
 from app.services.retrieval import retrieve_policy, retrieve_business_records
@@ -237,6 +242,64 @@ def health(): return {"status":"ok","service":"ledgergate-api"}
 
 
 @app.get("/ready")
+
+_agent_inference_client = None
+_agent_inference_client_lock = Lock()
+
+
+def _get_agent_inference_client() -> InferenceClient:
+    """Reuse one bounded inference client per API worker process."""
+    global _agent_inference_client
+    if _agent_inference_client is None:
+        with _agent_inference_client_lock:
+            if _agent_inference_client is None:
+                try:
+                    config = InferenceConfig.from_env()
+                except (TypeError, ValueError):
+                    raise HTTPException(503, "Agent inference configuration is invalid") from None
+                _agent_inference_client = InferenceClient(config)
+    return _agent_inference_client
+
+
+def _build_agent_orchestrator(db: Session, tenant_id: str) -> TaskOrchestrator:
+    """Bind planner and read-only executor to the authenticated tenant."""
+    executor = ToolExecutor(db, tenant_id)
+    planner = TaskPlanner(executor, _get_agent_inference_client())
+    return TaskOrchestrator(planner, executor, max_steps=5, timeout_seconds=30.0)
+
+
+@app.post("/api/v1/agent/tasks")
+def run_agent_task(
+    payload: AgentTaskIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Plan and run a bounded, read-only evidence-gathering task for this tenant."""
+    orchestrator = _build_agent_orchestrator(db, user.tenant_id)
+    result = orchestrator.run(payload.task)
+    plan = None
+    if result.plan is not None:
+        plan = {
+            "goal": result.plan.goal,
+            "steps": [
+                {
+                    "tool": step.tool,
+                    "arguments": step.arguments,
+                    "purpose": step.purpose,
+                }
+                for step in result.plan.steps
+            ],
+        }
+    return {
+        "status": result.status,
+        "error_code": result.error_code,
+        "plan": plan,
+        "outputs": result.outputs,
+        "trace": result.trace,
+        "duration_ms": result.duration_ms,
+    }
+
+
 def readiness(db: Session = Depends(get_db)):
     """Report readiness only when required request-path dependencies respond."""
     dependencies = {"database": "ok", "clamav": "not_configured"}
