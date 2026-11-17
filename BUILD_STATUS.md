@@ -1,5 +1,13 @@
 # LedgerGate build and production-readiness status
 
+## Latest main verification — 2026-11-17
+
+- AI research integration PR #45 was squash-merged into `main` as `10d548957519ba9471647e28cb57af9a5244c40a`.
+- The merge commit's post-merge GitHub Actions checks completed successfully: backend, frontend, Docker, Transformer tests, RL tests, Python analysis, and JavaScript/TypeScript analysis.
+- The merged research suite adds the educational Transformer implementation, PPO/GRPO and policy-gradient research packages, inference adapters and benchmarks, agent-evaluation tooling, tests, and dedicated workflows. These are research/engineering components, not a pretrained production model or autonomous financial approval capability.
+- The enterprise-readiness PR #3 remains open as a draft and targets `production-readiness`, not `main`. Its head is based on a substantially divergent history; do not merge it wholesale. Port its security, auth, runtime-grant, and migration changes only after reconciling them against the current main migrations and regression tests.
+- The repository's CI passing does not establish a live production deployment. Object Lock/IAM, SMTP, HTTPS/OIDC, restore/DR, load testing, independent security review, and legal/privacy sign-off remain external go-live gates.
+
 ## Latest continuation — 2026-11-17
 
 - Tenant-owned relational references were hardened in PR #41 (merge commit `d17f0bc2e142b3d1ded927bee34af53efd6b1a14`). Alembic revision `0027_tenant_owned_references` follows `0026_preauth_identity_rls`; it preflights existing references, adds same-tenant database triggers and composite foreign keys, and updates SQLAlchemy metadata. The historical `0001_initial.py` baseline was not rewritten.
