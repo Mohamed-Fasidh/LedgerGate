@@ -2,6 +2,15 @@
 
 ## Latest main verification — 2026-11-17
 
+## Latest security continuation — 2026-11-17
+
+- PR #46 was squash-merged into `main` as `2bea5f2c65615e89487d8f273cebacabd1b24cf8`. It removes runtime-role DELETE privilege from `public.audit_events` while preserving the required SELECT/INSERT/UPDATE grants. The PostgreSQL privilege regression test asserts the narrower permission set. PR-head CI run [44063749566](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44063749566) and CodeQL run [44063777043](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44063777043) both passed.
+- PR #47 was squash-merged into `main` as `5583dc9ec1331726d245ff8eb230232a9a14552c`. The Next.js frontend now applies baseline response headers for MIME sniffing, framing, referrer policy, browser permissions, and cross-origin opener isolation. PR-head CI run [44064325461](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44064325461) and CodeQL run [44064325499](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44064325499) both passed.
+- The frontend headers are baseline browser hardening, not a complete Content Security Policy or HSTS deployment configuration. Configure those only after reviewing actual hosting, asset, API, and TLS behavior.
+- PR #3 remains open and draft on a divergent branch. Do not merge it wholesale; selectively reconcile any remaining approval-policy, auth, and UI improvements with current migrations and tests.
+- These successful CI and CodeQL runs validate the PR heads. They do not establish a live production deployment, provisioned cloud IAM/Object Lock, real SMTP delivery, disaster-recovery restoration, load testing, or independent security/compliance sign-off.
+
+
 - AI research integration PR #45 was squash-merged into `main` as `10d548957519ba9471647e28cb57af9a5244c40a`.
 - The merge commit's post-merge GitHub Actions checks completed successfully: backend, frontend, Docker, Transformer tests, RL tests, Python analysis, and JavaScript/TypeScript analysis.
 - The merged research suite adds the educational Transformer implementation, PPO/GRPO and policy-gradient research packages, inference adapters and benchmarks, agent-evaluation tooling, tests, and dedicated workflows. These are research/engineering components, not a pretrained production model or autonomous financial approval capability.
