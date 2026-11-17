@@ -229,3 +229,50 @@ def test_runtime_role_uses_explicit_grants_without_future_default_access():
             connection.execute(text(f'DROP TABLE public."{future_table}"'))
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_auth_lookup_functions_have_narrow_runtime_execution_privileges():
+    """Auth bootstrap exposes only fixed SECURITY DEFINER lookups to runtime."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    expected_functions = {
+        "auth_lookup_user",
+        "auth_email_exists",
+        "auth_lookup_password_reset",
+        "auth_lookup_email_verification",
+    }
+
+    try:
+        with engine.connect() as connection:
+            rows = connection.execute(text("""
+                SELECT p.proname, p.prosecdef,
+                       owner.rolname AS owner_name,
+                       owner.rolcanlogin AS owner_can_login,
+                       owner.rolbypassrls AS owner_bypasses_rls,
+                       has_function_privilege('ledgergate_runtime', p.oid, 'EXECUTE') AS runtime_can_execute,
+                       EXISTS (
+                           SELECT 1
+                           FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) AS acl
+                           WHERE acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+                       ) AS public_can_execute,
+                       pg_has_role('ledgergate_runtime', 'ledgergate_auth_owner', 'MEMBER') AS runtime_can_assume_owner
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid = p.pronamespace
+                JOIN pg_roles owner ON owner.oid = p.proowner
+                WHERE n.nspname = 'public'
+                  AND p.proname = ANY(:function_names)
+            """), {"function_names": list(expected_functions)}).mappings().all()
+
+        actual = {row["proname"]: row for row in rows}
+        assert set(actual) == expected_functions
+        for function_name in expected_functions:
+            function = actual[function_name]
+            assert function["prosecdef"] is True, function_name
+            assert function["owner_name"] == "ledgergate_auth_owner", function_name
+            assert function["owner_can_login"] is False, function_name
+            assert function["owner_bypasses_rls"] is True, function_name
+            assert function["runtime_can_execute"] is True, function_name
+            assert function["public_can_execute"] is False, function_name
+            assert function["runtime_can_assume_owner"] is False, function_name
+    finally:
+        engine.dispose()
