@@ -122,3 +122,22 @@ def test_planner_does_not_accept_extra_top_level_fields():
     }))
     with pytest.raises(PlanningError, match="invalid structured plan"):
         planner.plan("Review invoice")
+
+def test_planner_rejects_registered_but_non_read_only_tool():
+    class ExecutorWithWriteTool(FakeExecutor):
+        registry = {
+            **FakeExecutor.registry,
+            "invoice_approve": (InvoiceLookup, None),
+        }
+
+    client = FakeInferenceClient(text=json.dumps({
+        "goal": "Approve invoice",
+        "steps": [{
+            "tool": "invoice_approve",
+            "arguments": {"invoice_id": 42},
+            "purpose": "Approve",
+        }],
+    }))
+    planner = TaskPlanner(ExecutorWithWriteTool(), client)
+    with pytest.raises(PlanningError, match="not allowlisted"):
+        planner.plan("Approve invoice 42")
