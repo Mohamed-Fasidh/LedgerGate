@@ -326,5 +326,8 @@ def test_invoice_approval_plan_filters_policy_by_invoice_currency(invoice_curren
     assert invoice.approval_policy_id == policy.id
     assert invoice.approval_steps_snapshot == policy.approval_steps
     assert invoice.approval_stage == 1
-    rendered = [str(condition) for condition in captured["conditions"]]
-    assert any(f"approval_policies.currency = '{invoice_currency}'" in item for item in rendered)
+    currency_conditions = [
+        condition for condition in captured["conditions"]
+        if getattr(getattr(condition, "left", None), "name", None) == "currency"
+    ]
+    assert any(condition.right.value == invoice_currency for condition in currency_conditions)
