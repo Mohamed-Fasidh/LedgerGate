@@ -152,3 +152,27 @@ def test_production_rejects_non_origin_public_app_urls(public_url):
 
 def test_production_allows_trailing_slash_on_public_app_origin():
     validate_production_settings(production_settings(public_app_url="https://app.example.com/"))
+
+
+@pytest.mark.parametrize(
+    "from_address",
+    [
+        "",
+        "not-an-email",
+        "missing-domain@",
+        "@example.com",
+        "two@@example.com",
+        "no-reply@example.com\\nBcc: attacker@example.com",
+        "no-reply@example.com, attacker@example.com",
+        "LedgerGate <not-an-email>",
+        "LedgerGate <no-reply@example.com> trailing",
+        "no-reply@localhost",
+    ],
+)
+def test_production_rejects_malformed_or_injected_email_from_addresses(from_address):
+    with pytest.raises(RuntimeError, match="EMAIL_FROM_ADDRESS"):
+        validate_production_settings(production_settings(email_from_address=from_address))
+
+
+def test_production_accepts_plain_email_from_address():
+    validate_production_settings(production_settings(email_from_address="no-reply@example.com"))
