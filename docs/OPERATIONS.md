@@ -77,3 +77,29 @@ The CLI returns exit code 0 only when the HMAC, export metadata, tenant consiste
 - Restrict keyring access, log verification operations without logging key material, maintain protected offline recovery copies, and document emergency revocation/re-signing procedures. Do not place historical secrets in source control or ordinary application logs.
 - Each audit export attempt uses a fresh UUID in both its signed payload and S3 object key, even when the event range is identical. This avoids treating a retry as an overwrite of a prior COMPLIANCE-locked object. A successful S3 write followed by a failed database commit can still leave an unreferenced immutable object; periodically reconcile the WORM bucket against `immutable_export_created` audit records and retain unexplained objects for investigation rather than deleting them.
 - The application currently accepts one active signing key through environment configuration. Historical key retention and independent verification-keyring storage remain operator responsibilities; this code does not implement a managed KMS keyring or automatic rotation.
+
+## Invoice object-storage reconciliation
+
+The storage inventory command compares generated invoice objects with `invoices.file_path` references. It is a maintenance operation, not part of API startup.
+
+Run a dry-run first:
+
+```bash
+cd backend
+RECONCILIATION_DATABASE_URL="$RECONCILIATION_DATABASE_URL" python -m scripts.reconcile_storage
+```
+
+The database URL must use a dedicated PostgreSQL maintenance role that:
+- is not `ledgergate_runtime` and is not a superuser;
+- has `BYPASSRLS` so the inventory includes every tenant;
+- has read-only access to the invoice table.
+
+The command sets its database transaction to read-only. It also needs object-storage list access. Local storage is supported for development.
+
+Deletion is disabled by default. To remove confirmed orphan objects, use both explicit flags:
+
+```bash
+RECONCILIATION_DATABASE_URL="$RECONCILIATION_DATABASE_URL" python -m scripts.reconcile_storage --delete-orphans --confirm-delete
+```
+
+Deletion has a mandatory 24-hour minimum-age grace period to avoid racing uploads or invoice transactions. Objects that are too recent are reported as deferred; missing referenced objects are reported separately and are never deleted. Review the dry-run counts and confirm backups/retention requirements before enabling deletion.
