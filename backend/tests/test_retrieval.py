@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -93,6 +95,31 @@ def test_business_retrieval_scopes_purchase_orders_and_suppliers(retrieval_db):
 
     assert len(results) == MAX_RETRIEVAL_RESULTS
     assert all(item["reference"].startswith("ACME-INVOICE-") for item in results)
-    assert all(item["amount"] == 100.0 for item in results)
+    assert all(item["amount"] == "100.00" for item in results)
     assert all(item["supplier"] == "Acme Supplies" for item in results)
     assert retrieve_business_records(db, "tenant-a", "", limit=10) == []
+
+
+def test_business_retrieval_preserves_small_currency_amount_exactly(retrieval_db):
+    db = retrieval_db
+    supplier = Supplier(tenant_id="tenant-a", name="Precision Supplies")
+    db.add(supplier)
+    db.flush()
+    db.add(
+        PurchaseOrder(
+            tenant_id="tenant-a",
+            po_number="PRECISION-PO-1",
+            supplier_id=supplier.id,
+            total_amount=Decimal("0.10"),
+            currency="INR",
+            description="precision test item",
+        )
+    )
+    db.commit()
+
+    results = retrieve_business_records(
+        db, "tenant-a", "precision po precision supplies"
+    )
+    assert results
+    assert results[0]["amount"] == "0.10"
+    assert isinstance(results[0]["amount"], str)
