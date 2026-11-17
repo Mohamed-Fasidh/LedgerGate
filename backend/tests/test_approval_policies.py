@@ -411,3 +411,64 @@ def test_invoice_decision_endpoints_require_admin_or_reviewer(path):
         with pytest.raises(HTTPException) as error:
             authorize(user=SimpleNamespace(role=role))
         assert error.value.status_code == 403
+
+
+@pytest.mark.parametrize("endpoint_name", ["approve", "reject"])
+def test_invoice_decision_rechecks_idempotency_after_row_lock(monkeypatch, endpoint_name):
+    """A duplicate request waits for the invoice lock, then replays the winner."""
+    from types import SimpleNamespace
+    import app.main as main
+    from app.models import Invoice, InvoiceStatus, Role
+
+    invoice = SimpleNamespace(
+        id=92,
+        tenant_id="tenant-a",
+        created_by_user_id=7,
+        status=InvoiceStatus.review_required,
+        reconciliation={"decision": "MATCHED"},
+        approval_steps_snapshot=None,
+        approval_stage=1,
+        amount=100,
+        currency="INR",
+        approval_policy_id=None,
+    )
+    cached_response = {"id": 92, "status": "approved", "message": "replayed"}
+    lookups = []
+
+    class Query:
+        locked = False
+        def filter(self, *conditions):
+            return self
+        def with_for_update(self):
+            self.locked = True
+            return self
+        def first(self):
+            return invoice
+
+    class DB:
+        def __init__(self):
+            self.query_result = Query()
+        def query(self, model):
+            assert model is Invoice
+            return self.query_result
+
+    def idempotency_lookup(*args):
+        lookups.append(args)
+        return None if len(lookups) == 1 else cached_response
+
+    monkeypatch.setattr(main, "_get_idempotent_response", idempotency_lookup)
+    db = DB()
+    actor = SimpleNamespace(id=8, tenant_id="tenant-a", role=Role.reviewer)
+    endpoint = getattr(main, endpoint_name)
+
+    result = endpoint(
+        invoice_id=92,
+        payload=None,
+        idempotency_key="invoice-replay-key-0001",
+        db=db,
+        user=actor,
+    )
+
+    assert result == cached_response
+    assert len(lookups) == 2
+    assert db.query_result.locked is True
