@@ -53,7 +53,8 @@ For local development without Docker:
 - `GET/POST /api/v1/suppliers`
 - `GET/POST /api/v1/purchase-orders`
 - `GET/POST /api/v1/invoices`
-- `POST /api/v1/agent/tasks` (authenticated, bounded, synchronous read-only agent task execution)\n- `POST /api/v1/agent/jobs` and `GET /api/v1/agent/jobs/{id}` (durable asynchronous read-only agent jobs)
+- `POST /api/v1/agent/tasks` (authenticated, bounded, synchronous read-only agent task execution)
+- `POST /api/v1/agent/jobs` and `GET /api/v1/agent/jobs/{id}` (durable asynchronous read-only agent jobs)
 - `POST /api/v1/invoices/{id}/reconcile`
 - `POST /api/v1/invoices/{id}/approve`
 - `POST /api/v1/invoices/{id}/reject`
