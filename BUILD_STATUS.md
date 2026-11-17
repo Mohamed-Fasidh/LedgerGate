@@ -496,3 +496,5 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - The test observes PostgreSQL's `pg_stat_activity` and requires the second writer to be waiting on the advisory lock before the first transaction commits; it then verifies both event hashes form one valid chain.
 - PR-head CI run [44072358175](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44072358175) passed backend, frontend, Docker and operational hardening checks. CodeQL run [44072358052](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44072358052) passed Python and JavaScript/TypeScript analysis.
 - This test verifies concurrent audit appends under PostgreSQL/RLS. Full concurrent invoice HTTP requests with persisted idempotency replay are still a separate test gap.
+
+- Post-merge verification on the documentation-updated main revision `623e785ffc7fcc547f121fe7ad93eb6510347c04`: CI run [44072648898](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44072648898) passed backend, frontend, Docker and operational checks; CodeQL run [44072648841](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44072648841) passed.
