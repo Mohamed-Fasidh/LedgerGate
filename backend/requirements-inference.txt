@@ -4,3 +4,4 @@ psutil>=5.9,<8
 matplotlib>=3.8,<4
 # Optional accurate token counting; BENCHMARK_TOKENIZER must point to a local cache.
 transformers>=4.45,<6
+nvidia-ml-py>=12.535,<13  # optional local NVML telemetry
