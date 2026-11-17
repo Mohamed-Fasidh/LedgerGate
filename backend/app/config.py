@@ -11,7 +11,7 @@ def _is_unsafe_production_hostname(hostname: str) -> bool:
     normalized = hostname.rstrip(".").lower()
     if not normalized or normalized != hostname.lower():
         return True
-    if normalized == "localhost" or normalized.endswith(".localhost"):
+    if normalized in {"localhost", "localdomain"} or normalized.endswith((".localhost", ".localdomain", ".local")):
         return True
     try:
         address = ipaddress.ip_address(normalized)
