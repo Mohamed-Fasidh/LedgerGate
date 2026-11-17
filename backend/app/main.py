@@ -1484,6 +1484,12 @@ def download_invoice_file(invoice_id:int,db:Session=Depends(get_db),user:User=De
     db.commit()
     return StreamingResponse(BytesIO(content),media_type=media_type,headers={"Content-Disposition":f"attachment; filename*=UTF-8''{safe_filename}","X-Content-Type-Options":"nosniff","Cache-Control":"private, no-store"})
 
+def _require_invoice_status(inv: Invoice, allowed_statuses: set[InvoiceStatus], message: str) -> None:
+    """Reject invoice mutations that would violate the explicit workflow state machine."""
+    if inv.status not in allowed_statuses:
+        raise HTTPException(409, message)
+
+
 @app.post("/api/v1/invoices/{invoice_id}/confirm-extraction")
 def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):
     _validate_idempotency_key(idempotency_key)
@@ -1495,6 +1501,11 @@ def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_ke
         if cached is not None: return cached
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
+    _require_invoice_status(
+        inv,
+        {InvoiceStatus.EXTRACTION_REVIEW, InvoiceStatus.RECEIVED},
+        "Invoice extraction can only be confirmed before reconciliation or approval",
+    )
     if payload.supplier_id and not db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Supplier not found")
     if payload.purchase_order_id and not db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Purchase order not found")
     for k,v in payload_data.items(): setattr(inv,k,v)
@@ -1524,6 +1535,11 @@ def reconcile(invoice_id:int,idempotency_key:str|None=Header(default=None,alias=
         if cached is not None: return cached
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
+    _require_invoice_status(
+        inv,
+        {InvoiceStatus.RECEIVED},
+        "Only received invoices can be reconciled; invoices already in review or finalized cannot be reopened",
+    )
     if inv.amount is None or inv.invoice_number.startswith("UNCONFIRMED-"):
         raise HTTPException(409,"Confirm extracted invoice fields before reconciliation")
     po=None
