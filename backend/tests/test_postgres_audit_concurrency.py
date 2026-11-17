@@ -35,6 +35,8 @@ def test_concurrent_audit_writers_append_to_one_unbroken_tenant_chain():
     def append_second_event():
         second_started.set()
         with Session.begin() as db:
+            db.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": tenant_id})
             event = record_event(
                 db,
                 actor,
@@ -48,6 +50,8 @@ def test_concurrent_audit_writers_append_to_one_unbroken_tenant_chain():
     try:
         with ThreadPoolExecutor(max_workers=1) as executor:
             with Session.begin() as first:
+                first.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+                first.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": tenant_id})
                 first_event = record_event(
                     first,
                     actor,
@@ -89,6 +93,8 @@ def test_concurrent_audit_writers_append_to_one_unbroken_tenant_chain():
             second_hash = pending.result(timeout=10)
 
         with Session.begin() as db:
+            db.execute(text("SET LOCAL ROLE ledgergate_runtime"))
+            db.execute(text("SELECT set_config('app.tenant_id', :tenant_id, true)"), {"tenant_id": tenant_id})
             rows = (
                 db.query(AuditEvent)
                 .filter(AuditEvent.tenant_id == tenant_id)
