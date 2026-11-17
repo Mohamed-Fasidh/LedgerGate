@@ -10,9 +10,15 @@ MAX_OCR_PAGE_PIXELS = 12_000_000
 MAX_OCR_TOTAL_PIXELS = 48_000_000
 
 AMOUNT_PATTERNS = [
-    r"(?:grand\s+total|invoice\s+total|total\s+amount|amount\s+due|total)\s*[:\-]?\s*(?:₹|INR\s*)?([\d,]+(?:\.\d{1,2})?)",
-    r"(?:₹|INR)\s*([\d,]+(?:\.\d{1,2})?)",
+    r"(?:grand\s+total|invoice\s+total|total\s+amount|amount\s+due|total)\s*[:\-]?\s*(?:(₹|INR\b|\$|USD\b|€|EUR\b|£|GBP\b)\s*)?([\d,]+(?:\.\d{1,2})?)(?:\s*(₹|INR\b|\$|USD\b|€|EUR\b|£|GBP\b))?",
+    r"(₹|INR\b|\$|USD\b|€|EUR\b|£|GBP\b)\s*([\d,]+(?:\.\d{1,2})?)(?:\s*(₹|INR\b|\$|USD\b|€|EUR\b|£|GBP\b))?",
 ]
+CURRENCY_CODES = {
+    "₹": "INR", "INR": "INR",
+    "$": "USD", "USD": "USD",
+    "€": "EUR", "EUR": "EUR",
+    "£": "GBP", "GBP": "GBP",
+}
 INVOICE_PATTERNS = [
     r"(?:invoice\s*(?:no|number|#))\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/]+)",
 ]
@@ -35,14 +41,14 @@ def parse_text(text: str) -> dict:
     for pat in AMOUNT_PATTERNS:
         matches = list(re.finditer(pat, normalized, re.I))
         if matches:
-            raw = matches[-1].group(1).replace(",", "")
+            matched = matches[-1]
+            currency_token, raw = matched.group(1) or matched.group(3), matched.group(2)
             try:
-                result["amount"] = round(float(raw), 2)
+                result["amount"] = round(float(raw.replace(",", "")), 2)
                 result["confidence"]["amount"] = "regex_candidate"
-                if "₹" in normalized or re.search(r"\bINR\b", normalized, re.I):
-                    result["currency"] = "INR"
-                elif "$" in normalized:
-                    result["currency"] = "USD"
+                if currency_token:
+                    code = currency_token.upper() if currency_token.isalpha() else currency_token
+                    result["currency"] = CURRENCY_CODES[code]
                 break
             except ValueError:
                 pass
@@ -106,7 +112,7 @@ def extract_file(path: str, suffix: str) -> tuple[str, dict]:
                     for page in doc:
                         pix = page.get_pixmap(matrix=fitz.Matrix(OCR_SCALE, OCR_SCALE), alpha=False)
                         chunks.append(pytesseract.image_to_string(Image.open(io.BytesIO(pix.tobytes("png")))))
-                    ocr_text = "\\n".join(chunks)
+                    ocr_text = "\n".join(chunks)
                 except Exception:
                     # OCR is optional; retain the safe text-layer result if the
                     # Python package or system Tesseract executable is unavailable.

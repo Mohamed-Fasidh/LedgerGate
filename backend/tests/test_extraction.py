@@ -47,3 +47,47 @@ def test_ocr_pixel_estimate_accepts_normal_page():
         rect = Rect()
 
     assert document_extraction._ocr_pixel_count(Page()) == 1224 * 1584
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_currency", "expected_amount"),
+    [
+        ("Invoice Total: $1,250.75", "USD", 1250.75),
+        ("Grand Total: USD 2,000", "USD", 2000.0),
+        ("Amount Due: €845.20", "EUR", 845.2),
+        ("Total: GBP 99.99", "GBP", 99.99),
+        ("Grand Total: 1,250.75 USD", "USD", 1250.75),
+        ("Amount Due: 845.20 EUR", "EUR", 845.2),
+        ("Total: 99.99 GBP", "GBP", 99.99),
+    ],
+)
+def test_extracts_supported_currency_symbols_and_codes(text, expected_currency, expected_amount):
+    result = parse_text(text)
+    assert result["amount"] == expected_amount
+    assert result["currency"] == expected_currency
+    assert result["confidence"]["amount"] == "regex_candidate"
+
+
+def test_amount_without_currency_marker_keeps_inr_default():
+    result = parse_text("Grand Total: 650.00")
+    assert result["amount"] == 650.0
+    assert result["currency"] == "INR"
+
+
+def test_ocr_page_text_is_joined_with_real_newlines():
+    import ast
+    from pathlib import Path
+
+    source = Path(document_extraction.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    joins = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "ocr_text" for target in node.targets)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute)
+        and node.value.func.attr == "join"
+    ]
+    assert len(joins) == 1
+    assert isinstance(joins[0].value.func.value, ast.Constant)
+    assert joins[0].value.func.value.value == "\n"
