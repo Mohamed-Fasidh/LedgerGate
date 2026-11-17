@@ -1,25 +1,51 @@
 from app.agent.runtime import AgentContext, ReconciliationAgent
 
+
+def _context(invoice_amount, po_amount):
+    return AgentContext(
+        invoice={"invoice_number": "INV-1", "amount": invoice_amount, "currency": "INR"},
+        purchase_order={"po_number": "PO-1", "total_amount": po_amount, "currency": "INR"},
+    )
+
+
 def test_amount_discrepancy_requires_human_review():
-    ctx=AgentContext(invoice={"invoice_number":"INV-1","amount":65000,"currency":"INR"},
-                     purchase_order={"po_number":"PO-1","total_amount":50000,"currency":"INR"})
-    result=ReconciliationAgent().run(ctx)
-    assert result.state.value=="human_review"
-    assert any(x["code"]=="AMOUNT_EXCEEDS_PO" for x in result.findings)
+    result = ReconciliationAgent().run(_context("65000.00", "50000.00"))
+    assert result.state.value == "human_review"
+    assert any(item["code"] == "AMOUNT_EXCEEDS_PO" for item in result.findings)
+
 
 def test_exact_match_completes():
-    ctx=AgentContext(invoice={"invoice_number":"INV-2","amount":50000,"currency":"INR"},
-                     purchase_order={"po_number":"PO-2","total_amount":50000,"currency":"INR"})
-    result=ReconciliationAgent().run(ctx)
-    assert result.state.value=="complete"
-    assert result.findings==[]
+    result = ReconciliationAgent().run(_context("50000.00", "50000.00"))
+    assert result.state.value == "complete"
+    assert result.findings == []
+
+
+def test_decimal_difference_above_tolerance_requires_review():
+    result = ReconciliationAgent().run(_context("0.30", "0.28"))
+    finding = next(item for item in result.findings if item["code"] == "AMOUNT_EXCEEDS_PO")
+    assert finding["message"] == "Invoice exceeds PO by 0.02 INR."
+    assert result.state.value == "human_review"
+
+
+def test_one_cent_difference_remains_within_existing_tolerance():
+    result = ReconciliationAgent().run(_context("1.01", "1.00"))
+    assert result.state.value == "complete"
+    assert result.findings == []
+
+
+def test_non_finite_monetary_input_fails_closed():
+    result = ReconciliationAgent().run(_context("NaN", "1.00"))
+    assert result.state.value == "failed"
+    finding = next(item for item in result.findings if item["code"] == "RUNTIME_ERROR")
+    assert "NaN" not in finding["message"]
+
 
 def test_runtime_error_does_not_expose_internal_exception_details():
     class BrokenAgent(ReconciliationAgent):
         def _load(self, ctx):
             raise RuntimeError("database password=do-not-leak")
 
-    result=BrokenAgent().run(AgentContext(invoice={}))
+    result = BrokenAgent().run(AgentContext(invoice={}))
     assert result.state.value == "failed"
     finding = next(item for item in result.findings if item["code"] == "RUNTIME_ERROR")
     assert finding["severity"] == "high"
