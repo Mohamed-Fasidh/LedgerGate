@@ -5,12 +5,11 @@ from app.agent.tool_executor import ToolExecutor
 from app.services.inference import InferenceClient
 
 
-def run_read_only_task(
+def build_read_only_orchestrator(
     db,
     tenant_id: str,
-    task: str,
     *,
-    inference_client: InferenceClient | None = None,
+    inference_client: InferenceClient,
     max_steps: int = 5,
     timeout_seconds: float = 30.0,
 ) -> AgentRunResult:
@@ -23,5 +22,22 @@ def run_read_only_task(
         executor,
         max_steps=max_steps,
         timeout_seconds=timeout_seconds,
+    )
+    return orchestrator
+
+
+def run_read_only_task(
+    db,
+    tenant_id: str,
+    task: str,
+    *,
+    inference_client: InferenceClient | None = None,
+    max_steps: int = 5,
+    timeout_seconds: float = 30.0,
+) -> AgentRunResult:
+    client = inference_client or InferenceClient()
+    orchestrator = build_read_only_orchestrator(
+        db, tenant_id, inference_client=client,
+        max_steps=max_steps, timeout_seconds=timeout_seconds,
     )
     return orchestrator.run(task)
