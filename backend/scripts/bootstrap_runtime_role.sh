@@ -28,7 +28,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.invoices,
   public.policy_documents,
   public.agent_memories,
-  public.audit_events,
   public.registration_attempts,
   public.login_attempts,
   public.approval_policies,
