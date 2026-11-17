@@ -38,6 +38,17 @@ def test_validation_error_does_not_echo_sensitive_input():
     assert secret not in repr(exc.value.__cause__)
 
 
+def test_tool_schemas_reject_tenant_override_and_unknown_fields():
+    class Dummy:
+        pass
+
+    executor = ToolExecutor(Dummy(), "tenant-a")
+    with pytest.raises(ToolError, match="Invalid tool arguments"):
+        executor.execute(
+            "invoice_lookup", {"invoice_id": 1, "tenant_id": "tenant-b"}
+        )
+
+
 class FakeQuery:
     def __init__(self, row):
         self.row = row

@@ -11,13 +11,17 @@ Every reconciliation is advisory. Even a clean match enters human review. No end
 ## Agent runtime
 `START → LOAD_RECORDS → VALIDATE → DECIDE → COMPLETE | HUMAN_REVIEW | FAILED`
 
-The state machine performs deterministic checks. The allowlisted `ToolExecutor` validates tool name and arguments with Pydantic before tenant-scoped data access. The MCP process delegates to the same authenticated HTTP API.
+The state machine performs deterministic checks. The allowlisted `ToolExecutor` validates tool names and strict Pydantic argument schemas before tenant-scoped data access. Tool schemas reject unexpected fields, including attempts to supply a tenant override.
+
+The optional `TaskPlanner` uses the shared Ollama/vLLM inference client to propose a bounded JSON plan. It exposes only the explicit read-only tool allowlist, validates each proposed argument against strict Pydantic schemas, and enforces request, response, and step limits. `TaskOrchestrator` executes those validated read-only steps sequentially through the existing executor, which retains the authenticated tenant ID. It records an in-memory trace and supports cooperative cancellation and a deadline check between tool calls. It is not durable, does not retry, and cannot interrupt a synchronous database call already in progress. It must not be treated as an approval authority.
+
+The MCP process delegates to the same authenticated HTTP API.
 
 ## Retrieval and memory
 Policy retrieval combines token overlap and character n-gram similarity. This is a reproducible lexical/fuzzy baseline; it is not a neural embedding model. Episodic/semantic/procedural memory records are tenant-scoped and ranked by deterministic token overlap. The service interfaces can be extended with a sentence-transformer embedding provider and pgvector index after benchmarking.
 
 ## Inference
-Ollama and vLLM adapters can explain already-computed findings. They are not used to compute the financial decision. Provider calls have a bounded timeout and return an error if not configured.
+Ollama and vLLM adapters can explain already-computed findings and support bounded task planning. They are not used to compute the financial decision. Provider calls have bounded timeouts and return an error if not configured. Benchmark output distinguishes measured values from unavailable telemetry.
 
 ## Tenant boundaries
 All business records include tenant_id and API queries filter by the authenticated user's tenant. Before production, enforce PostgreSQL RLS and use a non-owner role; application filters alone are not a complete defense against every query bug.
@@ -26,5 +30,5 @@ All business records include tenant_id and API queries filter by the authenticat
 - Uploaded files are untrusted input.
 - Extracted fields are candidates, never trusted facts until user confirmation.
 - Retrieved policy text is evidence, not executable instructions.
-- Model output is untrusted explanatory text.
+- Model output and proposed tool plans are untrusted until schema, allowlist, and application authorization checks pass.
 - Only authorized human reviewers can finalize invoice decisions.

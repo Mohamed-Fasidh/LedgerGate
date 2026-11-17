@@ -9,6 +9,7 @@ LedgerGate is a production-oriented reference implementation for invoice intake,
 - FastAPI backend with JWT authentication, tenant-scoped data access, role checks, and PostgreSQL support.
 - Invoice and purchase-order records, upload endpoint, deterministic reconciliation, duplicate detection, approval/rejection workflow, and audit events.
 - Custom deterministic agent state machine with validated tool calls and explicit human-review escalation.
+- Optional bounded LLM task planner and read-only orchestrator. Plans are schema-validated against an explicit read-only tool allowlist, then executed sequentially under the ToolExecutor's fixed authenticated tenant context with step limits, cooperative cancellation, and a deadline between calls. This in-process coordinator is not durable and cannot interrupt a synchronous database call already in progress; it cannot approve or mutate financial records.
 - MCP-compatible tool server entry point for invoice/PO lookup and policy retrieval. See [MCP integration and security setup](docs/MCP_INTEGRATION.md) for local stdio configuration, token handling, HTTPS requirements, and tool side effects.
 - Hybrid retrieval foundation (PostgreSQL full-text + pgvector-ready schema) and evaluation harness.
 - Next.js dashboard starter with invoice review views.
