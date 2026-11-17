@@ -2,6 +2,9 @@
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
+READ_ONLY_TOOL_NAMES = frozenset({"invoice_lookup", "po_search", "policy_search"})
+
+
 class InvoiceLookup(BaseModel):
     model_config = ConfigDict(extra="forbid")
     invoice_id: int = Field(gt=0)
