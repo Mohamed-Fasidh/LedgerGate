@@ -92,7 +92,7 @@ class TaskOrchestrator:
             trace.append({"event": "step_started", "step": index, "tool": step.tool})
             try:
                 output = self.executor.execute(step.tool, step.arguments)
-            except (ToolError, Exception):
+            except Exception:
                 # Do not return tool exceptions, arguments, or provider data in traces.
                 status, error_code = "failed", "TOOL_EXECUTION_FAILED"
                 trace.append({
