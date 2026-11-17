@@ -1,0 +1,10 @@
+{
+  "seed": 1337,
+  "iterations": 120,
+  "group_size": 8,
+  "hidden_dim": 32,
+  "learning_rate": 0.025,
+  "clip_epsilon": 0.2,
+  "update_epochs": 3,
+  "entropy_coef": 0.01
+}
