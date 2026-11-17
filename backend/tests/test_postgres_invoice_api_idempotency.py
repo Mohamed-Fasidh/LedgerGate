@@ -1,4 +1,4 @@
-"""Concurrent authenticated invoice approval requests must replay one durable result."""
+"""Concurrent authenticated invoice decisions must replay one durable result."""
 
 import os
 import threading
@@ -15,8 +15,9 @@ from sqlalchemy.orm import sessionmaker
     not os.getenv("TEST_POSTGRES_URL"),
     reason="Requires disposable PostgreSQL database",
 )
-def test_concurrent_invoice_approval_http_requests_replay_same_idempotent_response(monkeypatch):
-    """Exercise the real API, auth dependency, PostgreSQL locks, and persisted replay."""
+@pytest.mark.parametrize(("decision", "expected_status", "audit_action"), [("approve", "approved", "human_approved"), ("reject", "rejected", "human_rejected")])
+def test_concurrent_invoice_decision_http_requests_replay_same_idempotent_response(monkeypatch, decision, expected_status, audit_action):
+    """Exercise real approval/rejection APIs, auth, PostgreSQL locks, and replay."""
     from app import main
     from app.audit import verify_tenant_chain
     from app.models import (
@@ -62,7 +63,7 @@ def test_concurrent_invoice_approval_http_requests_replay_same_idempotent_respon
         approval_steps_snapshot=[["reviewer"]],
         approval_stage=1,
     )
-    request_key = "approve-race-" + suffix
+    request_key = decision + "-race-" + suffix
     invoice_id = None
     access_token = None
     original_override = main.app.dependency_overrides.get(main.get_db)
@@ -100,7 +101,7 @@ def test_concurrent_invoice_approval_http_requests_replay_same_idempotent_respon
             with TestClient(main.app) as client:
                 barrier.wait(timeout=10)
                 return client.post(
-                    f"/api/v1/invoices/{invoice_id}/approve",
+                    f"/api/v1/invoices/{invoice_id}/{decision}",
                     headers={
                         "Authorization": f"Bearer {access_token}",
                         "Idempotency-Key": request_key,
@@ -117,7 +118,7 @@ def test_concurrent_invoice_approval_http_requests_replay_same_idempotent_respon
         response_bodies = [response.json() for response in responses]
         assert response_bodies[0] == response_bodies[1]
         assert response_bodies[0]["id"] == invoice_id
-        assert response_bodies[0]["status"] == "approved"
+        assert response_bodies[0]["status"] == expected_status
 
         with Session.begin() as db:
             db.execute(text("SET LOCAL ROLE ledgergate_runtime"))
@@ -141,15 +142,15 @@ def test_concurrent_invoice_approval_http_requests_replay_same_idempotent_respon
                 AuditEvent.tenant_id == tenant_id,
                 AuditEvent.entity_type == "invoice",
                 AuditEvent.entity_id == str(invoice_id),
-                AuditEvent.action == "human_approved",
+                AuditEvent.action == audit_action,
             ).all()
 
         assert len(approvals) == 1
-        assert approvals[0].decision == "approved"
+        assert approvals[0].decision == expected_status
         assert approvals[0].approver_user_id == approver.id
         assert len(records) == 1
         assert records[0].response_json == response_bodies[0]
-        assert stored_invoice.status == InvoiceStatus.approved
+        assert stored_invoice.status == InvoiceStatus(expected_status)
         assert len(audit_events) == 1
 
         with Session() as db:
