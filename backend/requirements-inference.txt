@@ -1,0 +1,6 @@
+# Optional benchmark/telemetry extras. Install serving engines on the inference host.
+# Do not install PyTorch CUDA wheels, vLLM or Ollama in the LedgerGate API image.
+psutil>=5.9,<8
+matplotlib>=3.8,<4
+# Optional accurate token counting; BENCHMARK_TOKENIZER must point to a local cache.
+transformers>=4.45,<6
