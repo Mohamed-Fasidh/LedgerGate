@@ -127,12 +127,8 @@ class EmailVerificationConfirmIn(BaseModel):
 
 
 class AgentTaskIn(BaseModel):
-    task: str = Field(min_length=5, max_length=4000)
-
-
-class AgentTaskIn(BaseModel):
     """User task description; tenant scope always comes from the access token."""
-    task: str = Field(min_length=1, max_length=4000)
+    task: str = Field(min_length=5, max_length=4000)
 
     @field_validator("task")
     @classmethod
