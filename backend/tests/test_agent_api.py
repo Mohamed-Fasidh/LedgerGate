@@ -1,6 +1,7 @@
 import pytest
 
-from app.main import _build_agent_orchestrator
+from app.agent.orchestrator import AgentRunResult
+from app.main import _build_agent_orchestrator, run_agent_task
 from app.schemas import AgentTaskIn
 
 
@@ -20,6 +21,11 @@ def test_agent_task_schema_trims_input_and_rejects_blank():
         AgentTaskIn(task="x" * 4001)
 
 
+def test_agent_task_schema_rejects_client_supplied_tenant_scope():
+    with pytest.raises(ValueError):
+        AgentTaskIn(task="Review invoice 42", tenant_id="attacker-tenant")
+
+
 def test_api_orchestrator_binds_planner_and_executor_to_authenticated_tenant(monkeypatch):
     monkeypatch.setattr(
         "app.main._get_agent_inference_client", lambda: FakeInferenceClient()
@@ -32,6 +38,62 @@ def test_api_orchestrator_binds_planner_and_executor_to_authenticated_tenant(mon
     assert orchestrator.planner.tool_executor is orchestrator.executor
     assert orchestrator.max_steps == 5
     assert orchestrator.timeout_seconds == 30.0
+
+
+def test_agent_endpoint_uses_authenticated_tenant_and_returns_json_safe_result(monkeypatch):
+    captured = {}
+    result = AgentRunResult(
+        status="completed",
+        plan=None,
+        outputs=[{"step": 1, "tool": "policy_search", "output": []}],
+        trace=[],
+    )
+
+    class FakeOrchestrator:
+        def run(self, task):
+            captured["task"] = task
+            return result
+
+    def build(_db, tenant_id):
+        captured["tenant_id"] = tenant_id
+        return FakeOrchestrator()
+
+    monkeypatch.setattr("app.main._build_agent_orchestrator", build)
+    response = run_agent_task(
+        AgentTaskIn(task="Review invoice 42"),
+        db=object(),
+        user=type("AuthenticatedUser", (), {"tenant_id": "tenant-from-auth-token"})(),
+    )
+
+    assert captured == {
+        "tenant_id": "tenant-from-auth-token",
+        "task": "Review invoice 42",
+    }
+    assert response["status"] == "completed"
+    assert response["outputs"][0]["tool"] == "policy_search"
+
+
+def test_agent_endpoint_maps_planning_failure_to_service_unavailable(monkeypatch):
+    from fastapi import HTTPException
+    from types import SimpleNamespace
+
+    class FakeOrchestrator:
+        def run(self, _task):
+            return SimpleNamespace(error_code="PLAN_FAILED")
+
+    monkeypatch.setattr(
+        "app.main._build_agent_orchestrator",
+        lambda _db, _tenant_id: FakeOrchestrator(),
+    )
+    with pytest.raises(HTTPException) as exc:
+        run_agent_task(
+            AgentTaskIn(task="Review invoice 42"),
+            db=object(),
+            user=type("AuthenticatedUser", (), {"tenant_id": "tenant-a"})(),
+        )
+
+    assert exc.value.status_code == 503
+    assert "provider" not in exc.value.detail.lower()
 
 
 def test_agent_endpoint_requires_authentication_and_uses_only_read_only_tools():
