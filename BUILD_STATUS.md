@@ -385,3 +385,20 @@ The post-merge CI and CodeQL checks were still running when this entry was writt
 ### Release boundary
 
 LedgerGate is an invoice intake, verification, and approval platform. Repository implementation and green CI are not production certification. A production release still requires provisioned staging/production infrastructure, managed secrets, TLS/network controls, least-privilege cloud identities, real integration tests, backup/PITR restoration, load testing, monitoring/alerting, incident response ownership, and independent security/legal review. Do not describe the service as production-ready until those controls are evidenced.
+
+
+## Currency-scoped approval policies — 2026-11-17
+
+- PR #49 merged into `main`: [Feature: scope approval policies by invoice currency](https://github.com/Mohamed-Fasidh/LedgerGate/pull/49).
+- Merge commit: `bcf0b1d23cd7977036e3a5d65d153046bc629272`.
+- Approval policy amount ranges are now scoped by tenant and currency; invoice approval resolution selects the policy matching the invoice currency.
+- Existing policies are backfilled as INR. The database retains an INR server default for legacy/direct SQL inserts, and API input trims and uppercases three-letter alphabetic currency values.
+- Regression coverage includes currency normalization, currency-scoped overlap checks, and migration baseline expectations.
+- CI run [44066052536](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44066052536) passed backend tests and migrations, frontend build/audit, Docker operational checks and image builds. CodeQL run [44066052528](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44066052528) passed.
+- This is not full ISO 4217 membership validation: the current API validates three alphabetic characters, not a canonical currency-code registry. No FX conversion is performed.
+
+### Next engineering priorities
+
+- Continue the selective review of PR #3's authentication/session and MFA workflows; do not merge its divergent branch wholesale.
+- Verify tenant isolation and authentication data-access boundaries against current runtime database grants and RLS policies.
+- Continue external release gates: staging deployment, managed S3/IAM and object retention, real SMTP/HTTPS integration, backup restoration, load testing, monitoring, and independent security review.
