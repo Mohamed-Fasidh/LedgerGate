@@ -1,7 +1,7 @@
 import enum
 from decimal import Decimal
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, ForeignKey, ForeignKeyConstraint, Numeric, Text, Boolean, Enum, JSON, Integer, UniqueConstraint, Index
+from sqlalchemy import String, DateTime, ForeignKey, ForeignKeyConstraint, Numeric, Text, Boolean, Enum, JSON, Integer, UniqueConstraint, Index, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -97,7 +97,6 @@ class Invoice(Base):
     extraction_fields: Mapped[dict] = mapped_column(JSON, default=dict)
     reconciliation: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     idempotency_operation: Mapped[str | None] = mapped_column(String(32), nullable=True)
     idempotency_request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     approval_policy_id: Mapped[int | None] = mapped_column(ForeignKey("approval_policies.id"), nullable=True)
@@ -369,7 +368,8 @@ class AgentTask(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
     __table_args__ = (
-        UniqueConstraint("tenant_id", "idempotency_key", name="uq_agent_tasks_tenant_idempotency"),
+        CheckConstraint("status IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'timed_out')", name="ck_agent_tasks_status"),
+        CheckConstraint("attempts >= 0 AND max_attempts BETWEEN 1 AND 5", name="ck_agent_tasks_attempts"),
         ForeignKeyConstraint(
             ["tenant_id", "requested_by_user_id"],
             ["users.tenant_id", "users.id"],
