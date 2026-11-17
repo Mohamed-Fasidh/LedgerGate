@@ -176,3 +176,18 @@ def test_production_rejects_malformed_or_injected_email_from_addresses(from_addr
 
 def test_production_accepts_plain_email_from_address():
     validate_production_settings(production_settings(email_from_address="no-reply@example.com"))
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://app.example.com:invalid",
+        "https://app.example.com:70000",
+        " https://app.example.com",
+        "https://app.example.com\\n",
+        "https://",
+    ],
+)
+def test_production_rejects_malformed_cors_origins(origin):
+    with pytest.raises(RuntimeError, match="CORS origins"):
+        validate_production_settings(production_settings(cors_origins=origin))
