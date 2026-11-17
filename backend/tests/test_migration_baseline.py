@@ -88,7 +88,7 @@ def test_postgresql_schema_matches_frozen_baseline_and_all_following_revisions()
         revision = connection.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-        assert revision == "0026_preauth_identity_rls"
+        assert revision == "0027_tenant_owned_references"
 
         unique_constraints = {
             item["name"]
