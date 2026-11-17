@@ -76,16 +76,24 @@ def validate_production_settings(config: Settings) -> None:
         raise RuntimeError("Production requires at least one explicit HTTPS CORS origin")
     for origin in origins:
         parsed = urlparse(origin)
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise RuntimeError("Production CORS origins must contain valid ports") from exc
         hostname = (parsed.hostname or "").lower()
         if (
-            parsed.scheme != "https"
+            origin != origin.strip()
+            or any(ord(char) < 32 or ord(char) == 127 for char in origin)
+            or parsed.scheme != "https"
             or not parsed.netloc
+            or not hostname
             or parsed.path not in ("", "/")
             or parsed.query
             or parsed.fragment
             or parsed.username
             or parsed.password
             or hostname in {"localhost", "127.0.0.1", "::1"}
+            or (port is not None and not 1 <= port <= 65535)
         ):
             raise RuntimeError("Production CORS origins must be explicit HTTPS origins without paths or localhost")
 
