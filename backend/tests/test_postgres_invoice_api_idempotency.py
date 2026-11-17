@@ -200,6 +200,13 @@ def test_concurrent_invoice_decision_http_requests_replay_same_idempotent_respon
         else:
             main.app.dependency_overrides[main.get_db] = original_override
         try:
+            with engine.begin() as connection:
+                connection.exec_driver_sql(
+                    f'DROP TRIGGER IF EXISTS "{trigger_name}" ON public.invoice_approvals'
+                )
+                connection.exec_driver_sql(
+                    f'DROP FUNCTION IF EXISTS public."{function_name}"()'
+                )
             with Session.begin() as db:
                 if invoice_id is not None:
                     db.query(IdempotencyRecord).filter(
