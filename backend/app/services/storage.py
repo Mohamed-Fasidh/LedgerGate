@@ -48,7 +48,10 @@ def _parse_s3_invoice_location(tenant_id: str, location: str) -> tuple[str, str,
         or parsed.password
         or parsed.query
         or parsed.fragment
+        or "?" in location
+        or "#" in location
         or parsed.params
+        or parsed.path.startswith("//")
         or "\\" in location
         or "%" in parsed.path
     ):
@@ -144,6 +147,7 @@ def store_invoice(tenant_id: str, suffix: str, content: bytes, *, already_scanne
 
 def delete_invoice(tenant_id: str, location: str) -> None:
     """Remove an uncommitted invoice object after a failed database insert."""
+    _validate_tenant_id(tenant_id)
     if location.startswith("s3://"):
         bucket, key, _suffix = _parse_s3_invoice_location(tenant_id, location)
         try:
@@ -158,6 +162,7 @@ def delete_invoice(tenant_id: str, location: str) -> None:
     file_path.unlink(missing_ok=True)
 
 def read_invoice(tenant_id: str, location: str) -> tuple[bytes, str]:
+    _validate_tenant_id(tenant_id)
     if location.startswith("s3://"):
         bucket, key, suffix = _parse_s3_invoice_location(tenant_id, location)
         body = None
