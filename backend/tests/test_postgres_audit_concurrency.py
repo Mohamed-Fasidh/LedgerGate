@@ -2,12 +2,13 @@
 
 import os
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 
@@ -16,39 +17,76 @@ from sqlalchemy.orm import sessionmaker
     reason="Requires disposable PostgreSQL database",
 )
 def test_concurrent_audit_writers_append_to_one_unbroken_tenant_chain():
-    from app.audit import verify_tenant_chain, record_event
+    from app.audit import record_event, verify_tenant_chain
     from app.models import AuditEvent
 
+    application_name = "ledgergate-audit-" + uuid.uuid4().hex[:16]
     engine = create_engine(
         os.environ["TEST_POSTGRES_URL"],
         pool_size=3,
         max_overflow=0,
+        connect_args={"application_name": application_name},
     )
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     tenant_id = "audit-race-" + uuid.uuid4().hex
     actor = SimpleNamespace(id=1, tenant_id=tenant_id)
-    start = threading.Barrier(3)
+    second_started = threading.Event()
 
-    def append_event(index):
+    def append_second_event():
+        second_started.set()
         with Session.begin() as db:
-            start.wait(timeout=10)
             event = record_event(
                 db,
                 actor,
                 "concurrency_test",
-                f"{tenant_id}-{index}",
+                f"{tenant_id}-second",
                 "concurrent_append",
-                {"writer": index},
+                {"writer": "second"},
             )
             return event.event_hash
 
     try:
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            first = executor.submit(append_event, 1)
-            second = executor.submit(append_event, 2)
-            start.wait(timeout=10)
-            first_hash = first.result(timeout=15)
-            second_hash = second.result(timeout=15)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with Session.begin() as first:
+                first_event = record_event(
+                    first,
+                    actor,
+                    "concurrency_test",
+                    f"{tenant_id}-first",
+                    "concurrent_append",
+                    {"writer": "first"},
+                )
+                first_hash = first_event.event_hash
+                pending = executor.submit(append_second_event)
+                assert second_started.wait(timeout=5), "second writer did not start"
+
+                # Do not rely on timing alone: observe the competing backend
+                # blocked specifically on the tenant's PostgreSQL advisory lock.
+                deadline = time.monotonic() + 10
+                second_waiting_for_advisory_lock = False
+                while time.monotonic() < deadline:
+                    with engine.connect() as observer:
+                        waiting = observer.execute(
+                            text("""
+                                SELECT count(*)
+                                FROM pg_stat_activity
+                                WHERE application_name = :application_name
+                                  AND wait_event_type = 'Lock'
+                                  AND wait_event = 'advisory'
+                            """),
+                            {"application_name": application_name},
+                        ).scalar_one()
+                    if waiting:
+                        second_waiting_for_advisory_lock = True
+                        break
+                    time.sleep(0.05)
+
+                assert second_waiting_for_advisory_lock, (
+                    "second writer never waited on the PostgreSQL tenant "
+                    "advisory lock while the first transaction was open"
+                )
+
+            second_hash = pending.result(timeout=10)
 
         with Session.begin() as db:
             rows = (
