@@ -143,6 +143,10 @@ def test_production_requires_verified_postgresql_tls():
         "https://app.example.com#fragment",
         "https://app.example.com:invalid",
         "https://app.example.com:70000",
+        "https://app.example.com?",
+        "https://app.example.com#",
+        "https://app.example.com\\\\evil",
+        "https://app.example.com/ path",
     ],
 )
 def test_production_rejects_non_origin_public_app_urls(public_url):
@@ -183,6 +187,10 @@ def test_production_accepts_plain_email_from_address():
     [
         "https://app.example.com:invalid",
         "https://app.example.com:70000",
+        "https://app.example.com?",
+        "https://app.example.com#",
+        "https://app.example.com\\\\evil",
+        "https://app example.com",
         " https://app.example.com",
         "https://app.example.com\n",
         "https://",
