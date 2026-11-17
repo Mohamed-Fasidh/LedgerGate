@@ -1594,12 +1594,14 @@ def _lock_approval_policy_ranges(db: Session, tenant_id: str) -> None:
 def _find_overlapping_approval_policy(
     db: Session,
     tenant_id: str,
+    currency: str,
     min_amount: Decimal,
     max_amount: Decimal | None,
 ):
-    """Find one active policy overlapping the requested half-open amount range."""
+    """Find an active policy overlapping the range for this tenant and currency."""
     query = db.query(ApprovalPolicy).filter(
         ApprovalPolicy.tenant_id == tenant_id,
+        ApprovalPolicy.currency == currency,
         ApprovalPolicy.is_active.is_(True),
         or_(ApprovalPolicy.max_amount.is_(None), ApprovalPolicy.max_amount > min_amount),
     )
@@ -1613,6 +1615,7 @@ def _resolve_invoice_approval_plan(db:Session,inv:Invoice,user:User):
     amount=inv.amount if inv.amount is not None else Decimal('0.00')
     policy=db.query(ApprovalPolicy).filter(
         ApprovalPolicy.tenant_id==user.tenant_id,
+        ApprovalPolicy.currency==(inv.currency or "INR").upper(),
         ApprovalPolicy.is_active.is_(True),
         ApprovalPolicy.min_amount<=amount,
         or_(ApprovalPolicy.max_amount.is_(None),ApprovalPolicy.max_amount>amount)
@@ -1662,21 +1665,21 @@ def create_approval_policy(payload:ApprovalPolicyIn,idempotency_key:str|None=Hea
         if cached is not None:
             return cached
     overlapping_policy = _find_overlapping_approval_policy(
-        db, user.tenant_id, payload.min_amount, payload.max_amount
+        db, user.tenant_id, payload.currency, payload.min_amount, payload.max_amount
     )
     if overlapping_policy is not None:
         raise HTTPException(
             409,
             f"Amount range overlaps active policy '{overlapping_policy.name}'",
         )
-    policy=ApprovalPolicy(tenant_id=user.tenant_id,created_by_user_id=user.id,name=payload.name,min_amount=payload.min_amount,max_amount=payload.max_amount,approval_steps=payload.approval_steps)
+    policy=ApprovalPolicy(tenant_id=user.tenant_id,created_by_user_id=user.id,name=payload.name,currency=payload.currency,min_amount=payload.min_amount,max_amount=payload.max_amount,approval_steps=payload.approval_steps)
     db.add(policy)
     try:
         db.flush()
-        response={"id":policy.id,"name":policy.name,"min_amount":float(policy.min_amount),"max_amount":float(policy.max_amount) if policy.max_amount is not None else None,"approval_steps":policy.approval_steps,"is_active":policy.is_active}
+        response={"id":policy.id,"name":policy.name,"currency":policy.currency,"min_amount":float(policy.min_amount),"max_amount":float(policy.max_amount) if policy.max_amount is not None else None,"approval_steps":policy.approval_steps,"is_active":policy.is_active}
         if idempotency_key:
             _store_idempotency_response(db,user.tenant_id,idempotency_key,operation,fingerprint,response)
-        record_event(db,user,"approval_policy",policy.id,"created",{"name":policy.name,"min_amount":str(payload.min_amount),"max_amount":str(payload.max_amount) if payload.max_amount is not None else None,"approval_steps":payload.approval_steps,"idempotent":bool(idempotency_key)})
+        record_event(db,user,"approval_policy",policy.id,"created",{"name":policy.name,"min_amount":str(payload.min_amount),"max_amount":str(payload.max_amount) if payload.max_amount is not None else None,"approval_steps":payload.approval_steps,"currency":payload.currency,"idempotent":bool(idempotency_key)})
         db.commit()
         return response
     except IntegrityError:
@@ -1697,9 +1700,9 @@ def list_approval_policies(
         raise HTTPException(400, "Limit must be 1-200 and offset must be non-negative")
     rows = db.query(ApprovalPolicy).filter(
         ApprovalPolicy.tenant_id == user.tenant_id
-    ).order_by(ApprovalPolicy.min_amount.asc(), ApprovalPolicy.id.asc()).offset(offset).limit(limit).all()
+    ).order_by(ApprovalPolicy.currency.asc(), ApprovalPolicy.min_amount.asc(), ApprovalPolicy.id.asc()).offset(offset).limit(limit).all()
     return [
-        {"id": p.id, "name": p.name, "min_amount": float(p.min_amount),
+        {"id": p.id, "name": p.name, "currency": p.currency, "min_amount": float(p.min_amount),
          "max_amount": float(p.max_amount) if p.max_amount is not None else None,
          "approval_steps": p.approval_steps, "is_active": p.is_active}
         for p in rows
