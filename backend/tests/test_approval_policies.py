@@ -279,3 +279,52 @@ def test_approval_policy_currency_is_normalized_and_validated():
     assert payload.currency == "USD"
     with pytest.raises(ValidationError):
         ApprovalPolicyIn(name="Bad currency", currency="US1", approval_steps=[["reviewer"]])
+
+
+@pytest.mark.parametrize("invoice_currency", ["USD", "EUR", "INR"])
+def test_invoice_approval_plan_filters_policy_by_invoice_currency(invoice_currency):
+    from decimal import Decimal
+    from types import SimpleNamespace
+    import app.main as main
+    from app.models import ApprovalPolicy, Role
+
+    policy = SimpleNamespace(
+        id=91,
+        currency=invoice_currency,
+        approval_steps=[["reviewer"], ["admin"]],
+        min_amount=Decimal("0.00"),
+        is_active=True,
+    )
+    captured = {"conditions": []}
+
+    class Query:
+        def filter(self, *conditions):
+            captured["conditions"].extend(conditions)
+            return self
+        def order_by(self, *ordering):
+            return self
+        def first(self):
+            return policy
+
+    class DB:
+        def query(self, model):
+            assert model is ApprovalPolicy
+            return Query()
+
+    invoice = SimpleNamespace(
+        approval_steps_snapshot=None,
+        amount=Decimal("250.00"),
+        currency=invoice_currency,
+        approval_policy_id=None,
+        approval_stage=0,
+    )
+    actor = SimpleNamespace(tenant_id="tenant-a", role=Role.reviewer)
+
+    result = main._resolve_invoice_approval_plan(DB(), invoice, actor)
+
+    assert result == policy.approval_steps
+    assert invoice.approval_policy_id == policy.id
+    assert invoice.approval_steps_snapshot == policy.approval_steps
+    assert invoice.approval_stage == 1
+    rendered = [str(condition) for condition in captured["conditions"]]
+    assert any(f"approval_policies.currency = '{invoice_currency}'" in item for item in rendered)
