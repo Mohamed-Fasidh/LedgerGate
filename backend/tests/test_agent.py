@@ -1,4 +1,7 @@
-from decimal import Decimal\nfrom types import SimpleNamespace\n\nfrom app.agent.runtime import AgentContext, ReconciliationAgent, build_reconciliation_context
+from decimal import Decimal
+from types import SimpleNamespace
+
+from app.agent.runtime import AgentContext, ReconciliationAgent, build_reconciliation_context
 
 
 def _context(invoice_amount, po_amount):
