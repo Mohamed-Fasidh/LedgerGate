@@ -13,6 +13,10 @@ def test_agent_task_schema_trims_input_and_rejects_blank():
     with pytest.raises(ValueError):
         AgentTaskIn(task="   ")
     with pytest.raises(ValueError):
+        AgentTaskIn(task="     ")
+    with pytest.raises(ValueError):
+        AgentTaskIn(task="four")
+    with pytest.raises(ValueError):
         AgentTaskIn(task="x" * 4001)
 
 
