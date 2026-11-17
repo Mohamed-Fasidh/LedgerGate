@@ -1,7 +1,38 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import ipaddress
+import re
 from urllib.parse import parse_qs, urlparse
 from email.headerregistry import Address
 from email.utils import parseaddr
+
+
+def _is_unsafe_production_hostname(hostname: str) -> bool:
+    """Reject local/private IP literals and malformed or local-only DNS names."""
+    normalized = hostname.rstrip(".").lower()
+    if not normalized or normalized != hostname.lower():
+        return True
+    if normalized == "localhost" or normalized.endswith(".localhost"):
+        return True
+    try:
+        address = ipaddress.ip_address(normalized)
+    except ValueError:
+        labels = normalized.split(".")
+        if len(labels) < 2 or len(normalized) > 253:
+            return True
+        if any(
+            not label
+            or len(label) > 63
+            or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", label)
+            for label in labels
+        ):
+            return True
+        # Reject non-standard integer/octal-like IPv4 host spellings.
+        if not any(char.isalpha() for char in labels[-1]):
+            return True
+        return False
+    if getattr(address, "ipv4_mapped", None) is not None:
+        address = address.ipv4_mapped
+    return not address.is_global
 
 
 class Settings(BaseSettings):
@@ -102,7 +133,7 @@ def validate_production_settings(config: Settings) -> None:
             or parsed.fragment
             or parsed.username
             or parsed.password
-            or hostname in {"localhost", "127.0.0.1", "::1"}
+            or _is_unsafe_production_hostname(hostname)
             or (port is not None and not 1 <= port <= 65535)
         ):
             raise RuntimeError("Production CORS origins must be explicit HTTPS origins without paths or localhost")
@@ -178,7 +209,7 @@ def validate_production_settings(config: Settings) -> None:
         or public_url.scheme != "https"
         or not public_url.netloc
         or not public_hostname
-        or public_hostname in {"localhost", "127.0.0.1", "::1"}
+        or _is_unsafe_production_hostname(public_hostname)
         or public_url.path not in ("", "/")
         or public_url.username
         or public_url.password
