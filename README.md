@@ -53,6 +53,7 @@ For local development without Docker:
 - `GET/POST /api/v1/suppliers`
 - `GET/POST /api/v1/purchase-orders`
 - `GET/POST /api/v1/invoices`
+- `POST /api/v1/agent/tasks` (authenticated, bounded, read-only agent task execution)
 - `POST /api/v1/invoices/{id}/reconcile`
 - `POST /api/v1/invoices/{id}/approve`
 - `POST /api/v1/invoices/{id}/reject`
@@ -78,3 +79,17 @@ Run the deterministic agent-evaluation suite from its package directory with `py
 ## Vizuara teaching workshops
 
 Four 15–20 minute teaching plans with mathematical explanations, coding demonstrations, interview questions, and exercises are available in [docs/workshops](docs/workshops/README.md). They cover Transformers from first principles, AI agent engineering and evaluation, PPO/GRPO, and LLM inference/GPU performance. Workshop materials are instructional plans; benchmark outputs must be generated on the actual hardware and model server used.
+
+
+### Read-only agent task API
+
+Send an authenticated task description; the server derives tenant scope from the access token and does not accept a tenant ID from the client.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/agent/tasks \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"task":"Find policy evidence relevant to duplicate invoices"}'
+```
+
+The endpoint uses the configured inference provider (`INFERENCE_PROVIDER=ollama` or `vllm`), validates the model-generated plan against read-only tool schemas, and limits execution to five steps and 30 seconds. It returns a structured plan, tool outputs, and a redacted execution trace. It cannot approve, reject, pay, or modify financial records. Configure and test the model server separately; the API does not install or launch Ollama/vLLM for you. This is synchronous in-process execution, not a durable job queue.

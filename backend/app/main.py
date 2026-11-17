@@ -1,4 +1,5 @@
 import uuid, hashlib, tempfile, json, secrets, hmac, socket, logging
+from threading import Lock
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -16,11 +17,13 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, PasswordResetToken, EmailVerificationToken, Role, InvoiceStatus
-from app.schemas import RegisterIn, TokenOut, RefreshIn, ChangePasswordIn, PasswordResetRequestIn, PasswordResetConfirmIn, EmailVerificationRequestIn, EmailVerificationConfirmIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn
+from app.schemas import RegisterIn, TokenOut, RefreshIn, ChangePasswordIn, PasswordResetRequestIn, PasswordResetConfirmIn, EmailVerificationRequestIn, EmailVerificationConfirmIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn, AgentTaskIn
 from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code, find_user_for_authentication, find_user_for_auth_token, authentication_email_exists
 from app.audit import record_event, verify_tenant_chain, event_payload, lock_tenant_audit_chain
 from app.services.audit_export import store_immutable_audit_export, AuditExportUnavailable
 from app.agent.runtime import ReconciliationAgent, build_reconciliation_context
+from app.services.inference import InferenceClient, InferenceConfig
+from app.agent.service import build_read_only_orchestrator
 from app.services.document_extraction import extract_file
 from app.services.retrieval import retrieve_policy, retrieve_business_records
 from app.services.evaluation import run_evaluation
@@ -229,6 +232,32 @@ def _issue_token_pair(db: Session, user: User, family_id: str | None = None):
     db.flush()
     return {"access_token": create_access_token(user), "refresh_token": refresh_token}
 
+
+
+_agent_inference_client = None
+_agent_inference_client_lock = Lock()
+
+
+def _get_agent_inference_client() -> InferenceClient:
+    """Reuse one bounded inference client per API worker process."""
+    global _agent_inference_client
+    if _agent_inference_client is None:
+        with _agent_inference_client_lock:
+            if _agent_inference_client is None:
+                try:
+                    config = InferenceConfig.from_env()
+                except (TypeError, ValueError):
+                    raise HTTPException(503, "Agent inference configuration is invalid") from None
+                _agent_inference_client = InferenceClient(config)
+    return _agent_inference_client
+
+
+def _build_agent_orchestrator(db: Session, tenant_id: str):
+    """Bind planner and read-only executor to the authenticated tenant."""
+    return build_read_only_orchestrator(
+        db, tenant_id, inference_client=_get_agent_inference_client(),
+        max_steps=5, timeout_seconds=30.0,
+    )
 
 
 @app.get("/health")
@@ -1841,6 +1870,22 @@ def invoice_approvals(invoice_id:int,db:Session=Depends(get_db),user:User=Depend
     if not inv: raise HTTPException(404,"Invoice not found")
     rows=db.query(InvoiceApproval).filter(InvoiceApproval.tenant_id==user.tenant_id,InvoiceApproval.invoice_id==inv.id).order_by(InvoiceApproval.stage.asc(),InvoiceApproval.created_at.asc()).all()
     return {"invoice_id":inv.id,"policy_id":inv.approval_policy_id,"approval_steps":inv.approval_steps_snapshot or [["reviewer","admin"]],"current_stage":inv.approval_stage or 1,"decisions":[{"stage":r.stage,"approver_user_id":r.approver_user_id,"decision":r.decision,"comment":r.comment,"created_at":r.created_at.isoformat()} for r in rows]}
+
+
+@app.post("/api/v1/agent/run", include_in_schema=False)
+@app.post("/api/v1/agent/tasks")
+def run_agent_task(
+    payload: AgentTaskIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Run bounded read-only evidence gathering under the authenticated tenant."""
+    orchestrator = _build_agent_orchestrator(db, user.tenant_id)
+    result = orchestrator.run(payload.task)
+    if result.error_code == "PLAN_FAILED":
+        raise HTTPException(503, "Agent planning service could not produce a valid plan")
+    return jsonable_encoder(result)
+
 
 @app.post("/api/v1/agent/memory")
 def add_agent_memory(content:str,memory_type:str="episodic",idempotency_key:str|None=Header(default=None,alias="Idempotency-Key"),db:Session=Depends(get_db),user:User=Depends(require_roles("admin","analyst"))):

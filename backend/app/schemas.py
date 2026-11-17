@@ -124,3 +124,16 @@ class EmailVerificationRequestIn(BaseModel):
 
 class EmailVerificationConfirmIn(BaseModel):
     token: str = Field(min_length=32, max_length=256)
+
+
+class AgentTaskIn(BaseModel):
+    """User task description; tenant scope always comes from the access token."""
+    task: str = Field(min_length=5, max_length=4000)
+
+    @field_validator("task")
+    @classmethod
+    def normalize_agent_task(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 5:
+            raise ValueError("Task description must contain at least five non-whitespace characters")
+        return normalized
