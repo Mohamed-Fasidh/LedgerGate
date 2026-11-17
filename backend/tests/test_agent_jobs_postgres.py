@@ -54,7 +54,9 @@ def test_agent_queue_claims_are_distinct_and_expired_leases_are_recovered():
                         FROM public.claim_agent_task(:worker_id, :token, 180)
                     """),
                     {"worker_id": worker_id, "token": token},
-                ).mappings().one()
+                ).mappings().first()
+            if row is None:
+                return None
             return {"id": row["task_id"], "tenant": row["task_tenant_id"], "token": token}
 
         with ThreadPoolExecutor(max_workers=2) as pool:
