@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -15,18 +16,27 @@ class AuditExportUnavailable(RuntimeError):
     pass
 
 
+# Bound synchronous export memory use and S3 object size. Larger audit histories
+# must be exported as multiple verified batches using the after_id cursor.
+MAX_AUDIT_EXPORT_BYTES = 10 * 1024 * 1024
+
+
 def canonical_json(value: dict) -> bytes:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        default=str,
-    ).encode("utf-8")
+    """Serialize only strict JSON values; reject NaN/Infinity and implicit coercion."""
+    try:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise AuditExportUnavailable("Audit export contains values that are not strict JSON") from exc
 
 
 def sign_audit_payload(payload: dict, signing_key: str) -> tuple[str, str]:
-    if len(signing_key) < 32:
+    if not isinstance(signing_key, str) or len(signing_key) < 32:
         raise AuditExportUnavailable("AUDIT_EXPORT_SIGNING_KEY must contain at least 32 characters")
     encoded = canonical_json(payload)
     digest = hashlib.sha256(encoded).hexdigest()
@@ -40,7 +50,10 @@ def verify_audit_export_signature(document: dict, signing_key: str) -> bool:
     signature = document.get("signature")
     digest = document.get("payload_sha256")
     payload = {key: value for key, value in document.items() if key not in ("signature", "payload_sha256", "signature_algorithm")}
-    expected_digest, expected_signature = sign_audit_payload(payload, signing_key)
+    try:
+        expected_digest, expected_signature = sign_audit_payload(payload, signing_key)
+    except (AuditExportUnavailable, TypeError, ValueError, AttributeError):
+        return False
     return (
         document.get("signature_algorithm") == "HMAC-SHA256"
         and isinstance(signature, str)
@@ -70,29 +83,79 @@ def verify_audit_export_signature_with_keyring(document: dict, keyring: dict[str
     except (AuditExportUnavailable, TypeError, ValueError, AttributeError):
         return False
 
+def _is_sha256_hex(value: object) -> bool:
+    """Accept only canonical lowercase SHA-256 digests."""
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _is_bounded_text(value: object, maximum: int) -> bool:
+    return isinstance(value, str) and 0 < len(value) <= maximum and value.strip() == value
+
+
 def verify_audit_export_document(document: dict, keyring: dict[str, str]) -> bool:
-    """Verify signature, export metadata, and every event's tenant hash-chain link."""
+    """Verify signature, strict export metadata, and every event hash-chain link."""
     if not verify_audit_export_signature_with_keyring(document, keyring):
         return False
     try:
         events = document.get("events")
         tenant_id = document.get("tenant_id")
-        if not isinstance(events, list) or not events or not isinstance(tenant_id, str) or not tenant_id:
+        event_count = document.get("event_count")
+        first_event_id = document.get("first_event_id")
+        last_event_id = document.get("last_event_id")
+        retention_days = document.get("retention_days")
+        if not isinstance(events, list) or not events or not _is_bounded_text(tenant_id, 64):
             return False
         if document.get("format") != "ledgergate-audit-export-v1":
             return False
-        if document.get("event_count") != len(events):
+        if not isinstance(event_count, int) or isinstance(event_count, bool) or event_count != len(events):
+            return False
+        if not isinstance(first_event_id, int) or isinstance(first_event_id, bool) or first_event_id < 1:
+            return False
+        if not isinstance(last_event_id, int) or isinstance(last_event_id, bool) or last_event_id < first_event_id:
+            return False
+        if not isinstance(retention_days, int) or isinstance(retention_days, bool) or not 1 <= retention_days <= 3650:
+            return False
+        export_id = document.get("export_id")
+        if not isinstance(export_id, str):
+            return False
+        try:
+            # Export IDs are generated as UUIDs and are part of the immutable
+            # object identity; accept only their canonical lowercase form.
+            if str(uuid.UUID(export_id)) != export_id:
+                return False
+        except (ValueError, AttributeError):
+            return False
+        if not _is_bounded_text(document.get("signing_key_id"), 128):
+            return False
+        exported_at = document.get("exported_at")
+        if not isinstance(exported_at, str):
+            return False
+        exported_timestamp = datetime.fromisoformat(exported_at.replace("Z", "+00:00"))
+        if exported_timestamp.tzinfo is None or exported_timestamp.utcoffset() is None:
             return False
 
-        expected_previous = events[0].get("previous_hash")
-        if not isinstance(expected_previous, str) or len(expected_previous) != 64:
+        expected_previous = events[0].get("previous_hash") if isinstance(events[0], dict) else None
+        if not _is_sha256_hex(expected_previous):
             return False
-        if document.get("first_previous_hash") != expected_previous:
+        if document.get("first_previous_hash") != expected_previous or not _is_sha256_hex(document.get("first_previous_hash")):
             return False
 
         previous_id = None
         for event in events:
             if not isinstance(event, dict) or event.get("tenant_id") != tenant_id:
+                return False
+            actor_id = event.get("actor_user_id")
+            if actor_id is not None and (
+                not isinstance(actor_id, int) or isinstance(actor_id, bool) or actor_id < 1
+            ):
+                return False
+            if not _is_bounded_text(event.get("entity_type"), 80):
+                return False
+            if not _is_bounded_text(event.get("entity_id"), 80):
+                return False
+            if not _is_bounded_text(event.get("action"), 100):
+                return False
+            if not isinstance(event.get("details"), dict):
                 return False
             event_id = event.get("id")
             if not isinstance(event_id, int) or isinstance(event_id, bool) or event_id < 1:
@@ -100,13 +163,15 @@ def verify_audit_export_document(document: dict, keyring: dict[str, str]) -> boo
             if previous_id is not None and event_id <= previous_id:
                 return False
             previous_id = event_id
-            if event.get("previous_hash") != expected_previous:
+            if event.get("previous_hash") != expected_previous or not _is_sha256_hex(event.get("previous_hash")):
                 return False
 
             created_at = event.get("created_at")
             if not isinstance(created_at, str):
                 return False
             timestamp = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+                return False
             payload = event_payload(
                 tenant_id=event["tenant_id"],
                 actor_user_id=event.get("actor_user_id"),
@@ -118,18 +183,18 @@ def verify_audit_export_document(document: dict, keyring: dict[str, str]) -> boo
             )
             calculated = calculate_event_hash(expected_previous, payload)
             stored_hash = event.get("event_hash")
-            if not isinstance(stored_hash, str) or not hmac.compare_digest(stored_hash, calculated):
+            if not _is_sha256_hex(stored_hash) or not hmac.compare_digest(stored_hash, calculated):
                 return False
             expected_previous = stored_hash
 
         return (
-            document.get("first_event_id") == events[0]["id"]
-            and document.get("last_event_id") == events[-1]["id"]
-            and document.get("last_event_hash") == expected_previous
+            first_event_id == events[0]["id"]
+            and last_event_id == events[-1]["id"]
+            and _is_sha256_hex(document.get("last_event_hash"))
+            and hmac.compare_digest(document["last_event_hash"], expected_previous)
         )
     except (KeyError, TypeError, ValueError, AttributeError):
         return False
-
 
 def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retention_days: int | None = None) -> dict:
     bucket = settings.audit_worm_bucket.strip()
@@ -137,13 +202,15 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
     retention = settings.audit_worm_retention_days if retention_days is None else retention_days
     if not bucket:
         raise AuditExportUnavailable("AUDIT_WORM_BUCKET is not configured")
-    if not settings.audit_export_signing_key_id.strip():
-        raise AuditExportUnavailable("AUDIT_EXPORT_SIGNING_KEY_ID is not configured")
-    if len(signing_key) < 32:
+    if not isinstance(tenant_id, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", tenant_id) is None:
+        raise AuditExportUnavailable("Tenant ID must be a safe, bounded storage path segment")
+    if not isinstance(settings.audit_export_signing_key_id, str) or not _is_bounded_text(settings.audit_export_signing_key_id, 128):
+        raise AuditExportUnavailable("AUDIT_EXPORT_SIGNING_KEY_ID is invalid")
+    if not isinstance(signing_key, str) or len(signing_key) < 32:
         raise AuditExportUnavailable("AUDIT_EXPORT_SIGNING_KEY must contain at least 32 characters")
-    if retention < 1 or retention > 3650:
-        raise AuditExportUnavailable("Audit export retention must be between 1 and 3650 days")
-    if not events:
+    if not isinstance(retention, int) or isinstance(retention, bool) or not 1 <= retention <= 3650:
+        raise AuditExportUnavailable("Audit export retention must be an integer between 1 and 3650 days")
+    if not isinstance(events, list) or not events:
         raise AuditExportUnavailable("An audit export must contain at least one event")
 
     client = _s3_client()
@@ -187,7 +254,19 @@ def store_immutable_audit_export(tenant_id: str, events: list[dict], *, retentio
         "signature_algorithm": "HMAC-SHA256",
         "signature": signature,
     }
+    # Validate the exact signed representation before making an irreversible
+    # COMPLIANCE-mode write. This protects the storage boundary even when a
+    # future caller bypasses the API's database-chain verification.
+    if not verify_audit_export_document(
+        document,
+        {settings.audit_export_signing_key_id: signing_key},
+    ):
+        raise AuditExportUnavailable("Audit export events or metadata failed strict validation")
     body = canonical_json(document)
+    if len(body) > MAX_AUDIT_EXPORT_BYTES:
+        raise AuditExportUnavailable(
+            f"Audit export exceeds the {MAX_AUDIT_EXPORT_BYTES}-byte object limit; export a smaller batch"
+        )
     key = (
         f"tenants/{tenant_id}/audit-exports/"
         f"{events[0]['id']}-{events[-1]['id']}/{export_id}.json"
