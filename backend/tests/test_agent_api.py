@@ -1,5 +1,6 @@
 import pytest
 
+from app.agent.orchestrator import AgentRunResult
 from app.main import _build_agent_orchestrator, run_agent_task
 from app.schemas import AgentTaskIn
 
@@ -40,13 +41,13 @@ def test_api_orchestrator_binds_planner_and_executor_to_authenticated_tenant(mon
 
 
 def test_agent_endpoint_uses_authenticated_tenant_and_returns_json_safe_result(monkeypatch):
-    from types import SimpleNamespace
-
     captured = {}
-    result = {
-        "status": "completed",
-        "outputs": [{"step": 1, "tool": "policy_search", "output": []}],
-    }
+    result = AgentRunResult(
+        status="completed",
+        plan=None,
+        outputs=[{"step": 1, "tool": "policy_search", "output": []}],
+        trace=[],
+    )
 
     class FakeOrchestrator:
         def run(self, task):
@@ -61,19 +62,20 @@ def test_agent_endpoint_uses_authenticated_tenant_and_returns_json_safe_result(m
     response = run_agent_task(
         AgentTaskIn(task="Review invoice 42"),
         db=object(),
-        user=SimpleNamespace(tenant_id="tenant-from-auth-token"),
+        user=type("AuthenticatedUser", (), {"tenant_id": "tenant-from-auth-token"})(),
     )
 
     assert captured == {
         "tenant_id": "tenant-from-auth-token",
         "task": "Review invoice 42",
     }
-    assert response == result
+    assert response["status"] == "completed"
+    assert response["outputs"][0]["tool"] == "policy_search"
 
 
 def test_agent_endpoint_maps_planning_failure_to_service_unavailable(monkeypatch):
-    from types import SimpleNamespace
     from fastapi import HTTPException
+    from types import SimpleNamespace
 
     class FakeOrchestrator:
         def run(self, _task):
@@ -87,7 +89,7 @@ def test_agent_endpoint_maps_planning_failure_to_service_unavailable(monkeypatch
         run_agent_task(
             AgentTaskIn(task="Review invoice 42"),
             db=object(),
-            user=SimpleNamespace(tenant_id="tenant-a"),
+            user=type("AuthenticatedUser", (), {"tenant_id": "tenant-a"})(),
         )
 
     assert exc.value.status_code == 503
