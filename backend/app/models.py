@@ -97,6 +97,7 @@ class Invoice(Base):
     extraction_fields: Mapped[dict] = mapped_column(JSON, default=dict)
     reconciliation: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     idempotency_operation: Mapped[str | None] = mapped_column(String(32), nullable=True)
     idempotency_request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     approval_policy_id: Mapped[int | None] = mapped_column(ForeignKey("approval_policies.id"), nullable=True)
