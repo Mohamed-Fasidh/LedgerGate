@@ -333,3 +333,27 @@ LedgerGate is an invoice verification and human-approval workflow platform. It d
 - Added `docs/CI_VERIFICATION_2026-11-16.md` to preserve the exact revision, run URL, checks, and production release boundary.
 - This result verifies automated CI only; it does not establish staging or production deployment, cloud security configuration, external email delivery, independent security review, or operational acceptance.
 - Historical note: PR #5 was subsequently merged into main; see Current verified state at the top of this document. Workflow cleanup remains branch-only until a separately authorized merge.
+
+
+## Repository continuation — 2026-11-17
+
+The following changes were merged into `main` during the 2026-11-17 continuation:
+
+- PR #30 — run the tested workflow-cleanup script. The scheduled cleanup workflow is configured for every five minutes; GitHub Actions cron does not provide a one-minute schedule.
+- PR #31 — freeze the initial Alembic schema as explicit DDL, reject applying the baseline to a non-empty unversioned schema, and add schema-contract regression coverage.
+- PR #32 — harden production `PUBLIC_APP_URL` validation.
+- PR #33 — prevent finalized invoice workflow states from being reopened through the guarded transition paths.
+- PR #34 — recognize USD/EUR/GBP currency markers while retaining INR fallback, and join OCR PDF page text with actual newlines.
+
+The post-merge CI and CodeQL checks were still running when this entry was written. Do not treat these merges as verified by post-merge CI until all checks for the current `main` commit finish successfully.
+
+### Remaining repository work
+
+- PR #35 (same-tenant database references) and PR #36 (strict signed audit-export validation) are still open. Their branches diverged from the current `main`; PR #35 also changes the frozen initial migration and must be reconciled carefully rather than merged blindly. Rebase/reconcile, run the complete PostgreSQL migration path and security tests, then review before merging.
+- PRs #38–#40 are stacked security changes based on PR #36/#39. Keep them draft until their complete dependency chain is rebased, validated, and reviewed.
+- PR #3 targets the separate `production-readiness` branch and carries a different migration lineage. It must not be merged wholesale into `main`; selectively port reviewed functionality only after migration and API compatibility review.
+- No live cloud deployment, real SMTP delivery, production S3/IAM/Object Lock verification, restore exercise, independent penetration test, or compliance sign-off is established by repository CI.
+
+### Release boundary
+
+LedgerGate is an invoice intake, verification, and approval platform. Repository implementation and green CI are not production certification. A production release still requires provisioned staging/production infrastructure, managed secrets, TLS/network controls, least-privilege cloud identities, real integration tests, backup/PITR restoration, load testing, monitoring/alerting, incident response ownership, and independent security/legal review. Do not describe the service as production-ready until those controls are evidenced.
