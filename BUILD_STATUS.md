@@ -506,3 +506,12 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - Updated both independent PostgreSQL sessions in the invoice `SELECT ... FOR UPDATE` test to use `ledgergate_runtime` and transaction-local `app.tenant_id`.
 - PR-head backend, frontend, Docker and CodeQL checks passed.
 - Post-merge CI [44073708379](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44073708379) and CodeQL [44073708280](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44073708280) passed.
+
+## Concurrent invoice approval HTTP idempotency — 2026-11-17
+
+- PR #61 merged: [Test: cover concurrent invoice approval API idempotency](https://github.com/Mohamed-Fasidh/LedgerGate/pull/61).
+- Merge commit: `de4f5ef3dbf44ab077ad7674d0d7defde3bb2d11`.
+- Added a PostgreSQL-backed integration test that sends two authenticated approval requests concurrently through the real FastAPI route and dependencies, using the restricted `ledgergate_runtime` role and tenant RLS.
+- The test verifies both HTTP requests return the same successful response and exactly one approval, one durable idempotency record, and one human-approval audit event are persisted; it also verifies the tenant audit chain.
+- PR-head CI run [44074094376](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074094376) passed backend (including the new PostgreSQL API test), frontend, and Docker. CodeQL run [44074094403](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074094403) passed Python and JavaScript/TypeScript analysis.
+- Post-merge CI [44074379659](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074379659) and CodeQL [44074379438](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44074379438) were triggered and are pending.
