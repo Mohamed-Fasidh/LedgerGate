@@ -276,3 +276,41 @@ def test_auth_lookup_functions_have_narrow_runtime_execution_privileges():
             assert function["runtime_can_assume_owner"] is False, function_name
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_auth_lookup_functions_expose_only_minimal_identity_fields():
+    """Cross-tenant discovery functions must not return credentials or token data."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    expected_outputs = {
+        "auth_lookup_user": ["user_id", "tenant_id", "is_active", "email_verified"],
+        "auth_email_exists": [],
+        "auth_lookup_password_reset": ["user_id", "tenant_id"],
+        "auth_lookup_email_verification": ["user_id", "tenant_id"],
+    }
+
+    try:
+        with engine.connect() as connection:
+            for function_name, expected_columns in expected_outputs.items():
+                columns = connection.execute(text("""
+                    SELECT parameter_name
+                    FROM information_schema.parameters
+                    WHERE specific_schema = 'public'
+                      AND specific_name LIKE :specific_name
+                      AND parameter_mode IN ('OUT', 'TABLE')
+                    ORDER BY ordinal_position
+                """), {"specific_name": function_name + "%"}).scalars().all()
+                assert list(columns) == expected_columns, function_name
+
+                config = connection.execute(text("""
+                    SELECT proconfig
+                    FROM pg_proc p
+                    JOIN pg_namespace n ON n.oid = p.pronamespace
+                    WHERE n.nspname = 'public' AND p.proname = :function_name
+                """), {"function_name": function_name}).scalar_one()
+                assert config and any(
+                    setting.replace(" ", "") == "search_path=pg_catalog,public"
+                    for setting in config
+                ), function_name
+    finally:
+        engine.dispose()
