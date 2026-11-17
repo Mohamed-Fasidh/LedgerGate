@@ -1749,7 +1749,7 @@ def approve(invoice_id:int,payload:ApprovalDecisionIn|None=None,idempotency_key:
     if idempotency_key:
         cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
         if cached is not None: return cached
-    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status not in (InvoiceStatus.review_required,InvoiceStatus.processing): raise HTTPException(409,"Invoice is not awaiting a decision")
     if inv.created_by_user_id == user.id: raise HTTPException(403,"Maker-checker policy: the invoice creator cannot approve their own invoice")
@@ -1794,7 +1794,7 @@ def reject(invoice_id:int,payload:ApprovalDecisionIn|None=None,idempotency_key:s
     if idempotency_key:
         cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
         if cached is not None: return cached
-    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
     if inv.status in (InvoiceStatus.approved,InvoiceStatus.rejected): raise HTTPException(409,"Invoice is already finalized")
     if inv.status not in (InvoiceStatus.review_required,InvoiceStatus.processing): raise HTTPException(409,"Invoice is not awaiting a decision")

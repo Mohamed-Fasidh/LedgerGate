@@ -353,8 +353,13 @@ def test_invoice_maker_cannot_approve_or_reject_own_invoice(endpoint_name):
     )
 
     class Query:
+        def __init__(self):
+            self.locked = False
         def filter(self, *conditions):
             self.conditions = conditions
+            return self
+        def with_for_update(self):
+            self.locked = True
             return self
         def first(self):
             return invoice
@@ -362,9 +367,11 @@ def test_invoice_maker_cannot_approve_or_reject_own_invoice(endpoint_name):
     class DB:
         def __init__(self):
             self.added = []
+            self.invoice_query = None
         def query(self, model):
             assert model is Invoice
-            return Query()
+            self.invoice_query = Query()
+            return self.invoice_query
         def add(self, value):
             self.added.append(value)
 
@@ -378,6 +385,7 @@ def test_invoice_maker_cannot_approve_or_reject_own_invoice(endpoint_name):
     assert error.value.status_code == 403
     assert "creator cannot" in error.value.detail
     assert db.added == []
+    assert db.invoice_query.locked is True
 
 
 @pytest.mark.parametrize("path", [
