@@ -40,6 +40,8 @@ class TaskOrchestrator:
             raise ValueError("max_steps must be between 1 and 10")
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        if getattr(planner, "tool_executor", None) is not executor:
+            raise ValueError("planner and orchestrator must share the same ToolExecutor instance")
         self.planner = planner
         self.executor = executor
         self.max_steps = max_steps

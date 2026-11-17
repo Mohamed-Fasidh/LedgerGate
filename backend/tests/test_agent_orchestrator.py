@@ -5,9 +5,10 @@ from app.agent.planner import PlannedStep, TaskPlan, PlanningError
 
 
 class FakePlanner:
-    def __init__(self, plan=None, error=None):
+    def __init__(self, plan=None, error=None, tool_executor=None):
         self.plan_result = plan
         self.error = error
+        self.tool_executor = tool_executor
 
     def plan(self, task, context=None):
         if self.error:
@@ -44,7 +45,9 @@ def test_orchestrator_executes_validated_read_only_steps_and_traces_them():
         ("policy_search", {"query": "duplicate invoice"}),
     )
     executor = FakeExecutor([{"invoice_number": "INV-10"}, {"matches": []}])
-    result = TaskOrchestrator(FakePlanner(plan), executor).run("Review invoice 10")
+    result = TaskOrchestrator(
+        FakePlanner(plan, tool_executor=executor), executor
+    ).run("Review invoice 10")
 
     assert result.status == "completed"
     assert len(result.outputs) == 2
@@ -60,9 +63,9 @@ def test_orchestrator_stops_when_cancelled_between_steps():
     event = Event()
     event.set()
     executor = FakeExecutor()
-    result = TaskOrchestrator(FakePlanner(plan), executor).run(
-        "Review invoice", cancel_event=event
-    )
+    result = TaskOrchestrator(
+        FakePlanner(plan, tool_executor=executor), executor
+    ).run("Review invoice", cancel_event=event)
     assert result.status == "cancelled"
     assert result.error_code == "CANCELLED"
     assert executor.calls == []
@@ -72,7 +75,9 @@ def test_orchestrator_enforces_deadline_before_tool_execution():
     plan = make_plan(("invoice_lookup", {"invoice_id": 10}))
     executor = FakeExecutor()
     result = TaskOrchestrator(
-        FakePlanner(plan), executor, timeout_seconds=0.0000001
+        FakePlanner(plan, tool_executor=executor),
+        executor,
+        timeout_seconds=0.0000001,
     ).run("Review invoice")
     assert result.status == "timed_out"
     assert result.error_code == "EXECUTION_DEADLINE_EXCEEDED"
@@ -85,7 +90,9 @@ def test_orchestrator_redacts_tool_failure_and_stops_following_steps():
         ("policy_search", {"query": "duplicate invoice"}),
     )
     executor = FakeExecutor(error=RuntimeError("database password=secret"))
-    result = TaskOrchestrator(FakePlanner(plan), executor).run("Review invoice")
+    result = TaskOrchestrator(
+        FakePlanner(plan, tool_executor=executor), executor
+    ).run("Review invoice")
     assert result.status == "failed"
     assert result.error_code == "TOOL_EXECUTION_FAILED"
     assert len(executor.calls) == 1
@@ -93,9 +100,10 @@ def test_orchestrator_redacts_tool_failure_and_stops_following_steps():
 
 
 def test_orchestrator_redacts_planning_failure():
+    executor = FakeExecutor()
     result = TaskOrchestrator(
-        FakePlanner(error=PlanningError("provider secret")),
-        FakeExecutor(),
+        FakePlanner(error=PlanningError("provider secret"), tool_executor=executor),
+        executor,
     ).run("Review invoice")
     assert result.status == "failed"
     assert result.error_code == "PLAN_FAILED"
@@ -109,8 +117,18 @@ def test_orchestrator_rejects_plan_that_exceeds_its_step_budget():
     )
     executor = FakeExecutor()
     result = TaskOrchestrator(
-        FakePlanner(plan), executor, max_steps=1
+        FakePlanner(plan, tool_executor=executor), executor, max_steps=1
     ).run("Review invoices")
     assert result.status == "failed"
     assert result.error_code == "STEP_LIMIT_EXCEEDED"
     assert executor.calls == []
+
+
+def test_orchestrator_rejects_mismatched_tenant_executor():
+    planner_executor = FakeExecutor()
+    different_executor = FakeExecutor()
+    planner = FakePlanner(make_plan(("invoice_lookup", {"invoice_id": 1})),
+                          tool_executor=planner_executor)
+    import pytest
+    with pytest.raises(ValueError, match="same ToolExecutor instance"):
+        TaskOrchestrator(planner, different_executor)
