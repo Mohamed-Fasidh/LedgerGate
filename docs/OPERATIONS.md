@@ -105,15 +105,22 @@ RECONCILIATION_DATABASE_URL="$RECONCILIATION_DATABASE_URL" python -m scripts.rec
 Deletion has a mandatory 24-hour minimum-age grace period to avoid racing uploads or invoice transactions. Objects that are too recent are reported as deferred; missing referenced objects are reported separately and are never deleted. Review the dry-run counts and confirm backups/retention requirements before enabling deletion.
 
 
-## Read-only agent task API
+## Read-only agent task APIs
 
-The authenticated `POST /api/v1/agent/tasks` endpoint runs bounded evidence-gathering plans. It derives tenant scope from the access token and only exposes the allowlisted invoice lookup, purchase-order search, and policy search tools.
+The authenticated `POST /api/v1/agent/tasks` endpoint remains the bounded synchronous path. It derives tenant scope from the access token and only exposes the allowlisted invoice lookup, purchase-order search, and policy search tools.
+
+For background execution, submit through `POST /api/v1/agent/jobs` and poll `GET /api/v1/agent/jobs/{job_id}`. Submission accepts the same bounded task schema and an optional `Idempotency-Key`; tenant and requester identity are never accepted from the request body. Job reads are restricted to the authenticated requester and tenant.
+
+The durable queue is PostgreSQL-backed. Migration `0029_durable_agent_tasks` creates a tenant-RLS-protected job table and a narrow `claim_agent_task` SECURITY DEFINER function. The function owner is a dedicated NOLOGIN/BYPASSRLS role that has SELECT/UPDATE only on the job table; the runtime role can execute the fixed claim function but is not a member of the owner role. Claims use `FOR UPDATE SKIP LOCKED`, random lease tokens, 180-second leases, and at most three attempts. A crashed worker's expired lease can be reclaimed; a worker whose lease was replaced cannot commit a stale result. Transient worker exceptions use bounded exponential retry. Results and error codes are persisted without exposing raw exception messages.
+
+Run the separate `agent-worker` Compose service alongside the API. It uses the same inference-provider environment settings. In production, provision the queue-owner role before migrations, apply migrations once as a release job, run the runtime-role bootstrap after migrations, then start API and worker replicas. Do not run migrations from worker or API replicas.
 
 Before enabling it, configure and verify one inference provider:
 
 - Ollama: `INFERENCE_PROVIDER=ollama`, `OLLAMA_BASE_URL`, and `OLLAMA_MODEL`.
+- OpenAI-compatible: `INFERENCE_PROVIDER=openai_compatible`, `INFERENCE_BASE_URL`, `INFERENCE_MODEL`, and `INFERENCE_API_KEY`.
 - vLLM: `INFERENCE_PROVIDER=vllm`, `VLLM_BASE_URL`, `VLLM_MODEL`, and `VLLM_API_KEY`.
 
-The API worker reuses one bounded inference client per process. Concurrency, queue size, queue wait, request timeout, retries, and output tokens are controlled by the `INFERENCE_*` settings documented in `docs/INFERENCE_ENGINEERING.md`. Model servers are separate services and must be deployed, network-restricted, monitored, and capacity-tested independently.
+The API and worker reuse bounded inference clients per process. Concurrency, queue size, queue wait, request timeout, retries, and output tokens are controlled by the `INFERENCE_*` settings documented in `docs/INFERENCE_ENGINEERING.md`. Model servers are separate services and must be deployed, network-restricted, monitored, and capacity-tested independently.
 
-Execution is capped at five read-only tool calls and 30 seconds. Cancellation/deadlines are cooperative between synchronous tool calls; they cannot interrupt a database call already in progress. The endpoint is not a durable job queue. Model output is advisory evidence only and must never replace human review or approval. Do not place secrets, payment credentials, or unrelated personal data in task descriptions.
+Execution is capped at five read-only tool calls and 30 seconds at the orchestrator level. Cancellation/deadlines are cooperative between synchronous tool calls; they cannot interrupt a database call already in progress. A worker lease fences database result commits but cannot undo an external side effect; therefore only read-only tools are permitted. Model output is advisory evidence only and must never replace human review or approval. Do not place secrets, payment credentials, or unrelated personal data in task descriptions.

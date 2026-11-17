@@ -9,11 +9,11 @@ LedgerGate is a production-oriented reference implementation for invoice intake,
 - FastAPI backend with JWT authentication, tenant-scoped data access, role checks, and PostgreSQL support.
 - Invoice and purchase-order records, upload endpoint, deterministic reconciliation, duplicate detection, approval/rejection workflow, and audit events.
 - Custom deterministic agent state machine with validated tool calls and explicit human-review escalation.
-- Optional bounded LLM task planner and read-only orchestrator. Plans are schema-validated against an explicit read-only tool allowlist, then executed sequentially under the ToolExecutor's fixed authenticated tenant context with step limits, cooperative cancellation, and a deadline between calls. This in-process coordinator is not durable and cannot interrupt a synchronous database call already in progress; it cannot approve or mutate financial records.
+- Optional bounded LLM task planner and read-only orchestrator. The synchronous task endpoint is bounded but in-process; a separate PostgreSQL-backed job API persists asynchronous tasks, uses tenant-scoped RLS, fenced worker leases, bounded retries, and crash recovery. Both paths use the read-only tool allowlist and cannot approve or mutate financial records.
 - MCP-compatible tool server entry point for invoice/PO lookup and policy retrieval. See [MCP integration and security setup](docs/MCP_INTEGRATION.md) for local stdio configuration, token handling, HTTPS requirements, and tool side effects.
 - Tenant-scoped deterministic lexical/fuzzy retrieval baseline and a versioned agent-evaluation harness. Neural embedding/vector retrieval is not yet implemented; see the documented research limitations.
 - Next.js dashboard starter with invoice review views.
-- Docker Compose for PostgreSQL, API, web application, ClamAV, and a separate durable account-email worker.
+- Docker Compose for PostgreSQL, API, web application, ClamAV, and separate durable account-email and agent workers.
 - Alembic migrations, tests, sample environment, and operational documentation.
 
 ## Quick start
@@ -53,7 +53,8 @@ For local development without Docker:
 - `GET/POST /api/v1/suppliers`
 - `GET/POST /api/v1/purchase-orders`
 - `GET/POST /api/v1/invoices`
-- `POST /api/v1/agent/tasks` (authenticated, bounded, read-only agent task execution)
+- `POST /api/v1/agent/tasks` (authenticated, bounded, synchronous read-only agent task execution)
+- `POST /api/v1/agent/jobs` and `GET /api/v1/agent/jobs/{id}` (durable asynchronous read-only agent jobs)
 - `POST /api/v1/invoices/{id}/reconcile`
 - `POST /api/v1/invoices/{id}/approve`
 - `POST /api/v1/invoices/{id}/reject`
@@ -61,6 +62,20 @@ For local development without Docker:
 - `GET /health`
 
 See `docs/ARCHITECTURE.md`, `docs/SECURITY.md`, `docs/EMAIL_OUTBOX.md`, and `docs/RESEARCH_PLAN.md`.
+
+## Durable read-only agent jobs
+
+Submit a job for background execution. Tenant scope and requester identity come only from the authenticated access token.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/agent/jobs \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Idempotency-Key: invoice-evidence-2026-001" \
+  -H "Content-Type: application/json" \
+  -d '{"task":"Find policy evidence relevant to duplicate invoices"}'
+```
+
+Poll the returned `job_id` with `GET /api/v1/agent/jobs/{job_id}`. The separate `agent-worker` Compose service claims jobs using PostgreSQL `FOR UPDATE SKIP LOCKED`, a narrow SECURITY DEFINER claim function, tenant RLS, and lease-token fencing. Expired leases are recoverable after worker crashes; attempts are capped at three with bounded backoff. The result remains advisory evidence and cannot approve or modify financial records. Configure the same inference-provider settings for the API and worker. See [Operations](docs/OPERATIONS.md) for deployment and limitations.
 
 ## Inference engineering
 

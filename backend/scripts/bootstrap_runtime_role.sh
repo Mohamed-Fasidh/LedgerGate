@@ -37,7 +37,8 @@ GRANT SELECT, INSERT, UPDATE ON TABLE
   public.idempotency_records,
   public.password_reset_tokens,
   public.email_verification_tokens,
-  public.outbound_emails
+  public.outbound_emails,
+  public.agent_tasks
 TO ledgergate_runtime;
 
 -- Runtime deletion is limited to bounded retention/cleanup tables. Business
@@ -67,6 +68,7 @@ GRANT EXECUTE ON FUNCTION public.auth_lookup_user(text) TO ledgergate_runtime;
 GRANT EXECUTE ON FUNCTION public.auth_email_exists(text) TO ledgergate_runtime;
 GRANT EXECUTE ON FUNCTION public.auth_lookup_password_reset(character varying) TO ledgergate_runtime;
 GRANT EXECUTE ON FUNCTION public.auth_lookup_email_verification(character varying) TO ledgergate_runtime;
+GRANT EXECUTE ON FUNCTION public.claim_agent_task(text, text, integer) TO ledgergate_runtime;
 
 -- Revoke inherited defaults for the actual migration owner (which may differ
 -- between local Compose, CI, and a managed production database).

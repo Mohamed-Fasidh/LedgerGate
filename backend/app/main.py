@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 from app.config import settings
 from app.database import Base, engine, get_db
-from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, PasswordResetToken, EmailVerificationToken, Role, InvoiceStatus
+from app.models import User, Supplier, PurchaseOrder, Invoice, AuditEvent, PolicyDocument, AgentMemory, LoginAttempt, ApprovalPolicy, InvoiceApproval, AuthSession, IdempotencyRecord, RegistrationAttempt, PasswordResetToken, EmailVerificationToken, AgentTask, Role, InvoiceStatus
 from app.schemas import RegisterIn, TokenOut, RefreshIn, ChangePasswordIn, PasswordResetRequestIn, PasswordResetConfirmIn, EmailVerificationRequestIn, EmailVerificationConfirmIn, SupplierIn, POIn, InvoiceIn, ReconcileOut, ExtractionConfirmIn, PolicyIn, ApprovalPolicyIn, ApprovalDecisionIn, TenantUserRoleUpdateIn, AgentTaskIn
 from app.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token, set_database_tenant, get_current_user, require_roles, generate_totp_secret, encrypt_totp_secret, decrypt_totp_secret, matching_totp_step, generate_mfa_recovery_codes, hash_mfa_recovery_code, consume_mfa_recovery_code, find_user_for_authentication, find_user_for_auth_token, authentication_email_exists
 from app.audit import record_event, verify_tenant_chain, event_payload, lock_tenant_audit_chain
@@ -1907,6 +1907,89 @@ def run_agent_task(
     if result.error_code == "PLAN_FAILED":
         raise HTTPException(503, "Agent planning service could not produce a valid plan")
     return jsonable_encoder(result)
+
+
+@app.post("/api/v1/agent/jobs", status_code=202)
+def submit_agent_job(
+    payload: AgentTaskIn,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Persist a bounded read-only agent task for asynchronous worker execution."""
+    _validate_idempotency_key(idempotency_key)
+    operation = f"agent_job.submit:{user.id}"
+    request_hash = _request_fingerprint(operation, {"task": payload.task})
+    if idempotency_key:
+        cached = _get_idempotent_response(
+            db, user.tenant_id, idempotency_key, operation, request_hash
+        )
+        if cached is not None:
+            return cached
+
+    job = AgentTask(
+        tenant_id=user.tenant_id,
+        requested_by_user_id=user.id,
+        task=payload.task,
+        status="queued",
+        attempts=0,
+        max_attempts=3,
+    )
+    db.add(job)
+    try:
+        db.flush()
+        response = {
+            "job_id": job.id,
+            "status": job.status,
+            "created_at": job.created_at.isoformat(),
+        }
+        if idempotency_key:
+            _store_idempotency_response(
+                db, user.tenant_id, idempotency_key, operation, request_hash, response
+            )
+        record_event(
+            db, user, "agent_task", job.id, "queued",
+            {"idempotent": bool(idempotency_key), "max_attempts": job.max_attempts},
+        )
+        db.commit()
+        return response
+    except IntegrityError:
+        db.rollback()
+        if idempotency_key:
+            cached = _get_idempotent_response(
+                db, user.tenant_id, idempotency_key, operation, request_hash
+            )
+            if cached is not None:
+                return cached
+        raise HTTPException(409, "Agent job submission conflicted with another request")
+
+
+@app.get("/api/v1/agent/jobs/{job_id}")
+def get_agent_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return only the authenticated requester's job within their tenant."""
+    set_database_tenant(db, user.tenant_id)
+    job = db.query(AgentTask).filter(
+        AgentTask.id == job_id,
+        AgentTask.tenant_id == user.tenant_id,
+        AgentTask.requested_by_user_id == user.id,
+    ).first()
+    if job is None:
+        raise HTTPException(404, "Agent job not found")
+    return jsonable_encoder({
+        "job_id": job.id,
+        "status": job.status,
+        "attempts": job.attempts,
+        "max_attempts": job.max_attempts,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "result": job.result_json,
+        "error_code": job.error_code,
+    })
 
 
 @app.post("/api/v1/agent/memory")

@@ -1,7 +1,7 @@
 import enum
 from decimal import Decimal
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, ForeignKey, ForeignKeyConstraint, Numeric, Text, Boolean, Enum, JSON, Integer, UniqueConstraint, Index
+from sqlalchemy import String, DateTime, ForeignKey, ForeignKeyConstraint, Numeric, Text, Boolean, Enum, JSON, Integer, UniqueConstraint, Index, CheckConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -344,4 +344,37 @@ class OutboundEmail(Base):
     __table_args__ = (
         Index("ix_outbound_emails_pending_due", "status", "next_attempt_at", "id"),
         Index("ix_outbound_emails_locked_at", "status", "locked_at"),
+    )
+
+class AgentTask(Base):
+    """Tenant-owned durable read-only agent job with a fenced worker lease."""
+    __tablename__ = "agent_tasks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    requested_by_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    task: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued", server_default="queued")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3, server_default="3")
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    worker_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
+    __table_args__ = (
+        CheckConstraint("status IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'timed_out')", name="ck_agent_tasks_status"),
+        CheckConstraint("attempts >= 0 AND max_attempts BETWEEN 1 AND 5", name="ck_agent_tasks_attempts"),
+        ForeignKeyConstraint(
+            ["tenant_id", "requested_by_user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_agent_tasks_tenant_requester",
+        ),
+        Index("ix_agent_tasks_claim", "status", "available_at", "lease_expires_at", "id"),
+        Index("ix_agent_tasks_tenant_created", "tenant_id", "created_at", "id"),
     )
