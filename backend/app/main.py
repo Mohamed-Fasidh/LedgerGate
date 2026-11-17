@@ -1499,8 +1499,11 @@ def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_ke
     if idempotency_key:
         cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
         if cached is not None: return cached
-    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
+    if idempotency_key:
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+        if cached is not None: return cached
     _require_invoice_status(
         inv,
         {InvoiceStatus.extraction_review, InvoiceStatus.received},
@@ -1533,8 +1536,11 @@ def reconcile(invoice_id:int,idempotency_key:str|None=Header(default=None,alias=
     if idempotency_key:
         cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
         if cached is not None: return cached
-    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
+    inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).with_for_update().first()
     if not inv: raise HTTPException(404,"Invoice not found")
+    if idempotency_key:
+        cached=_get_idempotent_response(db,user.tenant_id,idempotency_key,operation,fingerprint)
+        if cached is not None: return cached
     _require_invoice_status(
         inv,
         {InvoiceStatus.received},
