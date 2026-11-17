@@ -410,3 +410,12 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - Merge commit: `b4c148916ff8b295ea06a5e78815561d9046f3b7`.
 - Added parametrized regression coverage for USD, EUR, and INR invoice approval-plan selection, asserting that the currency predicate is applied and the matching policy snapshot is stored.
 - CI run [44066536222](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44066536222) passed backend tests, frontend dependency audit/build, Docker operational checks, and image builds. CodeQL run [44066536207](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44066536207) passed.
+
+
+## Authentication lookup privilege regression coverage — 2026-11-17
+
+- PR #51 merged into `main`: [Test: verify restricted authentication lookup privileges](https://github.com/Mohamed-Fasidh/LedgerGate/pull/51).
+- Merge commit: `0b0ff83b06b9fd8c4604c63d222f9422299a56ab`.
+- Added PostgreSQL integration assertions for the four reviewed SECURITY DEFINER authentication lookup functions: ownership by the non-login `ledgergate_auth_owner` role, its BYPASSRLS attribute, runtime EXECUTE grants, no PUBLIC EXECUTE, and no runtime membership in the owner role.
+- CI run [44066881890](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44066881890) passed backend, frontend, and Docker jobs. CodeQL run [44066881892](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44066881892) passed Python and JavaScript/TypeScript analysis.
+- These are structural privilege assertions against the disposable PostgreSQL CI database; they do not replace an independent production database penetration test.
