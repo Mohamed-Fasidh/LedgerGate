@@ -1,0 +1,2 @@
+{"case_id":"claim-001","claim":"The invoice total is supported by the purchase order evidence.","evidence_available":["invoice:INV-1:amount","po:PO-1:total"],"evidence_cited":["invoice:INV-1:amount","po:PO-1:total"]}
+{"case_id":"claim-002","claim":"The supplier has passed a compliance review.","evidence_available":["supplier:SUP-1:name"],"evidence_cited":["supplier:SUP-1:compliance_status"]}

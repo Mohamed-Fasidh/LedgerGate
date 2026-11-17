@@ -1,0 +1,2 @@
+{"case_id":"tool-001","intent":"look up invoice 42","expected_tool":"invoice_lookup","observed_tool":"invoice_lookup","expected_arguments":{"invoice_id":42},"observed_arguments":{"invoice_id":42}}
+{"case_id":"tool-002","intent":"search policy for duplicate invoices","expected_tool":"policy_search","observed_tool":"policy_search","expected_arguments":{"query":"duplicate invoices"},"observed_arguments":{"query":"duplicate invoices"}}

@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "ledgergate-agent-evaluation"
 version = "1.0.0"
 description = "Deterministic, versioned AI-agent evaluation and reliability framework"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
 
