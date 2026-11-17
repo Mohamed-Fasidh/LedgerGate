@@ -22,9 +22,9 @@ class StorageUnavailable(RuntimeError):
 
 
 MAX_CLAMAV_RESPONSE_BYTES = 4096
-TENANT_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}\\Z")
+TENANT_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 INVOICE_OBJECT_PATTERN = re.compile(
-    r"tenants/(?P<tenant>[A-Za-z0-9_-]{1,64})/invoices/(?P<name>[0-9a-f]{32})\\.(?P<suffix>pdf|txt)\\Z"
+    r"tenants/(?P<tenant>[A-Za-z0-9_-]{1,64})/invoices/(?P<name>[0-9a-f]{32})\.(?P<suffix>pdf|txt)\Z"
 )
 
 
@@ -49,7 +49,7 @@ def _parse_s3_invoice_location(tenant_id: str, location: str) -> tuple[str, str,
         or parsed.query
         or parsed.fragment
         or parsed.params
-        or "\\\\" in location
+        or "\\" in location
         or "%" in parsed.path
     ):
         raise FileNotFoundError
