@@ -498,3 +498,11 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - This test verifies concurrent audit appends under PostgreSQL/RLS. Full concurrent invoice HTTP requests with persisted idempotency replay are still a separate test gap.
 
 - Post-merge verification on the documentation-updated main revision `623e785ffc7fcc547f121fe7ad93eb6510347c04`: CI run [44072648898](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44072648898) passed backend, frontend, Docker and operational checks; CodeQL run [44072648841](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44072648841) passed.
+
+## Invoice row-lock integration test under runtime tenant RLS — 2026-11-17
+
+- PR #60 merged: [Test: verify invoice row locks under runtime tenant RLS](https://github.com/Mohamed-Fasidh/LedgerGate/pull/60).
+- Merge commit: `a007ae91c51d6c02e4cca017da9497eb7c3722fa`.
+- Updated both independent PostgreSQL sessions in the invoice `SELECT ... FOR UPDATE` test to use `ledgergate_runtime` and transaction-local `app.tenant_id`.
+- PR-head backend, frontend, Docker and CodeQL checks passed.
+- Post-merge CI [44073708379](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44073708379) and CodeQL [44073708280](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44073708280) passed.
