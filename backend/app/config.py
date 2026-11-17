@@ -1,5 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from urllib.parse import parse_qs, urlparse
+from email.headerregistry import Address
+from email.utils import parseaddr
 
 
 class Settings(BaseSettings):
@@ -119,7 +121,26 @@ def validate_production_settings(config: Settings) -> None:
         raise RuntimeError("Production requires authenticated SMTP configuration for account recovery")
     if config.email_smtp_port != 587:
         raise RuntimeError("Production SMTP must use port 587 with STARTTLS")
-    if not config.email_from_address.strip() or "@" not in config.email_from_address:
+    raw_from_address = config.email_from_address
+    if (
+        not raw_from_address
+        or raw_from_address != raw_from_address.strip()
+        or any(ord(char) < 32 or ord(char) == 127 for char in raw_from_address)
+    ):
+        raise RuntimeError("Production requires a valid EMAIL_FROM_ADDRESS")
+    display_name, addr_spec = parseaddr(raw_from_address)
+    try:
+        parsed_address = Address(addr_spec=addr_spec)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Production requires a valid EMAIL_FROM_ADDRESS") from exc
+    canonical_header = f"{display_name} <{addr_spec}>" if display_name else addr_spec
+    if (
+        not addr_spec
+        or parsed_address.addr_spec != addr_spec
+        or raw_from_address != canonical_header
+        or not parsed_address.domain
+        or "." not in parsed_address.domain
+    ):
         raise RuntimeError("Production requires a valid EMAIL_FROM_ADDRESS")
     public_url = urlparse(config.public_app_url)
     try:
