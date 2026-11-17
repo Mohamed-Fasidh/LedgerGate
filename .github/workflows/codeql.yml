@@ -2,7 +2,7 @@ name: LedgerGate CodeQL
 
 on:
   pull_request:
-    branches: [main, security/strict-audit-export-validation]
+    branches: [main, security/strict-audit-export-validation, security/harden-public-app-origin-validation]
   push:
     branches: [main]
   schedule:
