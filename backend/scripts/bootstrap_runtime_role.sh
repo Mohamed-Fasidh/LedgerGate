@@ -41,6 +41,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
 TO ledgergate_runtime;
 
 -- Runtime needs schema-version diagnostics, never migration write access.
+-- Audit evidence is append-only: remove runtime deletion permission.
+REVOKE DELETE ON TABLE public.audit_events FROM ledgergate_runtime;
+
 GRANT SELECT ON TABLE public.alembic_version TO ledgergate_runtime;
 
 -- Existing application-generated IDs need sequence usage. Future sequences

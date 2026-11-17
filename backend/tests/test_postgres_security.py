@@ -205,7 +205,8 @@ def test_runtime_role_uses_explicit_grants_without_future_default_access():
                       has_table_privilege('ledgergate_runtime', :table_name, 'UPDATE'),
                       has_table_privilege('ledgergate_runtime', :table_name, 'DELETE')
                 """), {"table_name": f"public.{table}"}).one()
-                assert tuple(privileges) == (True, True, True, True), table
+                expected = (True, True, True, False) if table == "audit_events" else (True, True, True, True)
+                assert tuple(privileges) == expected, table
 
             migration_table = connection.execute(text("""
                 SELECT
