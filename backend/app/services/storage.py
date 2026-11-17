@@ -188,3 +188,58 @@ def read_invoice(tenant_id: str, location: str) -> tuple[bytes, str]:
     if file_path.parent != tenant_dir or not file_path.is_file():
         raise FileNotFoundError
     return file_path.read_bytes(), file_path.suffix.lower()
+
+
+def list_invoice_objects() -> dict[str, "datetime"]:
+    """List only application-generated invoice objects and their creation times.
+
+    Returned keys match the exact locations persisted in Invoice.file_path.
+    Symlinks, non-generated files, and malformed S3 keys are ignored.
+    """
+    from datetime import datetime, timezone
+
+    backend = settings.storage_backend.lower()
+    objects: dict[str, datetime] = {}
+    if backend == "s3":
+        if not settings.s3_bucket:
+            raise StorageUnavailable("S3_BUCKET is not configured")
+        try:
+            paginator = _s3_client().get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=settings.s3_bucket, Prefix="tenants/"):
+                for item in page.get("Contents", []):
+                    key = item.get("Key")
+                    modified = item.get("LastModified")
+                    if not isinstance(key, str) or INVOICE_OBJECT_PATTERN.fullmatch(key) is None:
+                        continue
+                    if not isinstance(modified, datetime):
+                        continue
+                    if modified.tzinfo is None:
+                        modified = modified.replace(tzinfo=timezone.utc)
+                    objects[f"s3://{settings.s3_bucket}/{key}"] = modified.astimezone(timezone.utc)
+        except Exception as exc:
+            raise StorageUnavailable("Private object storage inventory failed") from exc
+        return objects
+
+    if backend != "local":
+        raise StorageUnavailable("Unsupported invoice storage backend")
+
+    root = Path(settings.upload_dir)
+    if root.is_symlink() or not root.exists():
+        return objects
+    try:
+        for tenant_entry in os.scandir(root):
+            if not tenant_entry.is_dir(follow_symlinks=False):
+                continue
+            if TENANT_ID_PATTERN.fullmatch(tenant_entry.name) is None:
+                continue
+            for item in os.scandir(tenant_entry.path):
+                if not item.is_file(follow_symlinks=False):
+                    continue
+                if re.fullmatch(r"[0-9a-f]{32}\.(?:pdf|txt)", item.name) is None:
+                    continue
+                stat_result = item.stat(follow_symlinks=False)
+                modified = datetime.fromtimestamp(stat_result.st_mtime, tz=timezone.utc)
+                objects[str(Path(tenant_entry.path) / item.name)] = modified
+    except OSError as exc:
+        raise StorageUnavailable("Local invoice storage inventory failed") from exc
+    return objects
