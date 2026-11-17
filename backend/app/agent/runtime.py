@@ -37,6 +37,27 @@ class AgentContext:
     trace: list[str] = field(default_factory=list)
 
 
+def build_reconciliation_context(invoice, purchase_order=None) -> AgentContext:
+    """Build agent input directly from ORM records without float conversion."""
+    po_data = None
+    if purchase_order is not None:
+        po_data = {
+            "po_number": purchase_order.po_number,
+            "total_amount": purchase_order.total_amount,
+            "currency": purchase_order.currency,
+            "supplier_id": purchase_order.supplier_id,
+        }
+    return AgentContext(
+        invoice={
+            "invoice_number": invoice.invoice_number,
+            "amount": invoice.amount,
+            "currency": invoice.currency,
+            "supplier_id": invoice.supplier_id,
+        },
+        purchase_order=po_data,
+    )
+
+
 class ReconciliationAgent:
     def run(self, ctx: AgentContext) -> AgentContext:
         transitions = {
