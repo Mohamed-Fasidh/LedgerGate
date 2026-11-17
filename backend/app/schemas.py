@@ -68,9 +68,11 @@ class ApprovalPolicyIn(BaseModel):
     max_amount: Optional[Decimal] = Field(default=None, gt=0)
     approval_steps: list[list[str]] = Field(min_length=1, max_length=5)
 
-    @field_validator("currency")
+    @field_validator("currency", mode="before")
     @classmethod
     def normalize_policy_currency(cls, value: str) -> str:
+        if not isinstance(value, str):
+            raise ValueError("Currency must be a three-letter alphabetic code")
         normalized = value.strip().upper()
         if len(normalized) != 3 or not normalized.isalpha():
             raise ValueError("Currency must be a three-letter alphabetic code")
