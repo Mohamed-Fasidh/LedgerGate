@@ -1440,7 +1440,7 @@ async def upload_invoice(file:UploadFile=File(...),idempotency_key:str|None=Head
         if temp_path:
             Path(temp_path).unlink(missing_ok=True)
     candidate=fields.get("invoice_number") or f"UNCONFIRMED-{uuid.uuid4().hex[:10].upper()}"
-    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,idempotency_key=idempotency_key,idempotency_operation="upload" if idempotency_key else None,idempotency_request_hash=fingerprint if idempotency_key else None,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.EXTRACTION_REVIEW,file_name=safe_filename,file_path=stored_location,extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
+    obj=Invoice(tenant_id=user.tenant_id,created_by_user_id=user.id,idempotency_key=idempotency_key,idempotency_operation="upload" if idempotency_key else None,idempotency_request_hash=fingerprint if idempotency_key else None,invoice_number=candidate,amount=fields.get("amount"),currency=fields.get("currency") or "INR",invoice_date=fields.get("invoice_date"),status=InvoiceStatus.extraction_review,file_name=safe_filename,file_path=stored_location,extracted_text=extracted,extraction_fields=fields,reconciliation={"note":"Extracted fields are unverified. Confirm them before reconciliation."})
     db.add(obj)
     try:
         db.flush()
@@ -1503,13 +1503,13 @@ def confirm_extraction(invoice_id:int,payload:ExtractionConfirmIn,idempotency_ke
     if not inv: raise HTTPException(404,"Invoice not found")
     _require_invoice_status(
         inv,
-        {InvoiceStatus.EXTRACTION_REVIEW, InvoiceStatus.RECEIVED},
+        {InvoiceStatus.extraction_review, InvoiceStatus.received},
         "Invoice extraction can only be confirmed before reconciliation or approval",
     )
     if payload.supplier_id and not db.query(Supplier).filter(Supplier.id==payload.supplier_id,Supplier.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Supplier not found")
     if payload.purchase_order_id and not db.query(PurchaseOrder).filter(PurchaseOrder.id==payload.purchase_order_id,PurchaseOrder.tenant_id==user.tenant_id).first(): raise HTTPException(404,"Purchase order not found")
     for k,v in payload_data.items(): setattr(inv,k,v)
-    inv.status=InvoiceStatus.RECEIVED
+    inv.status=InvoiceStatus.received
     try:
         db.flush()
         response=invoice_view(inv)
@@ -1537,7 +1537,7 @@ def reconcile(invoice_id:int,idempotency_key:str|None=Header(default=None,alias=
     if not inv: raise HTTPException(404,"Invoice not found")
     _require_invoice_status(
         inv,
-        {InvoiceStatus.RECEIVED},
+        {InvoiceStatus.received},
         "Only received invoices can be reconciled; invoices already in review or finalized cannot be reopened",
     )
     if inv.amount is None or inv.invoice_number.startswith("UNCONFIRMED-"):
@@ -1556,7 +1556,7 @@ def reconcile(invoice_id:int,idempotency_key:str|None=Header(default=None,alias=
     policies=retrieve_policy(db,user.tenant_id,f"invoice {inv.invoice_number} approval amount discrepancy duplicate")
     evidence=result.evidence+[{"source":"policy_document","reference":p["title"],"snippet":p["snippet"],"score":p["score"]} for p in policies]
     decision="HUMAN_REVIEW" if result.state.value=="human_review" or duplicate else "MATCHED"
-    inv.status=InvoiceStatus.REVIEW_REQUIRED
+    inv.status=InvoiceStatus.review_required
     inv.reconciliation={"decision":decision,"findings":result.findings,"evidence":evidence,"trace":result.trace,"policy_matches":policies}
     response={"invoice_id":inv.id,"status":inv.status.value,"decision":decision,"findings":result.findings,"evidence":evidence,"requires_human_review":decision=="HUMAN_REVIEW"}
     if idempotency_key:
@@ -1751,7 +1751,7 @@ def approve(invoice_id:int,payload:ApprovalDecisionIn|None=None,idempotency_key:
         if cached is not None: return cached
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
-    if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
+    if inv.status not in (InvoiceStatus.review_required,InvoiceStatus.processing): raise HTTPException(409,"Invoice is not awaiting a decision")
     if inv.created_by_user_id == user.id: raise HTTPException(403,"Maker-checker policy: the invoice creator cannot approve their own invoice")
     if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before approval")
     steps=_resolve_invoice_approval_plan(db,inv,user)
@@ -1760,7 +1760,7 @@ def approve(invoice_id:int,payload:ApprovalDecisionIn|None=None,idempotency_key:
     try:
         db.flush()
         if stage>=len(steps):
-            inv.status=InvoiceStatus.APPROVED
+            inv.status=InvoiceStatus.approved
             message="All approval stages completed. Human approval recorded; no payment was initiated."
             record_event(db,user,"invoice",inv.id,"human_approved",{"stage":stage,"total_stages":len(steps),"maker_user_id":inv.created_by_user_id,"warning":"No payment is initiated."})
         else:
@@ -1796,14 +1796,14 @@ def reject(invoice_id:int,payload:ApprovalDecisionIn|None=None,idempotency_key:s
         if cached is not None: return cached
     inv=db.query(Invoice).filter(Invoice.id==invoice_id,Invoice.tenant_id==user.tenant_id).first()
     if not inv: raise HTTPException(404,"Invoice not found")
-    if inv.status in (InvoiceStatus.APPROVED,InvoiceStatus.REJECTED): raise HTTPException(409,"Invoice is already finalized")
-    if inv.status not in (InvoiceStatus.REVIEW_REQUIRED,InvoiceStatus.PROCESSING): raise HTTPException(409,"Invoice is not awaiting a decision")
+    if inv.status in (InvoiceStatus.approved,InvoiceStatus.rejected): raise HTTPException(409,"Invoice is already finalized")
+    if inv.status not in (InvoiceStatus.review_required,InvoiceStatus.processing): raise HTTPException(409,"Invoice is not awaiting a decision")
     if inv.reconciliation.get("decision") not in ("MATCHED","HUMAN_REVIEW"): raise HTTPException(409,"Reconcile invoice before rejection")
     if inv.created_by_user_id == user.id: raise HTTPException(403,"Maker-checker policy: the invoice creator cannot reject their own invoice")
     steps=_resolve_invoice_approval_plan(db,inv,user)
     stage=_validate_approval_actor(db,inv,user,steps)
     db.add(InvoiceApproval(tenant_id=user.tenant_id,invoice_id=inv.id,policy_id=inv.approval_policy_id,stage=stage,approver_user_id=user.id,decision="rejected",comment=payload.comment if payload else None))
-    inv.status=InvoiceStatus.REJECTED
+    inv.status=InvoiceStatus.rejected
     record_event(db,user,"invoice",inv.id,"human_rejected",{"stage":stage,"total_stages":len(steps),"maker_user_id":inv.created_by_user_id,"idempotent":bool(idempotency_key)})
     response={"id":inv.id,"status":inv.status.value,"approval_stage":stage,"message":"Invoice rejected at approval stage."}
     if idempotency_key:
