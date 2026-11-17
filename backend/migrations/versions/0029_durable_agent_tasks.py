@@ -27,10 +27,10 @@ def upgrade() -> None:
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("result_json", sa.JSON(), nullable=True),
         sa.Column("error_code", sa.String(length=80), nullable=True),
-        sa.Column("idempotency_key", sa.String(length=128), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.UniqueConstraint("tenant_id", "idempotency_key", name="uq_agent_tasks_tenant_idempotency"),
+        sa.CheckConstraint("status IN ('queued', 'running', 'completed', 'failed', 'cancelled', 'timed_out')", name="ck_agent_tasks_status"),
+        sa.CheckConstraint("attempts >= 0 AND max_attempts BETWEEN 1 AND 5", name="ck_agent_tasks_attempts"),
         sa.ForeignKeyConstraint(
             ["tenant_id", "requested_by_user_id"],
             ["users.tenant_id", "users.id"],
