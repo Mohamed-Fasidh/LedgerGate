@@ -518,3 +518,48 @@ def test_invoice_preapproval_transitions_recheck_idempotency_after_row_lock(monk
     assert result == cached_response
     assert len(lookups) == 2
     assert db.query_result.locked is True
+
+
+def test_invoice_preapproval_transitions_recheck_idempotency_after_row_lock(monkeypatch, endpoint_name):
+    """Duplicate extraction/reconciliation requests replay after waiting on the invoice lock."""
+    from types import SimpleNamespace
+    import app.main as main
+    from app.models import Invoice, Role
+
+    cached_response = {"invoice_id": 93, "status": "review_required", "decision": "MATCHED"}
+    lookups = []
+
+    class Query:
+        locked = False
+        def filter(self, *conditions):
+            return self
+        def with_for_update(self):
+            self.locked = True
+            return self
+        def first(self):
+            return SimpleNamespace(id=93, tenant_id="tenant-a")
+
+    class DB:
+        def __init__(self):
+            self.query_result = Query()
+        def query(self, model):
+            assert model is Invoice
+            return self.query_result
+
+    def idempotency_lookup(*args):
+        lookups.append(args)
+        return None if len(lookups) == 1 else cached_response
+
+    monkeypatch.setattr(main, "_get_idempotent_response", idempotency_lookup)
+    db = DB()
+    actor = SimpleNamespace(id=8, tenant_id="tenant-a", role=Role.analyst)
+    endpoint = getattr(main, endpoint_name)
+    kwargs = {"invoice_id": 93, "idempotency_key": "invoice-transition-replay-0001", "db": db, "user": actor}
+    if endpoint_name == "confirm_extraction":
+        kwargs["payload"] = SimpleNamespace(model_dump=lambda: {"invoice_number": "INV-93"})
+
+    result = endpoint(**kwargs)
+
+    assert result == cached_response
+    assert len(lookups) == 2
+    assert db.query_result.locked is True
