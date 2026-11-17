@@ -65,6 +65,7 @@ def _retry_or_fail(session_factory, claim):
                 AgentTask.tenant_id == claim["tenant_id"],
                 AgentTask.status == "running",
                 AgentTask.lease_token == claim["lease_token"],
+                AgentTask.lease_expires_at > now,
             ).first()
             if row is None:
                 db.rollback()
