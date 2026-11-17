@@ -70,6 +70,23 @@ services:
       - ALL
     restart: unless-stopped
 
+
+  agent-worker:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://ledgergate_runtime:${DB_RUNTIME_PASSWORD:-change_me_runtime_local_only}@db:5432/ledgergate
+      DB_RUNTIME_PASSWORD: ${DB_RUNTIME_PASSWORD:-change_me_runtime_local_only}
+    command: ["python", "-m", "app.agent_worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+
   clamav:
     image: clamav/clamav:1.4.2
     restart: unless-stopped
