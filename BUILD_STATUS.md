@@ -476,3 +476,13 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - PR-head CI run [44070396174](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44070396174) passed backend, frontend, and Docker. PR-head CodeQL run [44070396134](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44070396134) passed Python and JavaScript/TypeScript analysis.
 - Post-merge main CI run [44070779976](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44070779976) and CodeQL run [44070779971](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44070779971) were triggered; their final results must be checked before recording post-merge verification.
 - These mock-based regression tests verify the handler locking/idempotency sequence, not true simultaneous transactions on separate PostgreSQL connections. A dedicated multi-connection PostgreSQL concurrency test remains required.
+
+
+## Real PostgreSQL invoice row-lock concurrency test — 2026-11-17
+
+- PR #58 merged into `main`: [Test: verify invoice row-lock serialization on PostgreSQL](https://github.com/Mohamed-Fasidh/LedgerGate/pull/58).
+- Merge commit: `a93ac083c87dc002e10b03575e15eacf06feaaa4`.
+- Added a PostgreSQL integration test using two independent SQLAlchemy sessions/connections against one tenant-scoped invoice row. The first transaction holds `SELECT ... FOR UPDATE`; the test proves the second transaction cannot acquire the lock before the first commits and can acquire it after release.
+- PR-head CI run [44071010188](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44071010188) passed backend (including PostgreSQL migrations and the full pytest suite), frontend, and Docker image/operational checks. CodeQL run [44071010204](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44071010204) passed Python and JavaScript/TypeScript analysis.
+- Post-merge main CI run [44071273069](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44071273069) and CodeQL run [44071272928](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44071272928) were triggered; their final results must be checked before recording post-merge verification.
+- This integration test verifies PostgreSQL row-lock blocking behavior. It does not yet exercise simultaneous full HTTP requests through the API handlers, including their complete idempotency persistence/replay behavior.
