@@ -85,7 +85,7 @@ def test_postgresql_schema_matches_frozen_baseline_and_all_following_revisions()
             "tenant_id", "requested_by_user_id", "task", "status", "attempts",
             "max_attempts", "available_at", "worker_id", "lease_token",
             "locked_at", "lease_expires_at", "started_at", "finished_at",
-            "result_json", "error_code", "idempotency_key",
+            "result_json", "error_code",
         },
     }
     for table, columns in expected_columns.items():
