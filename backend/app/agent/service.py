@@ -12,8 +12,8 @@ def build_read_only_orchestrator(
     inference_client: InferenceClient,
     max_steps: int = 5,
     timeout_seconds: float = 30.0,
-) -> AgentRunResult:
-    """Plan and execute a bounded read-only task under one fixed tenant context."""
+) -> TaskOrchestrator:
+    """Build a bounded read-only orchestrator under one fixed tenant context."""
     executor = ToolExecutor(db, tenant_id)
     client = inference_client or InferenceClient()
     planner = TaskPlanner(executor, client, max_steps=max_steps)
