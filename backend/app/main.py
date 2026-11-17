@@ -1,4 +1,5 @@
 import uuid, hashlib, tempfile, json, secrets, hmac, socket, logging
+from dataclasses import replace
 from threading import Lock
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
@@ -238,14 +239,35 @@ _agent_inference_client = None
 _agent_inference_client_lock = Lock()
 
 
+AGENT_PLANNING_REQUEST_TIMEOUT_SECONDS = 20.0
+AGENT_PLANNING_QUEUE_WAIT_SECONDS = 2.0
+
+
+def _bounded_agent_inference_config(config: InferenceConfig) -> InferenceConfig:
+    """Reserve time for tool execution inside the orchestrator's 30-second budget."""
+    return replace(
+        config,
+        request_timeout_seconds=min(
+            config.request_timeout_seconds, AGENT_PLANNING_REQUEST_TIMEOUT_SECONDS
+        ),
+        connect_timeout_seconds=min(config.connect_timeout_seconds, 5.0),
+        max_queue_wait_seconds=min(
+            config.max_queue_wait_seconds, AGENT_PLANNING_QUEUE_WAIT_SECONDS
+        ),
+        # A retry could consume a second full request timeout and exceed the
+        # orchestrator deadline before it reaches its first tool step.
+        max_retries=0,
+    )
+
+
 def _get_agent_inference_client() -> InferenceClient:
-    """Reuse one bounded inference client per API worker process."""
+    """Reuse one bounded, deadline-aware inference client per API worker process."""
     global _agent_inference_client
     if _agent_inference_client is None:
         with _agent_inference_client_lock:
             if _agent_inference_client is None:
                 try:
-                    config = InferenceConfig.from_env()
+                    config = _bounded_agent_inference_config(InferenceConfig.from_env())
                 except (TypeError, ValueError):
                     raise HTTPException(503, "Agent inference configuration is invalid") from None
                 _agent_inference_client = InferenceClient(config)

@@ -130,3 +130,45 @@ def test_agent_endpoint_requires_authentication_and_uses_only_read_only_tools():
     )
     assert "ToolExecutor" in service_source
     assert "build_read_only_orchestrator" in service_source
+
+
+def test_agent_inference_config_fits_inside_orchestrator_deadline():
+    from app.main import _bounded_agent_inference_config
+    from app.services.inference import InferenceConfig
+
+    configured = InferenceConfig(
+        provider="ollama",
+        base_url="http://model.test",
+        model="test-model",
+        request_timeout_seconds=60.0,
+        connect_timeout_seconds=10.0,
+        max_queue_wait_seconds=8.0,
+        max_retries=3,
+    )
+    bounded = _bounded_agent_inference_config(configured)
+
+    assert bounded.request_timeout_seconds == 20.0
+    assert bounded.connect_timeout_seconds == 5.0
+    assert bounded.max_queue_wait_seconds == 2.0
+    assert bounded.max_retries == 0
+
+
+def test_agent_inference_config_preserves_stricter_operator_limits():
+    from app.main import _bounded_agent_inference_config
+    from app.services.inference import InferenceConfig
+
+    configured = InferenceConfig(
+        provider="ollama",
+        base_url="http://model.test",
+        model="test-model",
+        request_timeout_seconds=8.0,
+        connect_timeout_seconds=2.0,
+        max_queue_wait_seconds=1.0,
+        max_retries=0,
+    )
+    bounded = _bounded_agent_inference_config(configured)
+
+    assert bounded.request_timeout_seconds == 8.0
+    assert bounded.connect_timeout_seconds == 2.0
+    assert bounded.max_queue_wait_seconds == 1.0
+    assert bounded.max_retries == 0
