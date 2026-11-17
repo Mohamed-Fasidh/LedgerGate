@@ -205,9 +205,10 @@ def test_approval_policy_create_rechecks_idempotency_after_tenant_lock(monkeypat
     monkeypatch.setattr(main, "_lock_approval_policy_ranges", lock)
 
     payload = SimpleNamespace(
-        model_dump=lambda: {"name": "Existing policy", "min_amount": "0", "max_amount": None,
+        model_dump=lambda: {"name": "Existing policy", "currency": "INR", "min_amount": "0", "max_amount": None,
                             "approval_steps": [["reviewer"]]},
         name="Existing policy",
+        currency="INR",
         min_amount=Decimal("0.00"),
         max_amount=None,
         approval_steps=[["reviewer"]],
@@ -268,3 +269,13 @@ def test_extraction_confirmation_and_reconciliation_enforce_workflow_state_guard
                 for call in ast.walk(node)
             )
     assert guarded_routes == {"confirm_extraction": True, "reconcile": True}
+
+
+def test_approval_policy_currency_is_normalized_and_validated():
+    from pydantic import ValidationError
+    from app.schemas import ApprovalPolicyIn
+
+    payload = ApprovalPolicyIn(name="USD approvals", currency=" usd ", approval_steps=[["reviewer"]])
+    assert payload.currency == "USD"
+    with pytest.raises(ValidationError):
+        ApprovalPolicyIn(name="Bad currency", currency="US1", approval_steps=[["reviewer"]])
