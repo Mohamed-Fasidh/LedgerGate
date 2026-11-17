@@ -5,7 +5,7 @@ Existing policies are backfilled as INR to preserve historical behavior.
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0028_currency_scoped_approval_policies"
+revision = "0028_currency_approval"
 down_revision = "0027_tenant_owned_references"
 branch_labels = None
 depends_on = None
