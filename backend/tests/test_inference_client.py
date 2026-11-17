@@ -49,8 +49,8 @@ def test_ollama_non_streaming_response():
 
 
 def test_vllm_streaming_deltas():
-    body = (b'data: {"choices":[{"delta":{"content":"hel"}}]\n\n'
-            b'data: {"choices":[{"delta":{"content":"lo"}}]\n\n'
+    body = (b'data: {"choices":[{"delta":{"content":"hel"}}]}\n\n'
+            b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n'
             b'data: [DONE]\n\n')
     client = InferenceClient(config(), transport=httpx.MockTransport(
         lambda req: httpx.Response(200, content=body)))
