@@ -428,3 +428,11 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - Added PostgreSQL integration assertions that authentication lookup functions expose only the intended identity output columns and retain a fixed `search_path` of `pg_catalog, public`.
 - CI run [44067373600](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44067373600) passed backend, frontend, and Docker jobs. CodeQL run [44067373614](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44067373614) passed Python and JavaScript/TypeScript analysis.
 - Existing end-to-end PostgreSQL coverage in `test_pre_auth_identity_rls.py` also exercises cross-tenant login/reset/verification lookup behavior, no-context RLS visibility, and post-lookup tenant-scoped reads.
+
+
+## Runtime database privilege-escalation regression coverage — 2026-11-17
+
+- PR #53 merged into `main`: [Test: prevent runtime database role privilege escalation](https://github.com/Mohamed-Fasidh/LedgerGate/pull/53).
+- Merge commit: `9730a068e5c56b9d6a5d23d203e94b65a58b4a64`.
+- PostgreSQL integration coverage asserts the runtime role is a login without superuser, database/role creation, replication, inheritance, or RLS-bypass attributes; has no role memberships; and owns no objects in the public application schema.
+- CI run [44067734197](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44067734197) passed backend, frontend, and Docker. CodeQL run [44067734272](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44067734272) passed Python and JavaScript/TypeScript analysis.
