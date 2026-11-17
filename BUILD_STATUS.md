@@ -486,3 +486,13 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - PR-head CI run [44071010188](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44071010188) passed backend (including PostgreSQL migrations and the full pytest suite), frontend, and Docker image/operational checks. CodeQL run [44071010204](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44071010204) passed Python and JavaScript/TypeScript analysis.
 - Post-merge main CI run [44071273069](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44071273069) and CodeQL run [44071272928](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44071272928) were triggered; their final results must be checked before recording post-merge verification.
 - This integration test verifies PostgreSQL row-lock blocking behavior. It does not yet exercise simultaneous full HTTP requests through the API handlers, including their complete idempotency persistence/replay behavior.
+
+
+## Concurrent PostgreSQL audit-chain integrity test — 2026-11-17
+
+- PR #59 merged into `main`: [Test: verify concurrent PostgreSQL audit-chain appends](https://github.com/Mohamed-Fasidh/LedgerGate/pull/59).
+- Merge commit: `76d8016f380c1137b894e5124e5e310ec0a64314`.
+- Added a two-session PostgreSQL integration test for concurrent audit writers on the same tenant. Both sessions execute under `ledgergate_runtime` with tenant-scoped RLS context.
+- The test observes PostgreSQL's `pg_stat_activity` and requires the second writer to be waiting on the advisory lock before the first transaction commits; it then verifies both event hashes form one valid chain.
+- PR-head CI run [44072358175](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44072358175) passed backend, frontend, Docker and operational hardening checks. CodeQL run [44072358052](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44072358052) passed Python and JavaScript/TypeScript analysis.
+- This test verifies concurrent audit appends under PostgreSQL/RLS. Full concurrent invoice HTTP requests with persisted idempotency replay are still a separate test gap.
