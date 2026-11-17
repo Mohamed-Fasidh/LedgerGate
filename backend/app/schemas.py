@@ -124,3 +124,7 @@ class EmailVerificationRequestIn(BaseModel):
 
 class EmailVerificationConfirmIn(BaseModel):
     token: str = Field(min_length=32, max_length=256)
+
+
+class AgentTaskIn(BaseModel):
+    task: str = Field(min_length=5, max_length=4000)
