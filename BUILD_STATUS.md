@@ -3,7 +3,7 @@
 ## Latest continuation — 2026-11-17
 
 - Tenant-owned relational references were hardened in PR #41 (merge commit `d17f0bc2e142b3d1ded927bee34af53efd6b1a14`). Alembic revision `0027_tenant_owned_references` follows `0026_preauth_identity_rls`; it preflights existing references, adds same-tenant database triggers and composite foreign keys, and updates SQLAlchemy metadata. The historical `0001_initial.py` baseline was not rewritten.
-- Signed audit-export validation and the race-resistant offline verifier were merged in PR #42 (`03afa6d49fa24a5cd6264bd758bdcc9de115a02d)). The verifier rejects non-strict JSON, malformed metadata and event chains, oversized exports, duplicate JSON keys, unsafe special-file inputs, and symlink-swap races.
+- Signed audit-export validation and the race-resistant offline verifier were merged in PR #42 (`03afa6d49fa24a5cd6264bd758bdcc9de115a02d). The verifier rejects non-strict JSON, malformed metadata and event chains, oversized exports, duplicate JSON keys, unsafe special-file inputs, and symlink-swap races.
 - Strict production origin and sender-address validation was merged in PR #43 (`8290bccb9032262990da86451bc277b86d1304d4`).
 - Canonical tenant-scoped invoice object-path validation was merged in PR #44 (`87c819acbfbf66903730ea600eb9097c70303f84`).
 - PRs #35, #36, #38, #39, and #40 were closed as superseded after their changes were ported to clean branches based on current `main`.
