@@ -90,7 +90,10 @@ def validate_production_settings(config: Settings) -> None:
         hostname = (parsed.hostname or "").lower()
         if (
             origin != origin.strip()
-            or any(ord(char) < 32 or ord(char) == 127 for char in origin)
+            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in origin)
+            or "\\" in origin
+            or "?" in origin
+            or "#" in origin
             or parsed.scheme != "https"
             or not parsed.netloc
             or not hostname
@@ -167,7 +170,12 @@ def validate_production_settings(config: Settings) -> None:
         raise RuntimeError("Production PUBLIC_APP_URL must be a valid HTTPS application origin") from exc
     public_hostname = (public_url.hostname or "").lower()
     if (
-        public_url.scheme != "https"
+        config.public_app_url != config.public_app_url.strip()
+        or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in config.public_app_url)
+        or "\\" in config.public_app_url
+        or "?" in config.public_app_url
+        or "#" in config.public_app_url
+        or public_url.scheme != "https"
         or not public_url.netloc
         or not public_hostname
         or public_hostname in {"localhost", "127.0.0.1", "::1"}
