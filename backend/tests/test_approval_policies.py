@@ -475,6 +475,7 @@ def test_invoice_decision_rechecks_idempotency_after_row_lock(monkeypatch, endpo
 
 
 @pytest.mark.parametrize("endpoint_name", ["confirm_extraction", "reconcile"])
+@pytest.mark.parametrize("endpoint_name", ["confirm_extraction", "reconcile"])
 def test_invoice_preapproval_transitions_recheck_idempotency_after_row_lock(monkeypatch, endpoint_name):
     """Duplicate extraction/reconciliation requests replay after waiting on the invoice lock."""
     from types import SimpleNamespace
