@@ -402,3 +402,11 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - Continue the selective review of PR #3's authentication/session and MFA workflows; do not merge its divergent branch wholesale.
 - Verify tenant isolation and authentication data-access boundaries against current runtime database grants and RLS policies.
 - Continue external release gates: staging deployment, managed S3/IAM and object retention, real SMTP/HTTPS integration, backup restoration, load testing, monitoring, and independent security review.
+
+
+## Currency-policy regression coverage — 2026-11-17
+
+- PR #50 merged into `main`: [Test: cover currency-specific invoice approval selection](https://github.com/Mohamed-Fasidh/LedgerGate/pull/50).
+- Merge commit: `b4c148916ff8b295ea06a5e78815561d9046f3b7`.
+- Added parametrized regression coverage for USD, EUR, and INR invoice approval-plan selection, asserting that the currency predicate is applied and the matching policy snapshot is stored.
+- CI run [44066536222](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44066536222) passed backend tests, frontend dependency audit/build, Docker operational checks, and image builds. CodeQL run [44066536207](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44066536207) passed.
