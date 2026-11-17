@@ -25,3 +25,8 @@ Run `python -m pytest -q` from an individual package root. The inference tests a
 ## Dependencies
 
 Each package has its own dependency declaration. Install dependencies only for the package being explored; do not merge research-only dependencies into the production application requirements without a separate review.
+
+
+## Teaching workshops
+
+Instructor-led 15–20 minute workshop plans are maintained in [docs/workshops](../docs/workshops/README.md), covering Transformers, agent engineering/evaluation, PPO/GRPO, and inference/GPU performance.
