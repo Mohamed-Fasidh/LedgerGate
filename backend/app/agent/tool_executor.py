@@ -1,16 +1,19 @@
 """Allowlisted tool dispatcher with strict input validation and bounded execution surface."""
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 class InvoiceLookup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     invoice_id: int = Field(gt=0)
 
 
 class POSearch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     query: str = Field(min_length=2, max_length=200)
 
 
 class PolicySearch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     query: str = Field(min_length=2, max_length=500)
 
 
