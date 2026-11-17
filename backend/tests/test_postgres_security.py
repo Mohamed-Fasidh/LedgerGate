@@ -314,3 +314,38 @@ def test_auth_lookup_functions_expose_only_minimal_identity_fields():
                 ), function_name
     finally:
         engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="Requires disposable PostgreSQL database")
+def test_runtime_database_role_cannot_escalate_privileges():
+    """The application login must not own objects or inherit privileged roles."""
+    engine = create_engine(os.environ["TEST_POSTGRES_URL"])
+    try:
+        with engine.connect() as connection:
+            role = connection.execute(text("""
+                SELECT rolcanlogin, rolsuper, rolcreatedb, rolcreaterole,
+                       rolinherit, rolreplication, rolbypassrls
+                FROM pg_roles WHERE rolname = 'ledgergate_runtime'
+            """)).one()
+            assert tuple(role) == (True, False, False, False, False, False, False)
+
+            memberships = connection.execute(text("""
+                SELECT parent.rolname
+                FROM pg_auth_members AS membership
+                JOIN pg_roles AS member ON member.oid = membership.member
+                JOIN pg_roles AS parent ON parent.oid = membership.roleid
+                WHERE member.rolname = 'ledgergate_runtime'
+            """)).scalars().all()
+            assert memberships == []
+
+            owned_objects = connection.execute(text("""
+                SELECT n.nspname, c.relname
+                FROM pg_class AS c
+                JOIN pg_namespace AS n ON n.oid = c.relnamespace
+                JOIN pg_roles AS owner ON owner.oid = c.relowner
+                WHERE owner.rolname = 'ledgergate_runtime'
+                  AND n.nspname = 'public'
+            """)).all()
+            assert owned_objects == []
+    finally:
+        engine.dispose()
