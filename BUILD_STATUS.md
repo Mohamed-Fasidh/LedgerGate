@@ -455,3 +455,13 @@ LedgerGate is an invoice intake, verification, and approval platform. Repository
 - Approval and rejection handlers now acquire a tenant-scoped invoice row lock using SQLAlchemy `with_for_update()` before making a decision. Maker-checker regression tests assert that both decision paths request the lock.
 - CI run [44069426818](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44069426818) passed backend, frontend, and Docker jobs. CodeQL run [44069426787](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44069426787) passed Python and JavaScript/TypeScript analysis.
 - This serializes decision handlers on PostgreSQL; a dedicated multi-connection concurrency integration test is still a separate validation item.
+
+
+## Invoice decision idempotency race closure — 2026-11-17
+
+- PR #56 merged into `main`: [Fix: replay duplicate invoice decisions after row lock](https://github.com/Mohamed-Fasidh/LedgerGate/pull/56).
+- Merge commit: `e69d27c28fb14bf5d03afd60e81df5241208d74f`.
+- Both approval and rejection handlers now repeat the idempotency lookup after acquiring the tenant-scoped invoice row lock. A duplicate request that waited behind the original transaction can return the original committed response instead of acting on stale state.
+- Added regression coverage for both endpoints: the first idempotency lookup misses, the invoice row lock is acquired, and the second lookup returns the cached response.
+- CI run [44069886358](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44069886358) passed backend, frontend, and Docker. CodeQL run [44069886415](https://github.com/Mohamed-Fasidh/LedgerGate/actions/runs/44069886415) passed Python and JavaScript/TypeScript analysis.
+- A dedicated concurrent multi-connection PostgreSQL integration test remains a separate validation item.
