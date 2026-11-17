@@ -39,6 +39,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.outbound_emails
 TO ledgergate_runtime;
 
+-- Audit evidence is append-only: the runtime may read and append events,
+-- but must never delete them. UPDATE remains blocked by the database trigger.
+GRANT SELECT, INSERT, UPDATE ON TABLE public.audit_events TO ledgergate_runtime;
+
 -- Runtime needs schema-version diagnostics, never migration write access.
 GRANT SELECT ON TABLE public.alembic_version TO ledgergate_runtime;
 
