@@ -57,26 +57,10 @@ def upgrade() -> None:
           WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), ''));
     """)
 
-    # The queue claim function is the only cross-tenant queue operation. Its
-    # NOLOGIN BYPASSRLS owner has privileges on agent_tasks only; it cannot
-    # read invoices, users, policies, or any other tenant-owned table.
-    op.execute("""
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ledgergate_agent_queue_owner') THEN
-            CREATE ROLE ledgergate_agent_queue_owner
-              NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
-          ELSE
-            ALTER ROLE ledgergate_agent_queue_owner
-              NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
-          END IF;
-        END
-        $$;
-    """)
-    op.execute("GRANT USAGE ON SCHEMA public TO ledgergate_agent_queue_owner")
+    # The isolated BYPASSRLS owner is provisioned by the privileged bootstrap
+    # script before migrations. It receives access to this queue table only.
     op.execute("GRANT SELECT, UPDATE ON public.agent_tasks TO ledgergate_agent_queue_owner")
     op.execute("GRANT CREATE ON SCHEMA public TO ledgergate_agent_queue_owner")
-    op.execute("GRANT ledgergate_agent_queue_owner TO CURRENT_USER")
     op.execute("SET LOCAL ROLE ledgergate_agent_queue_owner")
     op.execute("""
         CREATE OR REPLACE FUNCTION public.claim_agent_task(
@@ -149,10 +133,7 @@ def downgrade() -> None:
         op.execute("DROP POLICY IF EXISTS tenant_isolation ON public.agent_tasks")
         op.execute("ALTER TABLE public.agent_tasks NO FORCE ROW LEVEL SECURITY")
         op.execute("ALTER TABLE public.agent_tasks DISABLE ROW LEVEL SECURITY")
-        op.execute("REVOKE ledgergate_agent_queue_owner FROM CURRENT_USER")
         op.execute("REVOKE ALL ON public.agent_tasks FROM ledgergate_agent_queue_owner")
-        op.execute("REVOKE CREATE ON SCHEMA public FROM ledgergate_agent_queue_owner")
-        op.execute("DROP ROLE IF EXISTS ledgergate_agent_queue_owner")
     op.drop_index("ix_agent_tasks_tenant_created", table_name="agent_tasks")
     op.drop_index("ix_agent_tasks_claim", table_name="agent_tasks")
     op.drop_table("agent_tasks")
